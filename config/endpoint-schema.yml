@@ -1,0 +1,57 @@
+endpoints:
+  styles:
+    delete_when_any:
+      - field: active
+        equals: false
+  colorways:
+    delete_when_any:
+      - field: active
+        equals: false
+  collections:
+    delete_when_any:
+      - field: active
+        equals: false
+  category1s:
+    delete_when_any:
+      - field: active
+        equals: false
+  category2s:
+    delete_when_any:
+      - field: active
+        equals: false
+  sizes:
+    delete_when_any:
+      - field: active
+        equals: false
+  seasons:
+    delete_when_any:
+      - field: active
+        equals: false
+  materials:
+    delete_when_any:
+      - field: active
+        equals: false
+  boms:
+    delete_when_any:
+      - field: active
+        equals: false
+  bom_section_definitions:
+    delete_when_any:
+      - field: active
+        equals: false
+  bomrows:
+    delete_when_any:
+      - field: active
+        equals: false
+  supplierquotes:
+    delete_when_any:
+      - field: active
+        equals: false
+  suppliers:
+    delete_when_any:
+      - field: active
+        equals: false
+  factories:
+    delete_when_any:
+      - field: active
+        equals: false

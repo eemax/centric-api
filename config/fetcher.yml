@@ -1,0 +1,93 @@
+timeout: 30
+retry_max_attempts: 3
+retry_base_seconds: 40
+retry_max_seconds: 75
+jitter_ratio: 0.1
+output_dir: raw
+checkpoint_dir: checkpoints
+
+endpoints:
+  - name: seasons
+    api_version: v2
+    path: seasons
+    count_spec:
+      api_version: v2
+      path: count/Season
+  - name: styles
+    api_version: v2
+    path: styles
+    count_spec:
+      api_version: v2
+      path: count/Style
+  - name: materials
+    api_version: v2
+    path: materials
+    count_spec:
+      api_version: v2
+      path: count/Material
+  - name: colorways
+    api_version: v2
+    path: colorways
+    count_spec:
+      api_version: v2
+      path: count/Colorway
+  - name: collections
+    api_version: v2
+    path: collections
+    count_spec:
+      api_version: v2
+      path: count/Collection
+  - name: category1s
+    api_version: v2
+    path: category1s
+    count_spec:
+      api_version: v2
+      path: count/Category1
+  - name: category2s
+    api_version: v2
+    path: category2s
+    count_spec:
+      api_version: v2
+      path: count/Category2
+  - name: sizes
+    api_version: v2
+    path: product_sizes
+    count_spec:
+      api_version: v2
+      path: count/ProductSize
+  - name: boms
+    api_version: v3
+    path: apparel_bom_revisions
+    count_spec:
+      api_version: v2
+      path: count/ApparelBOMRevision
+  - name: bom_section_definitions
+    api_version: v2
+    path: bom_section_definitions
+    count_spec:
+      api_version: v2
+      path: count/BOMSectionDefinition
+  - name: bomrows
+    api_version: v3
+    path: part_materials
+    count_spec:
+      api_version: v2
+      path: count/PartMaterial
+  - name: supplierquotes
+    api_version: v2
+    path: supplier_item_revisions
+    count_spec:
+      api_version: v2
+      path: count/SupplierItemRevision
+  - name: suppliers
+    api_version: v2
+    path: suppliers
+    count_spec:
+      api_version: v2
+      path: count/Supplier
+  - name: factories
+    api_version: v2
+    path: factories
+    count_spec:
+      api_version: v2
+      path: count/Factory

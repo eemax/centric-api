@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "centric-api"
+version = "0.1.0"
+description = "Centric API fetcher, local cache, and changelog."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "croniter>=6.2.2",
+  "httpx>=0.27.0",
+  "PyYAML>=6.0.2",
+]
+
+[project.scripts]
+centric-api = "centric_api.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.0",
+  "ruff>=0.6.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/centric_api"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

@@ -1,0 +1,106 @@
+# Example delta state. Copy to ~/.centric-api/delta.yml only if you want to seed
+# the first delta floor manually; otherwise centric-api creates this file after
+# the first successful fetch.
+version: 1
+updated_at: "2026-01-01T01:00:00.000Z"
+overlap_minutes: 60
+overlap_days: 0
+endpoints:
+  seasons:
+    last_attempted_fetch_start: "2026-01-01T00:00:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:01:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:00:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:01:00.000Z"
+  styles:
+    last_attempted_fetch_start: "2026-01-01T00:01:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:06:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:01:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:06:00.000Z"
+  materials:
+    last_attempted_fetch_start: "2026-01-01T00:06:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:10:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:06:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:10:00.000Z"
+  colorways:
+    last_attempted_fetch_start: "2026-01-01T00:10:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:16:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:10:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:16:00.000Z"
+  collections:
+    last_attempted_fetch_start: "2026-01-01T00:16:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:17:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:16:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:17:00.000Z"
+  category1s:
+    last_attempted_fetch_start: "2026-01-01T00:17:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:18:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:17:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:18:00.000Z"
+  category2s:
+    last_attempted_fetch_start: "2026-01-01T00:18:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:19:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:18:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:19:00.000Z"
+  sizes:
+    last_attempted_fetch_start: "2026-01-01T00:19:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:21:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:19:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:21:00.000Z"
+  boms:
+    last_attempted_fetch_start: "2026-01-01T00:21:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:34:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:21:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:34:00.000Z"
+  bom_section_definitions:
+    last_attempted_fetch_start: "2026-01-01T00:34:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:35:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:34:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:35:00.000Z"
+  bomrows:
+    last_attempted_fetch_start: "2026-01-01T00:35:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:48:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:35:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:48:00.000Z"
+  supplierquotes:
+    last_attempted_fetch_start: "2026-01-01T00:48:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:54:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:48:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:54:00.000Z"
+  suppliers:
+    last_attempted_fetch_start: "2026-01-01T00:54:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:57:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:54:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:57:00.000Z"
+  factories:
+    last_attempted_fetch_start: "2026-01-01T00:57:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T01:00:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:57:00.000Z"
+    last_successful_fetch_end: "2026-01-01T01:00:00.000Z"

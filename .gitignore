@@ -1,0 +1,22 @@
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+.DS_Store
+
+# Runtime data belongs under ~/.centric-api by default, but keep local overrides out too.
+data/
+raw/
+checkpoints/
+logs/
+cron/
+*.db
+*.db-shm
+*.db-wal
+
+# Private credentials/config overlays.
+.env
+local.env
+.local/
