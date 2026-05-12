@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import contextlib
+import io
 import json
 import sys
 import time
@@ -419,19 +421,30 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
             delta_state_file=args.delta_state_file,
             delta_dry_run=False,
             env_file=args.env_file,
-            quiet=False,
-            json=False,
+            quiet=True,
+            json=True,
             log_level=args.log_level,
         )
-        exit_code = run_fetch(fetch_args)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            exit_code = run_fetch(fetch_args)
         duration = time.time() - started
-        print(f"Fetch finished: exit={exit_code} duration={_format_duration(duration)}")
-        _append_human_log(
+        fetch_records = _parse_jsonl(stdout.getvalue())
+        _append_cron_fetch_records(
             log_file,
-            (
-                "fetch_finish "
-                f"exit_code={exit_code} duration_seconds={round(duration, 3)}"
-            ),
+            records=fetch_records,
+            stderr=stderr.getvalue(),
+            exit_code=exit_code,
+            duration_seconds=duration,
+        )
+        ok_count = sum(1 for record in fetch_records if record.get("status") == "ok")
+        failed_count = sum(1 for record in fetch_records if record.get("status") == "failed")
+        total_items = sum(_safe_int(record.get("items_fetched")) for record in fetch_records)
+        print(f"Fetch finished: exit={exit_code} duration={_format_duration(duration)}")
+        print(
+            f"Fetch records: {ok_count} ok, {failed_count} failed, "
+            f"{total_items} items fetched"
         )
     finally:
         lock_file.unlink(missing_ok=True)
@@ -962,6 +975,70 @@ def _append_human_log(path: Path, message: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(f"{_utc_iso()} SUMMARY {message}\n")
+
+
+def _append_cron_fetch_records(
+    path: Path,
+    *,
+    records: list[dict[str, Any]],
+    stderr: str,
+    exit_code: int,
+    duration_seconds: float,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps({"timestamp": _utc_iso(), **record}, default=str) + "\n")
+        if stderr.strip():
+            fh.write(
+                json.dumps(
+                    {
+                        "timestamp": _utc_iso(),
+                        "record_type": "fetch_stderr",
+                        "stderr": stderr.strip(),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+        fh.write(
+            json.dumps(
+                {
+                    "timestamp": _utc_iso(),
+                    "record_type": "cron_fetch_summary",
+                    "exit_code": exit_code,
+                    "duration_seconds": round(duration_seconds, 3),
+                },
+                default=str,
+            )
+            + "\n"
+        )
+
+
+def _parse_jsonl(value: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for line in value.splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            records.append({"record_type": "fetch_stdout", "line": text})
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+        else:
+            records.append({"record_type": "fetch_stdout", "value": payload})
+    return records
+
+
+def _safe_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    return 0
 
 
 def _parse_days_back(value: str) -> int:

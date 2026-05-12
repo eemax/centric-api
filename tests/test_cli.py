@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from centric_api.cli import main
+from centric_api.cli import _parse_jsonl, main
 
 
 def test_cli_help_commands(capsys) -> None:
@@ -40,3 +40,10 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
     assert "--config" not in cron_help
     assert "--timeout" not in cron_help
     assert "[schedule]" in cron_help
+
+
+def test_parse_jsonl_preserves_non_json_lines() -> None:
+    assert _parse_jsonl('{"status":"ok"}\nnot-json\n') == [
+        {"status": "ok"},
+        {"record_type": "fetch_stdout", "line": "not-json"},
+    ]

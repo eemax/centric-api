@@ -22,8 +22,9 @@ windows.
 Raw JSONL, checkpoints, logs, `delta.yml`, and the canonical SQLite cache live under
 `~/.centric-api`. The local database defaults to `~/.centric-api/centric.db`.
 
-`cron` runs in the foreground until stopped and defaults to hourly (`0 * * * *`). Logs and lock
-files always live under `~/.centric-api/logs` and `~/.centric-api/cron`.
+`cron` runs in the foreground until stopped and defaults to hourly (`0 * * * *`). It prints
+scheduler lifecycle messages to the terminal, runs fetch in quiet JSON mode, and appends fetch JSONL
+records to `~/.centric-api/logs/cron.log`. Lock files always live under `~/.centric-api/cron`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed
