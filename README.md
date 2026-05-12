@@ -11,6 +11,7 @@ uv run centric-api fetch --full
 uv run centric-api fetch --days 7
 uv run centric-api changelog
 uv run centric-api cron
+uv run centric-api cron "0 * * * *" --endpoint styles
 ```
 
 `fetch` defaults to delta mode. `--full` refetches all configured endpoints and still advances the
@@ -19,6 +20,9 @@ windows.
 
 Raw JSONL, checkpoints, logs, `delta.yml`, and the canonical SQLite cache live under
 `~/.centric-api`. The local database defaults to `~/.centric-api/centric.db`.
+
+`cron` runs in the foreground until stopped and defaults to hourly (`0 * * * *`). Logs and lock
+files always live under `~/.centric-api/logs` and `~/.centric-api/cron`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed

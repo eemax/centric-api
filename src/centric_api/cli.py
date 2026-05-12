@@ -49,7 +49,6 @@ SENSITIVE_QUERY_KEYS = {"token", "password", "api_key", "authorization"}
 LOG_LEVEL_RANKS = {"off": 0, "summary": 1, "http": 2, "debug": 3}
 
 LogLevel = Literal["off", "summary", "http", "debug"]
-LogFormat = Literal["text", "jsonl"]
 LogEvent = dict[str, Any]
 LogCallback = Callable[[LogEvent], None]
 
@@ -81,11 +80,8 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument("--days", type=_parse_days_back, default=None)
     fetch_parser.add_argument("--months", type=_parse_months_back, default=None)
     fetch_parser.add_argument("--resume", action="store_true")
-    fetch_parser.add_argument("--output-dir", default=None)
-    fetch_parser.add_argument("--checkpoint-dir", default=None)
     fetch_parser.add_argument("--db", default=None)
     fetch_parser.add_argument("--schema", default=None)
-    fetch_parser.add_argument("--no-changelog", action="store_true")
     fetch_parser.add_argument("--delta-state-file", default=None)
     fetch_parser.add_argument("--delta-dry-run", action="store_true")
     fetch_parser.add_argument("--env-file", default=None)
@@ -93,8 +89,6 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument("--quiet", action="store_true")
     fetch_parser.add_argument("--json", action="store_true")
     fetch_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="off")
-    fetch_parser.add_argument("--log-format", choices=["text", "jsonl"], default="text")
-    fetch_parser.add_argument("--log-file", default=None)
 
     changelog_parser = subparsers.add_parser("changelog", help="Inspect or update changelog")
     changelog_parser.add_argument(
@@ -110,7 +104,7 @@ def _build_parser() -> argparse.ArgumentParser:
     changelog_parser.add_argument("--json", action="store_true")
 
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
-    cron_parser.add_argument("--schedule", default="*/15 * * * *")
+    cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
     cron_parser.add_argument("--run-now", action="store_true")
     cron_parser.add_argument("--endpoint", action="append", default=[])
     cron_parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
@@ -119,8 +113,7 @@ def _build_parser() -> argparse.ArgumentParser:
     cron_parser.add_argument("--delta-state-file", default=None)
     cron_parser.add_argument("--env-file", default=None)
     cron_parser.add_argument("--timeout", type=float, default=None)
-    cron_parser.add_argument("--lock-file", default=None)
-    cron_parser.add_argument("--log-file", default=None)
+    cron_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
     return parser
 
 
@@ -129,10 +122,6 @@ def run_fetch(args: argparse.Namespace) -> int:
     run_started_dt = _utc_now()
     mode, modified_since = _resolve_fetch_mode(args, run_started_dt)
     fetcher_cfg, auth_settings, endpoint_specs = load_fetcher_settings(args.config)
-    if args.output_dir:
-        fetcher_cfg.output_dir = Path(args.output_dir).expanduser()
-    if args.checkpoint_dir:
-        fetcher_cfg.checkpoint_dir = Path(args.checkpoint_dir).expanduser()
 
     run_id = _run_id(run_started_dt, mode, args.days or args.months)
     fetcher_cfg.output_dir = fetcher_cfg.output_dir / "runs" / run_id
@@ -148,18 +137,10 @@ def run_fetch(args: argparse.Namespace) -> int:
     fetch_log_file: TextIO | None = None
     log_callback: LogCallback | None = None
     if args.log_level != "off":
-        log_path = (
-            Path(args.log_file).expanduser()
-            if args.log_file
-            else runtime_path(DEFAULT_FETCH_LOG_PATH)
-        )
+        log_path = runtime_path(DEFAULT_FETCH_LOG_PATH)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         fetch_log_file = log_path.open("a", encoding="utf-8")
-        log_callback = _build_log_callback(
-            fetch_log_file,
-            log_level=args.log_level,
-            log_format=args.log_format,
-        )
+        log_callback = _build_log_callback(fetch_log_file, log_level=args.log_level)
 
     results: list[FetchRunResult] = []
     failures: list[tuple[str, str]] = []
@@ -240,9 +221,11 @@ def run_fetch(args: argparse.Namespace) -> int:
                             error=None,
                         )
                         _write_delta_state(delta_state_file, delta_state)
-                        _append_jsonl(
+                        _append_human_record(
                             delta_log_file,
                             {
+                                "level": "summary",
+                                "event": "delta_endpoint",
                                 "run_at": attempt_end,
                                 "mode": mode,
                                 "endpoint": spec.name,
@@ -303,12 +286,15 @@ def run_fetch(args: argparse.Namespace) -> int:
     ingest_result: IngestResult | None = None
     changelog_run: ChangelogRun | None = None
     changelog_skipped: str | None = None
+    pipeline_error: str | None = None
     if results:
         db_path = _db_path(args.db)
         schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
         ingest_result = ingest_raw_dir(fetcher_cfg.output_dir, db_path, schemas=schemas)
-        if not args.no_changelog:
+        try:
             changelog_run, changelog_skipped = _run_changelog_after_ingest(db_path, ingest_result)
+        except Exception as exc:
+            pipeline_error = f"changelog failed after ingest: {exc}"
 
     duration_seconds = time.time() - started
     if args.json:
@@ -319,6 +305,7 @@ def run_fetch(args: argparse.Namespace) -> int:
             ingest_result=ingest_result,
             changelog_run=changelog_run,
             changelog_skipped=changelog_skipped,
+            pipeline_error=pipeline_error,
         )
     elif not args.quiet:
         _print_human_fetch_summary(
@@ -332,8 +319,9 @@ def run_fetch(args: argparse.Namespace) -> int:
             ingest_result=ingest_result,
             changelog_run=changelog_run,
             changelog_skipped=changelog_skipped,
+            pipeline_error=pipeline_error,
         )
-    return 1 if failures else 0
+    return 1 if failures or pipeline_error else 0
 
 
 def run_changelog(args: argparse.Namespace) -> int:
@@ -387,18 +375,14 @@ def run_cron(args: argparse.Namespace) -> int:
     schedule = args.schedule.strip()
     if len(schedule.split()) != 5 or not croniter.is_valid(schedule):
         raise ConfigError(f"Invalid cron schedule: {schedule!r}")
-    lock_file = (
-        Path(args.lock_file).expanduser() if args.lock_file else runtime_path(DEFAULT_LOCK_PATH)
-    )
-    log_file = (
-        Path(args.log_file).expanduser() if args.log_file else runtime_path(DEFAULT_CRON_LOG_PATH)
-    )
+    lock_file = runtime_path(DEFAULT_LOCK_PATH)
+    log_file = runtime_path(DEFAULT_CRON_LOG_PATH)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     print("Centric API cron starting")
     print(f"Schedule: {schedule}")
     print(f"Lock:     {lock_file}")
     print(f"Log:      {log_file}")
-    _append_jsonl(log_file, {"event": "cron_start", "schedule": schedule, "started_at": _utc_iso()})
+    _append_human_log(log_file, f"cron_start schedule={json.dumps(schedule)}")
 
     try:
         if args.run_now:
@@ -411,7 +395,7 @@ def run_cron(args: argparse.Namespace) -> int:
             _run_cron_fetch_once(args, lock_file=lock_file, log_file=log_file)
     except KeyboardInterrupt:
         print("Cron stopped.")
-        _append_jsonl(log_file, {"event": "cron_stop", "stopped_at": _utc_iso()})
+        _append_human_log(log_file, "cron_stop")
         return 0
 
 
@@ -419,7 +403,7 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     if lock_file.exists():
         print(f"Skipping fetch; lock exists: {lock_file}")
-        _append_jsonl(log_file, {"event": "fetch_skipped_lock", "lock_file": str(lock_file)})
+        _append_human_log(log_file, f"fetch_skipped_lock lock_file={json.dumps(str(lock_file))}")
         return
     lock_file.write_text(str(time.time()), encoding="utf-8")
     started = time.time()
@@ -433,32 +417,25 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
             days=None,
             months=None,
             resume=False,
-            output_dir=None,
-            checkpoint_dir=None,
             db=args.db,
             schema=args.schema,
-            no_changelog=False,
             delta_state_file=args.delta_state_file,
             delta_dry_run=False,
             env_file=args.env_file,
             timeout=args.timeout,
             quiet=False,
             json=False,
-            log_level="summary",
-            log_format="jsonl",
-            log_file=None,
+            log_level=args.log_level,
         )
         exit_code = run_fetch(fetch_args)
         duration = time.time() - started
         print(f"Fetch finished: exit={exit_code} duration={_format_duration(duration)}")
-        _append_jsonl(
+        _append_human_log(
             log_file,
-            {
-                "event": "fetch_finish",
-                "exit_code": exit_code,
-                "duration_seconds": round(duration, 3),
-                "finished_at": _utc_iso(),
-            },
+            (
+                "fetch_finish "
+                f"exit_code={exit_code} duration_seconds={round(duration, 3)}"
+            ),
         )
     finally:
         lock_file.unlink(missing_ok=True)
@@ -655,8 +632,14 @@ def _print_human_fetch_summary(
     ingest_result: IngestResult | None,
     changelog_run: ChangelogRun | None,
     changelog_skipped: str | None,
+    pipeline_error: str | None,
 ) -> None:
-    print("Fetch Complete" if not failures else "Fetch Finished With Failures")
+    title = (
+        "Fetch Complete"
+        if not failures and not pipeline_error
+        else "Fetch Finished With Failures"
+    )
+    print(title)
     print()
     print(f"Mode: {mode}")
     print(f"Run:  {run_id}")
@@ -702,6 +685,10 @@ def _print_human_fetch_summary(
     elif changelog_skipped:
         print()
         print(f"Changelog: {changelog_skipped}.")
+    if pipeline_error:
+        print()
+        print("Pipeline")
+        print(f"- {pipeline_error}")
     if failures:
         print()
         print("Failures")
@@ -717,6 +704,7 @@ def _print_json_fetch_records(
     ingest_result: IngestResult | None,
     changelog_run: ChangelogRun | None,
     changelog_skipped: str | None,
+    pipeline_error: str | None,
 ) -> None:
     for result in results:
         print(
@@ -741,6 +729,7 @@ def _print_json_fetch_records(
                 "manifest": str(manifest_path),
                 "ingest": _ingest_record(ingest_result),
                 "changelog": _changelog_record(changelog_run, changelog_skipped),
+                "pipeline_error": pipeline_error,
             }
         )
     )
@@ -822,7 +811,6 @@ def _build_log_callback(
     log_file: TextIO,
     *,
     log_level: LogLevel,
-    log_format: LogFormat,
 ) -> LogCallback:
     selected_rank = LOG_LEVEL_RANKS[log_level]
 
@@ -835,10 +823,7 @@ def _build_log_callback(
         url = record.get("url")
         if isinstance(url, str):
             record["url"] = _redact_url_query(url)
-        if log_format == "jsonl":
-            line = json.dumps(record, separators=(",", ":"))
-        else:
-            line = _render_log_line(record)
+        line = _render_log_line(record)
         log_file.write(line + "\n")
         log_file.flush()
 
@@ -971,10 +956,16 @@ def _classify_status(result: FetchRunResult, error: str | None) -> str:
     return "OK"
 
 
-def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
+def _append_human_record(path: Path, record: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
+        fh.write(_render_log_line({"timestamp": _utc_iso(), **record}) + "\n")
+
+
+def _append_human_log(path: Path, message: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(f"{_utc_iso()} SUMMARY {message}\n")
 
 
 def _parse_days_back(value: str) -> int:
