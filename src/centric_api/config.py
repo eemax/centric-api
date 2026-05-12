@@ -82,11 +82,9 @@ def _as_positive_int(value: Any, *, field_name: str, default: int) -> int:
 
 
 def _build_count_spec(raw: dict[str, Any]) -> CountSpec:
-    api_version = _as_version(raw.get("api_version"), field_name="count_spec.api_version")
     path = _as_path(raw.get("path"), field_name="count_spec.path")
     query_params = _as_dict(raw.get("query_params"), field_name="count_spec.query_params")
     return CountSpec(
-        api_version=api_version,
         path=path,
         query_params=query_params,
     )

@@ -34,6 +34,8 @@ endpoints:
   - name: styles
     api_version: v2
     path: styles
+    count_spec:
+      path: count/Style
 """,
         encoding="utf-8",
     )
@@ -44,6 +46,8 @@ endpoints:
     assert fetcher_cfg.checkpoint_dir == tmp_path / "home" / "checkpoints"
     assert auth_settings.env_file == tmp_path / "home" / "local.env"
     assert [endpoint.name for endpoint in endpoints] == ["styles"]
+    assert endpoints[0].count_spec is not None
+    assert endpoints[0].count_spec.path == "count/Style"
 
 
 def test_schema_requires_endpoints_root(tmp_path: Path) -> None:

@@ -3,7 +3,7 @@
 # the first successful fetch.
 version: 1
 updated_at: "2026-01-01T01:00:00.000Z"
-overlap_minutes: 60
+overlap_minutes: 10
 overlap_days: 0
 endpoints:
   seasons:

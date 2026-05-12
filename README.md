@@ -29,7 +29,8 @@ mode, and writes JSONL-only records to `~/.centric-api/logs/cron.log`. Lock file
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed
-the file manually, copy `config/delta.example.yml` to `~/.centric-api/delta.yml`.
+the file manually, copy `config/delta.example.yml` to `~/.centric-api/delta.yml`. Delta fetches
+default to a 10-minute overlap from the previous successful fetch start.
 
 Credentials resolve from environment variables or `~/.centric-api/local.env`:
 

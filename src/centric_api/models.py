@@ -7,7 +7,6 @@ from typing import Any, Literal
 
 @dataclass
 class CountSpec:
-    api_version: str
     path: str
     query_params: dict[str, Any] = field(default_factory=dict)
 

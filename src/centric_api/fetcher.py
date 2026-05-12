@@ -34,6 +34,7 @@ PAGINATION_SKIP_PARAM = "skip"
 PAGINATION_LIMIT_PARAM = "limit"
 ITEM_PATH = "$"
 COUNT_RESULT_PATH = "$.count"
+COUNT_API_VERSION = "v2"
 
 
 @dataclass
@@ -708,7 +709,7 @@ def get_expected_count(
     retries_ref = retries_used_ref if retries_used_ref is not None else [0]
     count_url = _build_endpoint_url(
         fetcher_cfg.base_url or auth_ctx.base_url,
-        spec.count_spec.api_version,
+        COUNT_API_VERSION,
         spec.count_spec.path,
     )
     payload = _request_json_with_retry(
