@@ -89,7 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument("--env-file", default=None)
     fetch_parser.add_argument("--quiet", action="store_true")
     fetch_parser.add_argument("--json", action="store_true")
-    fetch_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="off")
+    fetch_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
 
     changelog_parser = subparsers.add_parser("changelog", help="Inspect or update changelog")
     changelog_parser.add_argument(
@@ -196,7 +196,7 @@ def run_fetch(args: argparse.Namespace) -> int:
                         api_log_callback=log_callback,
                     )
                     results.append(result)
-                    status = _classify_status(result, None)
+                    status = "OK"
                     attempt_end = _utc_iso()
                     endpoint_records.append(
                         _endpoint_manifest_record(
@@ -252,7 +252,7 @@ def run_fetch(args: argparse.Namespace) -> int:
                             "error": message,
                         }
                     )
-                    if mode == "delta":
+                    if mode in {"delta", "full"}:
                         _update_delta_state_for_endpoint(
                             delta_state,
                             endpoint_name=spec.name,
@@ -488,11 +488,9 @@ def _prepare_runtime_spec(
 def _apply_modified_since_filter(spec: EndpointSpec, modified_since: str) -> EndpointSpec:
     query_params = strip_modified_at_filters(spec.query_params)
     query_params["_modified_at=ge"] = modified_since
-    next_count_spec = None
-    if spec.count_spec is not None:
-        count_query_params = strip_modified_at_filters(spec.count_spec.query_params)
-        count_query_params["_modified_at=ge"] = modified_since
-        next_count_spec = replace(spec.count_spec, query_params=count_query_params)
+    count_query_params = strip_modified_at_filters(spec.count_spec.query_params)
+    count_query_params["_modified_at=ge"] = modified_since
+    next_count_spec = replace(spec.count_spec, query_params=count_query_params)
     return replace(spec, query_params=query_params, count_spec=next_count_spec)
 
 
@@ -531,7 +529,7 @@ def _update_delta_state_for_endpoint(
     existing["last_attempted_fetch_end"] = attempt_end
     existing["last_attempted_status"] = status
     existing["last_attempted_error"] = error
-    if status in {"OK", "PARTIAL"}:
+    if status == "OK":
         existing["last_successful_fetch_start"] = attempt_start
         existing["last_successful_fetch_end"] = attempt_end
     endpoints[endpoint_name] = existing
@@ -896,9 +894,7 @@ def _print_delta_dry_run(
     overlap_minutes: int,
 ) -> None:
     data_modified = spec.query_params.get("_modified_at=ge")
-    count_modified = (
-        spec.count_spec.query_params.get("_modified_at=ge") if spec.count_spec else None
-    )
+    count_modified = spec.count_spec.query_params.get("_modified_at=ge")
     print(
         json.dumps(
             {
@@ -959,14 +955,6 @@ def _changelog_record(run: ChangelogRun | None, skipped: str | None) -> dict[str
 
 def _db_path(value: str | None) -> Path:
     return Path(value).expanduser() if value else runtime_path(DEFAULT_DB_PATH)
-
-
-def _classify_status(result: FetchRunResult, error: str | None) -> str:
-    if error is not None:
-        return "FAILED"
-    if result.warnings:
-        return "PARTIAL"
-    return "OK"
 
 
 def _append_human_record(path: Path, record: dict[str, Any]) -> None:

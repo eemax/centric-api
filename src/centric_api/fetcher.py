@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from .auth import AuthContext, AuthError
+from .auth import AuthContext
 from .delta import build_delta_endpoint_spec
 from .models import EndpointSpec, FetcherConfig, FetchProgressEvent, FetchRunResult
 
@@ -465,6 +465,12 @@ def _read_checkpoint(path: Path) -> _CheckpointState:
 
     normalized_window_start_line: int | None
     if window_start_line is None:
+        if next_skip > 0:
+            return _CheckpointState(
+                exists=True,
+                valid=False,
+                invalid_reason="window_start_line is required when next_skip is greater than zero",
+            )
         normalized_window_start_line = None
     elif isinstance(window_start_line, int) and window_start_line >= 0:
         normalized_window_start_line = window_start_line
@@ -642,13 +648,14 @@ def _iter_pages(
     fetcher_cfg: FetcherConfig,
     *,
     start_skip: int,
-    expected_total: int | None,
+    already_fetched: int,
+    expected_total: int,
     retries_used_ref: list[int],
     progress_callback: Callable[[FetchProgressEvent], None] | None = None,
     api_log_callback: ApiLogCallback = None,
 ) -> Iterator[_Page]:
     skip = start_skip
-    fetched = 0
+    fetched = already_fetched
     url = _build_endpoint_url(
         fetcher_cfg.base_url or auth_ctx.base_url,
         spec.api_version,
@@ -688,7 +695,7 @@ def _iter_pages(
         yield page
 
         fetched += len(items)
-        if expected_total is not None and fetched >= expected_total:
+        if fetched >= expected_total:
             break
         if not items or len(items) < spec.limit:
             break
@@ -702,10 +709,7 @@ def get_expected_count(
     retries_used_ref: list[int] | None = None,
     progress_callback: Callable[[FetchProgressEvent], None] | None = None,
     api_log_callback: ApiLogCallback = None,
-) -> int | None:
-    if spec.count_spec is None:
-        return None
-
+) -> int:
     retries_ref = retries_used_ref if retries_used_ref is not None else [0]
     count_url = _build_endpoint_url(
         fetcher_cfg.base_url or auth_ctx.base_url,
@@ -793,15 +797,6 @@ def run_endpoint(
         checkpoint_completed_resolved = resume_completed_hint
 
     if resume and checkpoint_restart_from_zero:
-        force_output_rewrite = True
-        start_skip = 0
-        items_fetched = 0
-        if checkpoint_delta_floor is not None:
-            effective_delta_floor = checkpoint_delta_floor
-
-    # Legacy checkpoints might not include window_start_line.
-    # Restart safely to avoid false integrity success.
-    if resume and start_skip > 0 and checkpoint_window_start_line is None:
         force_output_rewrite = True
         start_skip = 0
         items_fetched = 0
@@ -945,7 +940,6 @@ def run_endpoint(
             "level": "debug",
             "event": "runtime_query_prepared",
             "endpoint": spec.name,
-            "has_count_spec": spec.count_spec is not None,
             "effective_delta_floor": effective_delta_floor,
             "data_sort": spec.query_params.get("sort"),
         },
@@ -989,29 +983,14 @@ def run_endpoint(
             },
         )
 
-    expected_count: int | None = None
-    preflight_warning: str | None = None
-    try:
-        expected_count = get_expected_count(
-            spec,
-            auth_ctx,
-            fetcher_cfg,
-            retries_used_ref=retries_used_ref,
-            progress_callback=progress_callback,
-            api_log_callback=api_log_callback,
-        )
-    except (FetchError, AuthError) as exc:
-        preflight_warning = f"Count preflight unavailable for '{spec.name}': {exc}"
-        warnings.append(preflight_warning)
-        _emit_api_log(
-            api_log_callback,
-            {
-                "level": "debug",
-                "event": "count_preflight_unavailable",
-                "endpoint": spec.name,
-                "error": str(exc),
-            },
-        )
+    expected_count = get_expected_count(
+        spec,
+        auth_ctx,
+        fetcher_cfg,
+        retries_used_ref=retries_used_ref,
+        progress_callback=progress_callback,
+        api_log_callback=api_log_callback,
+    )
 
     _emit_progress(
         progress_callback,
@@ -1026,17 +1005,6 @@ def run_endpoint(
         ),
     )
 
-    if preflight_warning:
-        _emit_progress(
-            progress_callback,
-            FetchProgressEvent(
-                kind="warning",
-                endpoint=spec.name,
-                message=preflight_warning,
-                retries_used=retries_used_ref[0],
-                elapsed_seconds=time.time() - started,
-            ),
-        )
     if checkpoint_warning:
         _emit_progress(
             progress_callback,
@@ -1051,9 +1019,7 @@ def run_endpoint(
 
     pages_fetched = 0
     next_skip = start_skip
-    expected_pages: int | None = None
-    if expected_count is not None and spec.limit > 0:
-        expected_pages = math.ceil(expected_count / spec.limit)
+    expected_pages = math.ceil(expected_count / spec.limit)
     page_durations: deque[float] = deque(maxlen=10)
 
     def _fail_integrity(message: str) -> None:
@@ -1098,7 +1064,6 @@ def run_endpoint(
         )
         raise FetchError(message)
 
-    should_validate_ids = expected_count is not None
     tracked_id_items = 0
     seen_ids: set[Any] = set()
     duplicate_ids: list[Any] = []
@@ -1109,10 +1074,10 @@ def run_endpoint(
     id_validation_checked_items = 0
     id_validation_unique_ids = 0
     id_validation_reason: str | None = None
-    count_validation_status = "skipped"
+    count_validation_status = "passed"
     count_validation_reason: str | None = None
 
-    if should_validate_ids and resume and start_skip > 0:
+    if resume and start_skip > 0:
         try:
             (
                 seeded_items,
@@ -1165,6 +1130,7 @@ def run_endpoint(
             auth_ctx,
             fetcher_cfg,
             start_skip=start_skip,
+            already_fetched=items_fetched,
             expected_total=expected_count,
             retries_used_ref=retries_used_ref,
             progress_callback=progress_callback,
@@ -1173,27 +1139,24 @@ def run_endpoint(
             pages_fetched += 1
             for item in page.items:
                 out_fh.write(json.dumps(item, separators=(",", ":")) + "\n")
-                if should_validate_ids:
-                    tracked_id_items += 1
-                    invalid_detail = _track_item_id(
-                        item,
-                        seen_ids=seen_ids,
-                        duplicate_id_set=duplicate_id_set,
-                        duplicate_ids=duplicate_ids,
-                    )
-                    if invalid_detail is not None:
-                        invalid_id_count += 1
-                        if first_invalid_id_detail is None:
-                            first_invalid_id_detail = invalid_detail
+                tracked_id_items += 1
+                invalid_detail = _track_item_id(
+                    item,
+                    seen_ids=seen_ids,
+                    duplicate_id_set=duplicate_id_set,
+                    duplicate_ids=duplicate_ids,
+                )
+                if invalid_detail is not None:
+                    invalid_id_count += 1
+                    if first_invalid_id_detail is None:
+                        first_invalid_id_detail = invalid_detail
             items_fetched += len(page.items)
             next_skip = page.skip + spec.limit
             page_durations.append(page.duration_seconds)
             rolling_avg_seconds = sum(page_durations) / len(page_durations)
-            estimated_remaining_seconds: float | None = None
-            if expected_count is not None and spec.limit > 0:
-                remaining_items = max(expected_count - items_fetched, 0)
-                remaining_pages = math.ceil(remaining_items / spec.limit)
-                estimated_remaining_seconds = remaining_pages * rolling_avg_seconds
+            remaining_items = max(expected_count - items_fetched, 0)
+            remaining_pages = math.ceil(remaining_items / spec.limit)
+            estimated_remaining_seconds = remaining_pages * rolling_avg_seconds
             _write_checkpoint(
                 checkpoint_path,
                 spec.name,
@@ -1220,9 +1183,11 @@ def run_endpoint(
                     "window_start_line": window_start_line,
                 },
             )
-            percent_complete: float | None = None
-            if expected_count is not None and expected_count > 0:
-                percent_complete = min(100.0, (items_fetched / expected_count) * 100.0)
+            percent_complete = (
+                min(100.0, (items_fetched / expected_count) * 100.0)
+                if expected_count > 0
+                else None
+            )
             _emit_progress(
                 progress_callback,
                 FetchProgressEvent(
@@ -1245,8 +1210,7 @@ def run_endpoint(
                 ),
             )
 
-    mismatch = expected_count is not None and items_fetched != expected_count
-    if mismatch:
+    if items_fetched != expected_count:
         mismatch_error = (
             f"Fetched {items_fetched} items for '{spec.name}' "
             f"but count preflight expected {expected_count}."
@@ -1266,71 +1230,69 @@ def run_endpoint(
             "Action: exit endpoint."
         )
 
-    if expected_count is None:
-        count_validation_status = "skipped"
-        count_validation_reason = "expected_count_unavailable"
-        id_validation_status = "skipped"
-        id_validation_checked_items = 0
-        id_validation_unique_ids = 0
-        id_validation_reason = "expected_count_unavailable"
+    if invalid_id_count > 0 or duplicate_ids:
+        detail_parts: list[str] = []
+        if invalid_id_count > 0:
+            first_issue = first_invalid_id_detail or "invalid field 'id'"
+            detail_parts.append(
+                f"invalid id values={invalid_id_count} (first issue: {first_issue})"
+            )
+        if duplicate_ids:
+            duplicate_preview = [repr(value) for value in duplicate_ids[:5]]
+            detail_parts.append(
+                f"duplicate ids={len(duplicate_ids)} (sample: {', '.join(duplicate_preview)})"
+            )
+        validation_error = (
+            f"Post-fetch ID validation failed for '{spec.name}': "
+            + "; ".join(detail_parts)
+            + ". Duplicate IDs indicate unstable pagination. Action: exit endpoint."
+        )
         _emit_api_log(
             api_log_callback,
             {
                 "level": "summary",
-                "event": "id_validation_skipped",
+                "event": "id_validation_failed",
                 "endpoint": spec.name,
-                "reason": "expected_count_unavailable",
-                "checked_items": 0,
-                "unique_ids": 0,
+                "invalid_id_count": invalid_id_count,
+                "duplicate_id_count": len(duplicate_ids),
+                "duplicate_ids_sample": [repr(value) for value in duplicate_ids[:5]],
             },
         )
-    else:
-        count_validation_status = "passed"
-        count_validation_reason = None
-        if invalid_id_count > 0 or duplicate_ids:
-            detail_parts: list[str] = []
-            if invalid_id_count > 0:
-                first_issue = first_invalid_id_detail or "invalid field 'id'"
-                detail_parts.append(
-                    f"invalid id values={invalid_id_count} (first issue: {first_issue})"
-                )
-            if duplicate_ids:
-                duplicate_preview = [repr(value) for value in duplicate_ids[:5]]
-                detail_parts.append(
-                    f"duplicate ids={len(duplicate_ids)} (sample: {', '.join(duplicate_preview)})"
-                )
-            validation_error = (
-                f"Post-fetch ID validation failed for '{spec.name}': "
-                + "; ".join(detail_parts)
-                + ". Duplicate IDs indicate unstable pagination. Action: exit endpoint."
-            )
-            _emit_api_log(
-                api_log_callback,
-                {
-                    "level": "summary",
-                    "event": "id_validation_failed",
-                    "endpoint": spec.name,
-                    "invalid_id_count": invalid_id_count,
-                    "duplicate_id_count": len(duplicate_ids),
-                    "duplicate_ids_sample": [repr(value) for value in duplicate_ids[:5]],
-                },
-            )
-            _fail_integrity(validation_error)
+        _fail_integrity(validation_error)
 
-        id_validation_status = "passed"
-        id_validation_checked_items = tracked_id_items
-        id_validation_unique_ids = len(seen_ids)
-        id_validation_reason = None
+    unique_id_count = len(seen_ids)
+    if unique_id_count != expected_count:
         _emit_api_log(
             api_log_callback,
             {
                 "level": "summary",
-                "event": "id_validation_passed",
+                "event": "unique_id_count_mismatch_failed",
                 "endpoint": spec.name,
-                "checked_items": id_validation_checked_items,
-                "unique_ids": id_validation_unique_ids,
+                "expected_count": expected_count,
+                "checked_items": tracked_id_items,
+                "unique_ids": unique_id_count,
             },
         )
+        _fail_integrity(
+            f"Post-fetch ID validation failed for '{spec.name}': "
+            f"expected {expected_count} unique ids, found {unique_id_count}. "
+            "Action: exit endpoint."
+        )
+
+    id_validation_status = "passed"
+    id_validation_checked_items = tracked_id_items
+    id_validation_unique_ids = unique_id_count
+    id_validation_reason = None
+    _emit_api_log(
+        api_log_callback,
+        {
+            "level": "summary",
+            "event": "id_validation_passed",
+            "endpoint": spec.name,
+            "checked_items": id_validation_checked_items,
+            "unique_ids": id_validation_unique_ids,
+        },
+    )
 
     duration = time.time() - started
     _write_checkpoint(

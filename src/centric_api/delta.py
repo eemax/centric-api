@@ -47,12 +47,10 @@ def build_delta_endpoint_spec(
     if delta_floor is not None:
         query_params["_modified_at=ge"] = delta_floor
 
-    next_count_spec = None
-    if spec.count_spec is not None:
-        count_query_params = strip_modified_at_filters(spec.count_spec.query_params)
-        if delta_floor is not None:
-            count_query_params["_modified_at=ge"] = delta_floor
-        next_count_spec = replace(spec.count_spec, query_params=count_query_params)
+    count_query_params = strip_modified_at_filters(spec.count_spec.query_params)
+    if delta_floor is not None:
+        count_query_params["_modified_at=ge"] = delta_floor
+    next_count_spec = replace(spec.count_spec, query_params=count_query_params)
 
     mutated = replace(spec, query_params=query_params, count_spec=next_count_spec)
     if force_sort or delta_floor is not None:

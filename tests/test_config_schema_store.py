@@ -46,8 +46,24 @@ endpoints:
     assert fetcher_cfg.checkpoint_dir == tmp_path / "home" / "checkpoints"
     assert auth_settings.env_file == tmp_path / "home" / "local.env"
     assert [endpoint.name for endpoint in endpoints] == ["styles"]
-    assert endpoints[0].count_spec is not None
     assert endpoints[0].count_spec.path == "count/Style"
+
+
+def test_load_fetcher_settings_requires_count_spec(tmp_path: Path) -> None:
+    config = tmp_path / "fetcher.yml"
+    config.write_text(
+        """
+timeout: 5
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="count_spec"):
+        load_fetcher_settings(config)
 
 
 def test_schema_requires_endpoints_root(tmp_path: Path) -> None:

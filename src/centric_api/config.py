@@ -102,17 +102,17 @@ def _build_endpoint_spec(raw: dict[str, Any]) -> EndpointSpec:
     limit = _as_positive_int(raw.get("limit", 50), field_name=f"endpoint[{name}].limit", default=50)
 
     count_spec_raw = raw.get("count_spec")
-    if count_spec_raw is not None and not isinstance(count_spec_raw, dict):
+    if not isinstance(count_spec_raw, dict):
         raise ConfigError(f"endpoint[{name}].count_spec must be an object.")
-    count_spec = _build_count_spec(count_spec_raw) if isinstance(count_spec_raw, dict) else None
+    count_spec = _build_count_spec(count_spec_raw)
 
     return EndpointSpec(
         name=name.strip(),
         api_version=api_version,
         path=path,
+        count_spec=count_spec,
         query_params=query_params,
         limit=limit,
-        count_spec=count_spec,
     )
 
 

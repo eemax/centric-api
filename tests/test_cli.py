@@ -4,7 +4,13 @@ import json
 
 import pytest
 
-from centric_api.cli import _append_cron_event, _append_cron_fetch_records, _parse_jsonl, main
+from centric_api.cli import (
+    _append_cron_event,
+    _append_cron_fetch_records,
+    _build_parser,
+    _parse_jsonl,
+    main,
+)
 
 
 def test_cli_help_commands(capsys) -> None:
@@ -39,6 +45,12 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
     assert "--fetch-config" in cron_help
     assert "--log-level" not in cron_help
     assert "[schedule]" in cron_help
+
+
+def test_fetch_log_level_defaults_to_summary() -> None:
+    args = _build_parser().parse_args(["fetch"])
+
+    assert args.log_level == "summary"
 
 
 def test_parse_jsonl_preserves_non_json_lines() -> None:

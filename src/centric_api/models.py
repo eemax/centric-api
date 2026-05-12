@@ -16,9 +16,9 @@ class EndpointSpec:
     name: str
     api_version: str
     path: str
+    count_spec: CountSpec
     query_params: dict[str, Any] = field(default_factory=dict)
     limit: int = 50
-    count_spec: CountSpec | None = None
 
 
 @dataclass
