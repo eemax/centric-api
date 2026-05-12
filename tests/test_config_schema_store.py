@@ -21,7 +21,7 @@ def test_runtime_paths_use_centric_api_home(
     assert runtime_path("raw") == tmp_path / "home" / "raw"
 
 
-def test_load_fetcher_settings_no_fetch_params(
+def test_load_fetcher_settings_runtime_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -46,18 +46,19 @@ endpoints:
     assert [endpoint.name for endpoint in endpoints] == ["styles"]
 
 
-def test_schema_rejects_identity_and_modified_at_overrides(tmp_path: Path) -> None:
+def test_schema_requires_endpoints_root(tmp_path: Path) -> None:
     schema = tmp_path / "endpoint-schema.yml"
     schema.write_text(
         """
-endpoints:
-  styles:
-    primary_key: code
+styles:
+  delete_when_any:
+    - field: active
+      equals: false
 """,
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="hardcoded"):
+    with pytest.raises(ValueError, match="endpoints"):
         load_endpoint_schemas(schema)
 
 

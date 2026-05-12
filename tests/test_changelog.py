@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 from centric_api.changelog import list_changes, list_field_summary, record_changelog
@@ -55,12 +56,19 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     )
     changes = list_changes(db_path, endpoint="styles", limit=10)
     field_summary = list_field_summary(db_path, endpoint="styles", limit=10)
+    field_summary_since = list_field_summary(
+        db_path,
+        endpoint="styles",
+        since=datetime(1970, 1, 1, tzinfo=UTC),
+        limit=10,
+    )
     changed_event = next(change for change in changes if change["change_type"] == "changed")
 
     assert second.event_count == 1
     assert changed_event["changed_fields"] == ["extra"]
     assert changed_event["previous_payload"]["extra"] == "before"
     assert changed_event["current_payload"]["extra"] == "after"
+    assert field_summary_since
     assert sorted(field_summary, key=lambda row: (row["field"], row["field_change_type"])) == [
         {
             "endpoint": "styles",

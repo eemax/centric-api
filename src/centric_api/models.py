@@ -10,7 +10,6 @@ class CountSpec:
     api_version: str
     path: str
     query_params: dict[str, Any] = field(default_factory=dict)
-    result_path: str = "$.count"
 
 
 @dataclass
@@ -19,10 +18,7 @@ class EndpointSpec:
     api_version: str
     path: str
     query_params: dict[str, Any] = field(default_factory=dict)
-    skip_param: str = "skip"
-    limit_param: str = "limit"
     limit: int = 50
-    item_path: str = "$"
     count_spec: CountSpec | None = None
 
 
@@ -34,8 +30,8 @@ class FetcherConfig:
     retry_base_seconds: float = 0.5
     retry_max_seconds: float = 8.0
     jitter_ratio: float = 0.2
-    output_dir: Path = Path("data/output")
-    checkpoint_dir: Path = Path("data/checkpoints")
+    output_dir: Path = Path("raw")
+    checkpoint_dir: Path = Path("checkpoints")
 
 
 @dataclass

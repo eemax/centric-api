@@ -73,14 +73,6 @@ def _as_path(value: Any, *, field_name: str) -> str:
     return value.strip().strip("/")
 
 
-def _as_json_path(value: Any, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError(f"{field_name} must be a non-empty JSON path string.")
-    if not value.startswith("$"):
-        raise ConfigError(f"{field_name} must start with '$'.")
-    return value
-
-
 def _as_positive_int(value: Any, *, field_name: str, default: int) -> int:
     if value is None:
         return default

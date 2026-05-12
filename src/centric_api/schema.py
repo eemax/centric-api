@@ -70,7 +70,7 @@ def _apply_endpoint_schema_file(
     if not isinstance(payload, dict):
         raise ValueError(f"Endpoint schema root must be an object: {resolved_path}")
 
-    endpoints = payload.get("endpoints", payload)
+    endpoints = payload.get("endpoints")
     if not isinstance(endpoints, dict):
         raise ValueError(f"Endpoint schema 'endpoints' must be an object: {resolved_path}")
 
@@ -82,22 +82,6 @@ def _apply_endpoint_schema_file(
             raise ValueError(
                 f"Endpoint schema for {endpoint_name!r} must be an object: {resolved_path}"
             )
-        if "delete_field" in config or "delete_when" in config:
-            raise ValueError(
-                "Endpoint schema delete_field/delete_when are no longer supported; "
-                "use delete_when_any instead."
-            )
-        if (
-            "primary_key" in config
-            or "modified_at_fields" in config
-            or "modified_at_field" in config
-        ):
-            raise ValueError(
-                "Endpoint schema primary_key/modified_at_fields are hardcoded as "
-                "'id' and '_modified_at'."
-            )
-        if "full_snapshot_mode" in config:
-            raise ValueError("Endpoint schema full_snapshot_mode is not used by centric-api.")
         name = str(endpoint_name)
         default = merged.get(name, EndpointSchema(name=name))
         delete_when_any = _merged_delete_conditions(config, default)

@@ -30,6 +30,10 @@ _OPERATOR_SUFFIXES = {"!", "ge", "gt", "le", "lt"}
 RequestParams = dict[str, Any] | list[tuple[str, Any]]
 ApiLogEvent = dict[str, Any]
 ApiLogCallback = Callable[[ApiLogEvent], None] | None
+PAGINATION_SKIP_PARAM = "skip"
+PAGINATION_LIMIT_PARAM = "limit"
+ITEM_PATH = "$"
+COUNT_RESULT_PATH = "$.count"
 
 
 @dataclass
@@ -137,14 +141,16 @@ def _compile_query_params(query_params: dict[str, Any]) -> list[tuple[str, Any]]
 def _with_pagination_params(
     params: list[tuple[str, Any]],
     *,
-    skip_param: str,
     skip: int,
-    limit_param: str,
     limit: int,
 ) -> list[tuple[str, Any]]:
-    base_params = [(key, value) for key, value in params if key not in {skip_param, limit_param}]
-    base_params.append((skip_param, skip))
-    base_params.append((limit_param, limit))
+    base_params = [
+        (key, value)
+        for key, value in params
+        if key not in {PAGINATION_SKIP_PARAM, PAGINATION_LIMIT_PARAM}
+    ]
+    base_params.append((PAGINATION_SKIP_PARAM, skip))
+    base_params.append((PAGINATION_LIMIT_PARAM, limit))
     return base_params
 
 
@@ -374,10 +380,10 @@ def _summarize_response_body(response_text: str) -> str:
     return f"json {type(payload).__name__}"
 
 
-def _extract_items(payload: Any, item_path: str) -> list[dict]:
-    raw = extract_json_path(payload, item_path)
+def _extract_items(payload: Any) -> list[dict]:
+    raw = extract_json_path(payload, ITEM_PATH)
     if not isinstance(raw, list):
-        raise FetchError(f"item_path '{item_path}' did not resolve to an array.")
+        raise FetchError(f"item path '{ITEM_PATH}' did not resolve to an array.")
 
     items: list[dict] = []
     for idx, item in enumerate(raw):
@@ -655,9 +661,7 @@ def _iter_pages(
     while True:
         params = _with_pagination_params(
             base_params,
-            skip_param=spec.skip_param,
             skip=skip,
-            limit_param=spec.limit_param,
             limit=spec.limit,
         )
 
@@ -674,7 +678,7 @@ def _iter_pages(
             request_kind="data fetch",
             api_log_callback=api_log_callback,
         )
-        items = _extract_items(payload, spec.item_path)
+        items = _extract_items(payload)
         page = _Page(
             skip=skip,
             items=items,
@@ -719,9 +723,9 @@ def get_expected_count(
         request_kind="count preflight",
         api_log_callback=api_log_callback,
     )
-    result = extract_json_path(payload, spec.count_spec.result_path)
+    result = extract_json_path(payload, COUNT_RESULT_PATH)
     if isinstance(result, bool) or not isinstance(result, (int, float)):
-        raise FetchError(f"Count path '{spec.count_spec.result_path}' did not resolve to a number.")
+        raise FetchError(f"Count path '{COUNT_RESULT_PATH}' did not resolve to a number.")
     if result < 0:
         raise FetchError("Count result cannot be negative.")
     return int(result)

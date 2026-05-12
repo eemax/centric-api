@@ -113,7 +113,6 @@ def _build_parser() -> argparse.ArgumentParser:
     cron_parser.add_argument("--schema", default=None)
     cron_parser.add_argument("--delta-state-file", default=None)
     cron_parser.add_argument("--env-file", default=None)
-    cron_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
     return parser
 
 
@@ -381,7 +380,7 @@ def run_cron(args: argparse.Namespace) -> int:
     print(f"Schedule: {schedule}")
     print(f"Lock:     {lock_file}")
     print(f"Log:      {log_file}")
-    _append_human_log(log_file, f"cron_start schedule={json.dumps(schedule)}")
+    _append_cron_event(log_file, record_type="cron_start", schedule=schedule)
 
     try:
         if args.run_now:
@@ -394,7 +393,7 @@ def run_cron(args: argparse.Namespace) -> int:
             _run_cron_fetch_once(args, lock_file=lock_file, log_file=log_file)
     except KeyboardInterrupt:
         print("Cron stopped.")
-        _append_human_log(log_file, "cron_stop")
+        _append_cron_event(log_file, record_type="cron_stop")
         return 0
 
 
@@ -402,7 +401,12 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     if lock_file.exists():
         print(f"Skipping fetch; lock exists: {lock_file}")
-        _append_human_log(log_file, f"fetch_skipped_lock lock_file={json.dumps(str(lock_file))}")
+        _append_cron_event(
+            log_file,
+            record_type="cron_fetch_skipped",
+            reason="lock_exists",
+            lock_file=str(lock_file),
+        )
         return
     lock_file.write_text(str(time.time()), encoding="utf-8")
     started = time.time()
@@ -423,7 +427,7 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
             env_file=args.env_file,
             quiet=True,
             json=True,
-            log_level=args.log_level,
+            log_level="off",
         )
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -971,10 +975,20 @@ def _append_human_record(path: Path, record: dict[str, Any]) -> None:
         fh.write(_render_log_line({"timestamp": _utc_iso(), **record}) + "\n")
 
 
-def _append_human_log(path: Path, message: str) -> None:
+def _append_cron_event(path: Path, *, record_type: str, **payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
-        fh.write(f"{_utc_iso()} SUMMARY {message}\n")
+        fh.write(
+            json.dumps(
+                {
+                    "timestamp": _utc_iso(),
+                    "record_type": record_type,
+                    **payload,
+                },
+                default=str,
+            )
+            + "\n"
+        )
 
 
 def _append_cron_fetch_records(
