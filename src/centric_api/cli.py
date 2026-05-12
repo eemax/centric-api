@@ -74,7 +74,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     fetch_parser = subparsers.add_parser("fetch", help="Fetch Centric API records")
-    fetch_parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    fetch_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
     fetch_parser.add_argument("--endpoint", action="append", default=[])
     fetch_parser.add_argument("--full", action="store_true", help="Refetch all records.")
     fetch_parser.add_argument("--days", type=_parse_days_back, default=None)
@@ -85,7 +85,6 @@ def _build_parser() -> argparse.ArgumentParser:
     fetch_parser.add_argument("--delta-state-file", default=None)
     fetch_parser.add_argument("--delta-dry-run", action="store_true")
     fetch_parser.add_argument("--env-file", default=None)
-    fetch_parser.add_argument("--timeout", type=float, default=None)
     fetch_parser.add_argument("--quiet", action="store_true")
     fetch_parser.add_argument("--json", action="store_true")
     fetch_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="off")
@@ -107,12 +106,11 @@ def _build_parser() -> argparse.ArgumentParser:
     cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
     cron_parser.add_argument("--run-now", action="store_true")
     cron_parser.add_argument("--endpoint", action="append", default=[])
-    cron_parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH))
+    cron_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
     cron_parser.add_argument("--db", default=None)
     cron_parser.add_argument("--schema", default=None)
     cron_parser.add_argument("--delta-state-file", default=None)
     cron_parser.add_argument("--env-file", default=None)
-    cron_parser.add_argument("--timeout", type=float, default=None)
     cron_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
     return parser
 
@@ -121,7 +119,7 @@ def run_fetch(args: argparse.Namespace) -> int:
     started = time.time()
     run_started_dt = _utc_now()
     mode, modified_since = _resolve_fetch_mode(args, run_started_dt)
-    fetcher_cfg, auth_settings, endpoint_specs = load_fetcher_settings(args.config)
+    fetcher_cfg, auth_settings, endpoint_specs = load_fetcher_settings(args.fetch_config)
 
     run_id = _run_id(run_started_dt, mode, args.days or args.months)
     fetcher_cfg.output_dir = fetcher_cfg.output_dir / "runs" / run_id
@@ -148,7 +146,6 @@ def run_fetch(args: argparse.Namespace) -> int:
     try:
         with init_auth_context(
             auth_settings,
-            timeout=args.timeout,
             env_file=Path(args.env_file).expanduser() if args.env_file else None,
         ) as auth_ctx:
             fetcher_cfg.base_url = auth_ctx.base_url
@@ -411,7 +408,7 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
     try:
         fetch_args = argparse.Namespace(
             command="fetch",
-            config=args.config,
+            fetch_config=args.fetch_config,
             endpoint=args.endpoint,
             full=False,
             days=None,
@@ -422,7 +419,6 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
             delta_state_file=args.delta_state_file,
             delta_dry_run=False,
             env_file=args.env_file,
-            timeout=args.timeout,
             quiet=False,
             json=False,
             log_level=args.log_level,

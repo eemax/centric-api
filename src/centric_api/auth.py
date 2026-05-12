@@ -179,13 +179,10 @@ class AuthContext:
 def init_auth_context(
     settings: AuthSettings,
     *,
-    timeout: float | None = None,
     env_file: Path | None = None,
     client: httpx.Client | None = None,
 ) -> AuthContext:
     merged = replace(settings)
-    if timeout is not None:
-        merged.timeout = timeout
     if env_file is not None:
         merged.env_file = env_file
 

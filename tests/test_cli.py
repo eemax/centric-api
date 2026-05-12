@@ -21,3 +21,22 @@ def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
 
     assert exit_code == 0
     assert "No changelog events found." in capsys.readouterr().out
+
+
+def test_fetch_and_cron_help_are_lean(capsys) -> None:
+    with pytest.raises(SystemExit) as fetch_exc:
+        main(["fetch", "--help"])
+    assert fetch_exc.value.code == 0
+    fetch_help = capsys.readouterr().out
+    assert "--fetch-config" in fetch_help
+    assert "--config" not in fetch_help
+    assert "--timeout" not in fetch_help
+
+    with pytest.raises(SystemExit) as cron_exc:
+        main(["cron", "--help"])
+    assert cron_exc.value.code == 0
+    cron_help = capsys.readouterr().out
+    assert "--fetch-config" in cron_help
+    assert "--config" not in cron_help
+    assert "--timeout" not in cron_help
+    assert "[schedule]" in cron_help

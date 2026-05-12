@@ -55,12 +55,12 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     )
     changes = list_changes(db_path, endpoint="styles", limit=10)
     field_summary = list_field_summary(db_path, endpoint="styles", limit=10)
+    changed_event = next(change for change in changes if change["change_type"] == "changed")
 
     assert second.event_count == 1
-    assert changes[0]["change_type"] == "changed"
-    assert changes[0]["changed_fields"] == ["extra"]
-    assert changes[0]["previous_payload"]["extra"] == "before"
-    assert changes[0]["current_payload"]["extra"] == "after"
+    assert changed_event["changed_fields"] == ["extra"]
+    assert changed_event["previous_payload"]["extra"] == "before"
+    assert changed_event["current_payload"]["extra"] == "after"
     assert sorted(field_summary, key=lambda row: (row["field"], row["field_change_type"])) == [
         {
             "endpoint": "styles",

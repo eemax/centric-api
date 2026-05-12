@@ -9,6 +9,7 @@ directory.
 uv run centric-api fetch
 uv run centric-api fetch --full
 uv run centric-api fetch --days 7
+uv run centric-api fetch --fetch-config config/fetcher.yml
 uv run centric-api changelog
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
