@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 
 from centric_api.config import load_fetcher_settings, runtime_home, runtime_path
+from centric_api.fetcher import FetchError, get_expected_count
 from centric_api.schema import load_endpoint_schemas
-from centric_api.store import ingest_raw_dir
+from centric_api.store import connect, ingest_raw_dir
 
 
 def test_runtime_paths_use_centric_api_home(
@@ -64,6 +65,43 @@ endpoints:
 
     with pytest.raises(ValueError, match="count_spec"):
         load_fetcher_settings(config)
+
+
+def test_count_preflight_rejects_fractional_counts(tmp_path: Path) -> None:
+    class Auth:
+        base_url = "https://centric.example.com"
+
+    class Response:
+        status_code = 200
+        reason_phrase = "OK"
+        text = '{"count": 1.5}'
+        headers = {"content-type": "application/json"}
+
+        def json(self):
+            return {"count": 1.5}
+
+    def request(*_args, **_kwargs):
+        return Response()
+
+    auth = Auth()
+    auth.request = request
+    config = tmp_path / "fetcher.yml"
+    config.write_text(
+        """
+timeout: 5
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+    count_spec:
+      path: count/Style
+""",
+        encoding="utf-8",
+    )
+    fetcher_cfg, _auth_settings, endpoints = load_fetcher_settings(config)
+
+    with pytest.raises(FetchError, match="non-integer"):
+        get_expected_count(endpoints[0], auth, fetcher_cfg)
 
 
 def test_schema_requires_endpoints_root(tmp_path: Path) -> None:
@@ -130,3 +168,84 @@ endpoints:
         tombstones = conn.execute("SELECT COUNT(*) FROM endpoint_tombstones").fetchone()[0]
     assert current == 0
     assert tombstones == 1
+
+
+def test_full_ingest_hard_deletes_missing_current_records(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?),
+                (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "styles",
+                "S1",
+                json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}),
+                "hash-s1",
+                "2026-01-01T00:00:00Z",
+                "seed.jsonl",
+                "seed",
+                "2026-01-01T00:00:00Z",
+                "styles",
+                "S2",
+                json.dumps({"id": "S2", "_modified_at": "2026-01-01T00:00:00Z"}),
+                "hash-s2",
+                "2026-01-01T00:00:00Z",
+                "seed.jsonl",
+                "seed",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "full-run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-02T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "full-run",
+                "mode": "full",
+                "started_at": "2026-01-02T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ingest_raw_dir(raw_dir, db_path, schemas={})
+
+    assert result.records_deleted == 0
+    assert result.records_hard_deleted == 1
+    assert result.deleted_record_ids_by_endpoint == {"styles": ("S2",)}
+    with sqlite3.connect(db_path) as conn:
+        current_ids = [
+            row[0]
+            for row in conn.execute(
+                "SELECT record_id FROM endpoint_records WHERE endpoint = ? ORDER BY record_id",
+                ["styles"],
+            ).fetchall()
+        ]
+        tombstone = conn.execute(
+            """
+            SELECT payload_json
+            FROM endpoint_tombstones
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            ["styles", "S2"],
+        ).fetchone()
+
+    assert current_ids == ["S1"]
+    assert tombstone is not None
+    tombstone_payload = json.loads(tombstone[0])
+    assert tombstone_payload["id"] == "S2"
+    assert tombstone_payload["_centric_api_delete_type"] == "hard_delete"

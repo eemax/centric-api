@@ -9,6 +9,7 @@ from centric_api.cli import (
     _append_cron_fetch_records,
     _build_parser,
     _parse_jsonl,
+    _run_cron_fetch_once,
     main,
 )
 
@@ -82,3 +83,23 @@ def test_cron_log_helpers_write_jsonl_only(tmp_path) -> None:
     assert rows[0]["schedule"] == "0 * * * *"
     assert rows[1]["endpoint"] == "styles"
     assert rows[2]["exit_code"] == 0
+
+
+def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
+    def fail_fetch(_args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("centric_api.cli.run_fetch", fail_fetch)
+    args = _build_parser().parse_args(["cron"])
+    lock_path = tmp_path / "fetch.lock"
+    log_path = tmp_path / "cron.log"
+
+    _run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
+
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+
+    assert rows[0]["record_type"] == "fetch_stderr"
+    assert "boom" in rows[0]["stderr"]
+    assert rows[1]["record_type"] == "cron_fetch_summary"
+    assert rows[1]["exit_code"] == 1
+    assert not lock_path.exists()

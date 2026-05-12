@@ -44,7 +44,7 @@ class FetchRunResult:
     endpoint: str
     pages_fetched: int
     items_fetched: int
-    expected_count: int | None
+    expected_count: int
     retries_used: int
     start_skip: int
     next_skip: int
@@ -52,12 +52,11 @@ class FetchRunResult:
     output_file: Path
     checkpoint_file: Path
     warnings: list[str] = field(default_factory=list)
-    already_completed: bool = False
     effective_delta_floor: str | None = None
     did_catch_up: bool = False
-    count_validation_status: str = "skipped"
+    count_validation_status: str = "passed"
     count_validation_reason: str | None = None
-    id_validation_status: str = "not_run"
+    id_validation_status: str = "passed"
     id_validation_checked_items: int = 0
     id_validation_unique_ids: int = 0
     id_validation_reason: str | None = None

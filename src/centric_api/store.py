@@ -13,6 +13,10 @@ from .schema import DeleteCondition, EndpointSchema
 
 PRIMARY_KEY_FIELD = "id"
 MODIFIED_AT_FIELD = "_modified_at"
+HARD_DELETE_TYPE_FIELD = "_centric_api_delete_type"
+HARD_DELETE_DELETED_AT_FIELD = "_centric_api_deleted_at"
+HARD_DELETE_SOURCE_RUN_ID_FIELD = "_centric_api_source_run_id"
+HARD_DELETE_SOURCE_FILE_FIELD = "_centric_api_source_file"
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,7 @@ class IngestResult:
     records_read: int
     records_upserted: int
     records_deleted: int
+    records_hard_deleted: int
     invalid_records: int
     endpoints: dict[str, int]
     upserted_record_ids_by_endpoint: dict[str, tuple[str, ...]]
@@ -134,6 +139,7 @@ def ingest_raw_dir(
     records_read = 0
     records_upserted = 0
     records_deleted = 0
+    records_hard_deleted = 0
     invalid_records = 0
     endpoints: defaultdict[str, int] = defaultdict(int)
     upserted_ids: defaultdict[str, set[str]] = defaultdict(set)
@@ -181,6 +187,7 @@ def ingest_raw_dir(
             records_read += file_result["records_read"]
             records_upserted += file_result["records_upserted"]
             records_deleted += file_result["records_deleted"]
+            records_hard_deleted += file_result["records_hard_deleted"]
             invalid_records += file_result["invalid_records"]
             endpoints[raw_file.endpoint] += file_result["records_read"]
             upserted_ids[raw_file.endpoint].update(file_result["upserted_ids"])
@@ -192,6 +199,7 @@ def ingest_raw_dir(
         records_read=records_read,
         records_upserted=records_upserted,
         records_deleted=records_deleted,
+        records_hard_deleted=records_hard_deleted,
         invalid_records=invalid_records,
         endpoints=dict(sorted(endpoints.items())),
         upserted_record_ids_by_endpoint={
@@ -276,6 +284,7 @@ def _apply_raw_file(
 
     upserted_ids: set[str] = set()
     deleted_ids: set[str] = set()
+    retained_ids: set[str] = set()
     for record_id, (payload, _) in sorted(winners.items()):
         payload_json = _canonical_json(payload)
         payload_hash = _hash_text(payload_json)
@@ -318,6 +327,8 @@ def _apply_raw_file(
                 )
             continue
 
+        retained_ids.add(record_id)
+
         if existing is None:
             _upsert_current_record(
                 conn,
@@ -353,14 +364,71 @@ def _apply_raw_file(
         )
         upserted_ids.add(record_id)
 
+    hard_deleted_ids = _reconcile_full_snapshot_hard_deletes(
+        conn,
+        raw_file=raw_file,
+        retained_ids=retained_ids,
+        invalid_records=invalid_records,
+        ingested_at=now,
+    )
+    deleted_ids.update(hard_deleted_ids)
+
     return {
         "records_read": records_read,
         "records_upserted": len(upserted_ids),
-        "records_deleted": len(deleted_ids),
+        "records_deleted": len(deleted_ids) - len(hard_deleted_ids),
+        "records_hard_deleted": len(hard_deleted_ids),
         "invalid_records": invalid_records,
         "upserted_ids": upserted_ids,
         "deleted_ids": deleted_ids,
     }
+
+
+def _reconcile_full_snapshot_hard_deletes(
+    conn: sqlite3.Connection,
+    *,
+    raw_file: RawFile,
+    retained_ids: set[str],
+    invalid_records: int,
+    ingested_at: str,
+) -> set[str]:
+    if raw_file.run_mode != "full" or raw_file.is_delta or invalid_records:
+        return set()
+
+    rows = conn.execute(
+        """
+        SELECT record_id
+        FROM endpoint_records
+        WHERE endpoint = ?
+        """,
+        [raw_file.endpoint],
+    ).fetchall()
+    current_ids = {str(row["record_id"]) for row in rows}
+    hard_deleted_ids = current_ids - retained_ids
+    for record_id in sorted(hard_deleted_ids):
+        payload = {
+            PRIMARY_KEY_FIELD: record_id,
+            HARD_DELETE_TYPE_FIELD: "hard_delete",
+            HARD_DELETE_DELETED_AT_FIELD: ingested_at,
+            HARD_DELETE_SOURCE_RUN_ID_FIELD: raw_file.source_run_id,
+            HARD_DELETE_SOURCE_FILE_FIELD: str(raw_file.path),
+        }
+        payload_json = _canonical_json(payload)
+        payload_hash = _hash_text(payload_json)
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            [raw_file.endpoint, record_id],
+        )
+        _upsert_tombstone(
+            conn,
+            raw_file=raw_file,
+            record_id=record_id,
+            payload_json=payload_json,
+            payload_hash=payload_hash,
+            modified_at=None,
+            ingested_at=ingested_at,
+        )
+    return hard_deleted_ids
 
 
 def _record_is_newer(

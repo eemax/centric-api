@@ -731,6 +731,8 @@ def get_expected_count(
     result = extract_json_path(payload, COUNT_RESULT_PATH)
     if isinstance(result, bool) or not isinstance(result, (int, float)):
         raise FetchError(f"Count path '{COUNT_RESULT_PATH}' did not resolve to a number.")
+    if isinstance(result, float) and not result.is_integer():
+        raise FetchError(f"Count path '{COUNT_RESULT_PATH}' resolved to a non-integer number.")
     if result < 0:
         raise FetchError("Count result cannot be negative.")
     return int(result)
@@ -825,7 +827,6 @@ def run_endpoint(
     )
 
     if resume and checkpoint_completed_resolved is True:
-        effective_delta_floor = checkpoint_delta_floor or delta_floor
         message = (
             f"Fetch already completed for '{spec.name}'"
             + (
@@ -838,75 +839,19 @@ def run_endpoint(
             )
             + ". Run without --resume to start a new window."
         )
-        _emit_progress(
-            progress_callback,
-            FetchProgressEvent(
-                kind="endpoint_start",
-                endpoint=spec.name,
-                start_skip=start_skip,
-                limit=spec.limit,
-                expected_count=None,
-                retries_used=retries_used_ref[0],
-                elapsed_seconds=time.time() - started,
-            ),
-        )
-        _emit_progress(
-            progress_callback,
-            FetchProgressEvent(
-                kind="warning",
-                endpoint=spec.name,
-                message=message,
-                retries_used=retries_used_ref[0],
-                elapsed_seconds=time.time() - started,
-            ),
-        )
-        duration = time.time() - started
-        _emit_progress(
-            progress_callback,
-            FetchProgressEvent(
-                kind="endpoint_finish",
-                endpoint=spec.name,
-                pages_fetched=0,
-                items_fetched=0,
-                expected_count=None,
-                retries_used=retries_used_ref[0],
-                warnings_count=1,
-                elapsed_seconds=duration,
-            ),
-        )
         _emit_api_log(
             api_log_callback,
             {
-                "level": "debug",
-                "event": "endpoint_resume_noop",
+                "level": "summary",
+                "event": "resume_completed_checkpoint_failed",
                 "endpoint": spec.name,
                 "start_skip": start_skip,
-                "effective_delta_floor": effective_delta_floor,
+                "checkpoint_delta_floor": checkpoint_delta_floor,
+                "current_delta_floor": delta_floor,
                 "message": message,
             },
         )
-        return FetchRunResult(
-            endpoint=spec.name,
-            pages_fetched=0,
-            items_fetched=0,
-            expected_count=None,
-            retries_used=retries_used_ref[0],
-            start_skip=start_skip,
-            next_skip=start_skip,
-            duration_seconds=duration,
-            output_file=output_path,
-            checkpoint_file=checkpoint_path,
-            warnings=[message],
-            already_completed=True,
-            effective_delta_floor=effective_delta_floor,
-            did_catch_up=False,
-            count_validation_status="skipped",
-            count_validation_reason="resume_already_completed",
-            id_validation_status="not_run",
-            id_validation_checked_items=0,
-            id_validation_unique_ids=0,
-            id_validation_reason="resume_already_completed",
-        )
+        raise FetchError(message)
 
     if (
         resume
@@ -1346,7 +1291,6 @@ def run_endpoint(
         output_file=output_path,
         checkpoint_file=checkpoint_path,
         warnings=warnings,
-        already_completed=False,
         effective_delta_floor=effective_delta_floor,
         did_catch_up=resume,
         count_validation_status=count_validation_status,

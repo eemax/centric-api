@@ -432,7 +432,11 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            exit_code = run_fetch(fetch_args)
+            try:
+                exit_code = run_fetch(fetch_args)
+            except Exception as exc:
+                exit_code = 1
+                print(f"Error: {exc}", file=stderr)
         duration = time.time() - started
         fetch_records = _parse_jsonl(stdout.getvalue())
         _append_cron_fetch_records(
@@ -669,12 +673,10 @@ def _print_human_fetch_summary(
         print(header)
         print("-" * len(header))
         for result in results:
-            expected = (
-                str(result.expected_count) if result.expected_count is not None else "unknown"
-            )
             print(
                 f"{result.endpoint:<{endpoint_width}}  "
-                f"{result.items_fetched:>7}  {expected:>8}  {result.pages_fetched:>5}"
+                f"{result.items_fetched:>7}  {result.expected_count:>8}  "
+                f"{result.pages_fetched:>5}"
             )
     if ingest_result is not None:
         print()
@@ -686,6 +688,7 @@ def _print_human_fetch_summary(
         print(f"Records:   {ingest_result.records_read} read")
         print(f"Upserts:   {ingest_result.records_upserted}")
         print(f"Deletes:   {ingest_result.records_deleted}")
+        print(f"Hard del:  {ingest_result.records_hard_deleted}")
         if ingest_result.invalid_records:
             print(f"Invalid:   {ingest_result.invalid_records}")
     if changelog_run is not None:
@@ -936,6 +939,7 @@ def _ingest_record(result: IngestResult | None) -> dict[str, Any] | None:
         "records_read": result.records_read,
         "records_upserted": result.records_upserted,
         "records_deleted": result.records_deleted,
+        "records_hard_deleted": result.records_hard_deleted,
         "invalid_records": result.invalid_records,
     }
 

@@ -58,5 +58,9 @@ Private schema overlays resolve from `~/.centric-api/endpoint-schema.yml`.
 Changelog tracking is automatic. It compares canonical full payloads for current records and records
 added, changed, and removed events after ingest.
 
+Full fetch ingest is authoritative per successful endpoint. Current local records missing from a
+successful full snapshot are removed from `endpoint_records` and written as synthetic hard-delete
+tombstones.
+
 For dashboard-style queries, changelog also writes `endpoint_change_fields`, one row per top-level
 field change. Use `centric-api changelog fields` for a quick aggregate view.
