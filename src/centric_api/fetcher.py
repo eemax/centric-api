@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import random
 import re
 import time
 from collections import deque
@@ -107,11 +106,7 @@ def _is_transient_exception(exc: Exception) -> bool:
 
 def _sleep_backoff(fetcher_cfg: FetcherConfig, attempt: int) -> None:
     base = fetcher_cfg.retry_base_seconds * (2 ** (attempt - 1))
-    capped = min(base, fetcher_cfg.retry_max_seconds)
-    jitter = fetcher_cfg.jitter_ratio
-    low = max(0.0, capped * (1.0 - jitter))
-    high = capped * (1.0 + jitter)
-    time.sleep(random.uniform(low, high))
+    time.sleep(min(base, fetcher_cfg.retry_max_seconds))
 
 
 def _build_endpoint_url(base_url: str, api_version: str, path: str) -> str:

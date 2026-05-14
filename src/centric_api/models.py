@@ -25,10 +25,9 @@ class EndpointSpec:
 class FetcherConfig:
     base_url: str = ""
     timeout: float = 30.0
-    retry_max_attempts: int = 5
-    retry_base_seconds: float = 0.5
-    retry_max_seconds: float = 8.0
-    jitter_ratio: float = 0.2
+    retry_max_attempts: int = 3
+    retry_base_seconds: float = 15.0
+    retry_max_seconds: float = 30.0
     output_dir: Path = Path("raw")
     checkpoint_dir: Path = Path("checkpoints")
 

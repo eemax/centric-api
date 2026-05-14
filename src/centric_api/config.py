@@ -123,10 +123,9 @@ def _build_fetcher_config(raw: dict[str, Any]) -> FetcherConfig:
         raise ConfigError("auth settings belong in CENTRIC_* environment variables or .env.")
 
     timeout = raw.get("timeout", 30.0)
-    retry_max_attempts = raw.get("retry_max_attempts", 5)
-    retry_base_seconds = raw.get("retry_base_seconds", 0.5)
-    retry_max_seconds = raw.get("retry_max_seconds", 8.0)
-    jitter_ratio = raw.get("jitter_ratio", 0.2)
+    retry_max_attempts = raw.get("retry_max_attempts", 3)
+    retry_base_seconds = raw.get("retry_base_seconds", 15.0)
+    retry_max_seconds = raw.get("retry_max_seconds", 30.0)
 
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise ConfigError("timeout must be a positive number.")
@@ -136,12 +135,8 @@ def _build_fetcher_config(raw: dict[str, Any]) -> FetcherConfig:
         raise ConfigError("retry_base_seconds must be a positive number.")
     if not isinstance(retry_max_seconds, (int, float)) or retry_max_seconds <= 0:
         raise ConfigError("retry_max_seconds must be a positive number.")
-    if not isinstance(jitter_ratio, (int, float)) or jitter_ratio < 0:
-        raise ConfigError("jitter_ratio must be a non-negative number.")
     if float(retry_max_seconds) < float(retry_base_seconds):
         raise ConfigError("retry_max_seconds must be greater than or equal to retry_base_seconds.")
-    if float(jitter_ratio) > 1.0:
-        raise ConfigError("jitter_ratio must be less than or equal to 1.0.")
 
     output_dir = _runtime_path(raw.get("output_dir", "raw"))
     checkpoint_dir = _runtime_path(raw.get("checkpoint_dir", "checkpoints"))
@@ -151,7 +146,6 @@ def _build_fetcher_config(raw: dict[str, Any]) -> FetcherConfig:
         retry_max_attempts=retry_max_attempts,
         retry_base_seconds=float(retry_base_seconds),
         retry_max_seconds=float(retry_max_seconds),
-        jitter_ratio=float(jitter_ratio),
         output_dir=output_dir,
         checkpoint_dir=checkpoint_dir,
     )
