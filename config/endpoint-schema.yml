@@ -107,3 +107,7 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  users:
+    delete_when_any:
+      - field: active
+        equals: false

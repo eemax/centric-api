@@ -2,7 +2,7 @@
 # the first delta floor manually; otherwise centric-api creates this file after
 # the first successful fetch.
 version: 1
-updated_at: "2026-01-01T01:11:00.000Z"
+updated_at: "2026-01-01T01:12:00.000Z"
 overlap_minutes: 10
 overlap_days: 0
 endpoints:
@@ -195,3 +195,10 @@ endpoints:
     last_attempted_error:
     last_successful_fetch_start: "2026-01-01T01:10:00.000Z"
     last_successful_fetch_end: "2026-01-01T01:11:00.000Z"
+  users:
+    last_attempted_fetch_start: "2026-01-01T01:11:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T01:12:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T01:11:00.000Z"
+    last_successful_fetch_end: "2026-01-01T01:12:00.000Z"

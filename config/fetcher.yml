@@ -47,7 +47,7 @@ endpoints:
     count_spec:
       path: count/ProductSize
   - name: bom_masters
-    api_version: v3
+    api_version: v2
     path: apparel_boms
     count_spec:
       path: count/ApparelBOM
@@ -141,3 +141,8 @@ endpoints:
     path: duty_rates
     count_spec:
       path: count/DutyRate
+  - name: users
+    api_version: v2
+    path: users
+    count_spec:
+      path: count/User
