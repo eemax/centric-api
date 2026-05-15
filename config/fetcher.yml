@@ -46,22 +46,32 @@ endpoints:
     path: product_sizes
     count_spec:
       path: count/ProductSize
+  - name: bom_masters
+    api_version: v3
+    path: apparel_boms
+    count_spec:
+      path: count/ApparelBOM
   - name: boms
     api_version: v3
     path: apparel_bom_revisions
     count_spec:
       path: count/ApparelBOMRevision
-  - name: bom_section_definitions
+  - name: bom_sections
     api_version: v2
     path: bom_section_definitions
     count_spec:
       path: count/BOMSectionDefinition
-  - name: bomrows
+  - name: bom_lines
     api_version: v3
     path: part_materials
     count_spec:
       path: count/PartMaterial
-  - name: supplierquotes
+  - name: supplier_quote_masters
+    api_version: v2
+    path: supplier_items
+    count_spec:
+      path: count/SupplierItem
+  - name: supplier_quotes
     api_version: v2
     path: supplier_item_revisions
     count_spec:

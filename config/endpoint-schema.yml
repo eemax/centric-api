@@ -31,19 +31,27 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  bom_masters:
+    delete_when_any:
+      - field: active
+        equals: false
   boms:
     delete_when_any:
       - field: active
         equals: false
-  bom_section_definitions:
+  bom_sections:
     delete_when_any:
       - field: active
         equals: false
-  bomrows:
+  bom_lines:
     delete_when_any:
       - field: active
         equals: false
-  supplierquotes:
+  supplier_quote_masters:
+    delete_when_any:
+      - field: active
+        equals: false
+  supplier_quotes:
     delete_when_any:
       - field: active
         equals: false
