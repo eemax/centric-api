@@ -41,6 +41,17 @@ DEFAULT_ENDPOINT_SCHEMAS: dict[str, EndpointSchema] = {
         "supplierquotes",
         "suppliers",
         "factories",
+        "color_specifications",
+        "compositions",
+        "material_compositions",
+        "countries",
+        "shipping_ports",
+        "lookup_items",
+        "lookup_item_subtypes",
+        "material_types",
+        "style_types",
+        "documents",
+        "duty_rates",
     )
 }
 

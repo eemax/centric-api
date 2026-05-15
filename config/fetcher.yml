@@ -76,3 +76,58 @@ endpoints:
     path: factories
     count_spec:
       path: count/Factory
+  - name: color_specifications
+    api_version: v2
+    path: color_specifications
+    count_spec:
+      path: count/ColorSpecification
+  - name: compositions
+    api_version: v2
+    path: compositions
+    count_spec:
+      path: count/Composition
+  - name: material_compositions
+    api_version: v2
+    path: material_compositions
+    count_spec:
+      path: count/MaterialComposition
+  - name: countries
+    api_version: v2
+    path: countries
+    count_spec:
+      path: count/Country
+  - name: shipping_ports
+    api_version: v2
+    path: shipping_ports
+    count_spec:
+      path: count/ShippingPort
+  - name: lookup_items
+    api_version: v2
+    path: lookup_items
+    count_spec:
+      path: count/LookupItem
+  - name: lookup_item_subtypes
+    api_version: v2
+    path: lookup_item_subtypes
+    count_spec:
+      path: count/LookupItemSubtype
+  - name: material_types
+    api_version: v2
+    path: material_types
+    count_spec:
+      path: count/MaterialType
+  - name: style_types
+    api_version: v2
+    path: style_types
+    count_spec:
+      path: count/StyleType
+  - name: documents
+    api_version: v2
+    path: documents
+    count_spec:
+      path: count/Document
+  - name: duty_rates
+    api_version: v2
+    path: duty_rates
+    count_spec:
+      path: count/DutyRate

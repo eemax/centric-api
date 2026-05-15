@@ -55,3 +55,47 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  color_specifications:
+    delete_when_any:
+      - field: active
+        equals: false
+  compositions:
+    delete_when_any:
+      - field: active
+        equals: false
+  material_compositions:
+    delete_when_any:
+      - field: active
+        equals: false
+  countries:
+    delete_when_any:
+      - field: active
+        equals: false
+  shipping_ports:
+    delete_when_any:
+      - field: active
+        equals: false
+  lookup_items:
+    delete_when_any:
+      - field: active
+        equals: false
+  lookup_item_subtypes:
+    delete_when_any:
+      - field: active
+        equals: false
+  material_types:
+    delete_when_any:
+      - field: active
+        equals: false
+  style_types:
+    delete_when_any:
+      - field: active
+        equals: false
+  documents:
+    delete_when_any:
+      - field: active
+        equals: false
+  duty_rates:
+    delete_when_any:
+      - field: active
+        equals: false
