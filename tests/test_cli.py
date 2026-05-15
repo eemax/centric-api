@@ -9,7 +9,9 @@ from centric_api.cli import (
     _append_cron_fetch_records,
     _build_parser,
     _parse_jsonl,
+    _release_fetch_lock,
     _run_cron_fetch_once,
+    _try_acquire_fetch_lock,
     main,
 )
 
@@ -52,6 +54,29 @@ def test_fetch_log_level_defaults_to_summary() -> None:
     args = _build_parser().parse_args(["fetch"])
 
     assert args.log_level == "summary"
+
+
+def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    lock_path = tmp_path / "fetch.lock"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    exit_code = main(["fetch"])
+
+    assert exit_code == 1
+    assert "fetch lock exists" in capsys.readouterr().err
+
+
+def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
+    lock_path = tmp_path / "fetch.lock"
+
+    assert _try_acquire_fetch_lock(lock_path) is None
+    assert lock_path.is_file()
+    assert _try_acquire_fetch_lock(lock_path) is not None
+
+    _release_fetch_lock(lock_path)
+
+    assert not lock_path.exists()
 
 
 def test_parse_jsonl_preserves_non_json_lines() -> None:
@@ -103,3 +128,24 @@ def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
     assert rows[1]["record_type"] == "cron_fetch_summary"
     assert rows[1]["exit_code"] == 1
     assert not lock_path.exists()
+
+
+def test_cron_fetch_skips_when_fetch_lock_exists(tmp_path) -> None:
+    args = _build_parser().parse_args(["cron"])
+    lock_path = tmp_path / "fetch.lock"
+    log_path = tmp_path / "cron.jsonl"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    _run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
+
+    rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert rows == [
+        {
+            "timestamp": rows[0]["timestamp"],
+            "record_type": "cron_fetch_skipped",
+            "reason": "lock_exists",
+            "lock_file": str(lock_path),
+            "message": f"fetch lock exists: {lock_path}",
+        }
+    ]
+    assert lock_path.exists()

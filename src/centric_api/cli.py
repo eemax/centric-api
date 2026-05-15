@@ -5,6 +5,7 @@ import calendar
 import contextlib
 import io
 import json
+import os
 import sys
 import time
 from collections.abc import Callable
@@ -38,7 +39,7 @@ DEFAULT_CONFIG_PATH = Path("config/fetcher.yml")
 DEFAULT_DELTA_STATE_PATH = Path("delta.yml")
 DEFAULT_FETCH_LOG_PATH = Path("logs/fetch.log")
 DEFAULT_DB_PATH = Path("centric.db")
-DEFAULT_LOCK_PATH = Path("cron/fetch.lock")
+DEFAULT_LOCK_PATH = Path("fetch.lock")
 DEFAULT_CRON_LOG_PATH = Path("logs/cron.jsonl")
 DEFAULT_OVERLAP_MINUTES = 10
 DEFAULT_OVERLAP_DAYS = 0
@@ -116,6 +117,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def run_fetch(args: argparse.Namespace) -> int:
+    if not getattr(args, "skip_fetch_lock", False):
+        lock_file = runtime_path(DEFAULT_LOCK_PATH)
+        lock_error = _try_acquire_fetch_lock(lock_file)
+        if lock_error is not None:
+            print(f"Error: {lock_error}", file=sys.stderr)
+            return 1
+        try:
+            return _run_fetch_unlocked(args)
+        finally:
+            _release_fetch_lock(lock_file)
+    return _run_fetch_unlocked(args)
+
+
+def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     started = time.time()
     run_started_dt = _utc_now()
     mode, modified_since = _resolve_fetch_mode(args, run_started_dt)
@@ -189,6 +204,7 @@ def run_fetch(args: argparse.Namespace) -> int:
                         resume=args.resume,
                         append_output=mode == "delta",
                         output_file_suffix=".delta" if mode == "delta" else "",
+                        create_empty_output=mode == "full",
                         delta_floor=delta_floor if mode == "delta" else None,
                         progress_callback=None if args.quiet else _write_progress_line,
                         api_log_callback=log_callback,
@@ -380,17 +396,17 @@ def run_cron(args: argparse.Namespace) -> int:
 
 
 def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file: Path) -> None:
-    lock_file.parent.mkdir(parents=True, exist_ok=True)
-    if lock_file.exists():
-        print(f"Skipping fetch; lock exists: {lock_file}")
+    lock_error = _try_acquire_fetch_lock(lock_file)
+    if lock_error is not None:
+        print(f"Skipping fetch; {lock_error}")
         _append_cron_event(
             log_file,
             record_type="cron_fetch_skipped",
             reason="lock_exists",
             lock_file=str(lock_file),
+            message=lock_error,
         )
         return
-    lock_file.write_text(str(time.time()), encoding="utf-8")
     started = time.time()
     print(f"Fetch starting: {_utc_iso()}")
     try:
@@ -410,6 +426,7 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
             quiet=True,
             json=True,
             log_level="off",
+            skip_fetch_lock=True,
         )
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -437,7 +454,7 @@ def _run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file:
             f"{total_items} items fetched"
         )
     finally:
-        lock_file.unlink(missing_ok=True)
+        _release_fetch_lock(lock_file)
 
 
 def _resolve_fetch_mode(args: argparse.Namespace, now: datetime) -> tuple[str, str | None]:
@@ -712,7 +729,8 @@ def _print_json_fetch_records(
                     "pages_fetched": result.pages_fetched,
                     "expected_count": result.expected_count,
                     "retries_used": result.retries_used,
-                    "output_file": str(result.output_file),
+                    "output_file": str(result.output_file) if result.output_file_created else None,
+                    "output_file_created": result.output_file_created,
                 }
             )
         )
@@ -786,7 +804,8 @@ def _endpoint_manifest_record(
 ) -> dict[str, Any]:
     return {
         "endpoint": result.endpoint,
-        "file": result.output_file.name,
+        "file": result.output_file.name if result.output_file_created else None,
+        "output_file_created": result.output_file_created,
         "mode": mode,
         "status": status,
         "is_delta": mode == "delta",
@@ -941,6 +960,21 @@ def _changelog_record(run: ChangelogRun | None, skipped: str | None) -> dict[str
 
 def _db_path(value: str | None) -> Path:
     return Path(value).expanduser() if value else runtime_path(DEFAULT_DB_PATH)
+
+
+def _try_acquire_fetch_lock(path: Path) -> str | None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return f"fetch lock exists: {path}"
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps({"pid": os.getpid(), "created_at": _utc_iso()}) + "\n")
+    return None
+
+
+def _release_fetch_lock(path: Path) -> None:
+    path.unlink(missing_ok=True)
 
 
 def _append_cron_event(path: Path, *, record_type: str, **payload: Any) -> None:

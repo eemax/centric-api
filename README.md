@@ -26,8 +26,8 @@ Manual fetches append summary logs to `~/.centric-api/logs/fetch.log` by default
 
 `cron` runs in the foreground until stopped and defaults to hourly (`0 * * * *`). It prints
 scheduler lifecycle messages and concise fetch summaries to the terminal, runs fetch in quiet JSON
-mode, and writes JSONL-only records to `~/.centric-api/logs/cron.jsonl`. Lock files always live under
-`~/.centric-api/cron`.
+mode, and writes JSONL-only records to `~/.centric-api/logs/cron.jsonl`. Fetch runs are serialized
+with `~/.centric-api/fetch.lock`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed

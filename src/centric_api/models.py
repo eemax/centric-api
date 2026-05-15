@@ -50,6 +50,7 @@ class FetchRunResult:
     duration_seconds: float
     output_file: Path
     checkpoint_file: Path
+    output_file_created: bool = True
     warnings: list[str] = field(default_factory=list)
     effective_delta_floor: str | None = None
     did_catch_up: bool = False

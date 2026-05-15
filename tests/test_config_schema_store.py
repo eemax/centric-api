@@ -7,9 +7,23 @@ from pathlib import Path
 import pytest
 
 from centric_api.config import load_fetcher_settings, runtime_home, runtime_path
-from centric_api.fetcher import FetchError, get_expected_count
+from centric_api.fetcher import FetchError, get_expected_count, run_endpoint
+from centric_api.models import CountSpec, EndpointSpec, FetcherConfig
 from centric_api.schema import load_endpoint_schemas
 from centric_api.store import connect, ingest_raw_dir
+
+
+class _JsonResponse:
+    status_code = 200
+    reason_phrase = "OK"
+    headers = {"content-type": "application/json"}
+
+    def __init__(self, payload: dict):
+        self._payload = payload
+        self.text = json.dumps(payload)
+
+    def json(self):
+        return self._payload
 
 
 def test_runtime_paths_use_centric_api_home(
@@ -102,6 +116,71 @@ endpoints:
 
     with pytest.raises(FetchError, match="non-integer"):
         get_expected_count(endpoints[0], auth, fetcher_cfg)
+
+
+def test_delta_zero_count_skips_empty_raw_file(tmp_path: Path) -> None:
+    class Auth:
+        base_url = "https://centric.example.com"
+
+        def request(self, *_args, **_kwargs):
+            return _JsonResponse({"count": 0})
+
+    spec = EndpointSpec(
+        name="styles",
+        api_version="v2",
+        path="styles",
+        count_spec=CountSpec(path="count/Style"),
+    )
+    fetcher_cfg = FetcherConfig(
+        base_url="https://centric.example.com",
+        output_dir=tmp_path / "raw",
+        checkpoint_dir=tmp_path / "checkpoints",
+    )
+
+    result = run_endpoint(
+        spec,
+        Auth(),
+        fetcher_cfg,
+        append_output=True,
+        output_file_suffix=".delta",
+        create_empty_output=False,
+    )
+
+    assert result.items_fetched == 0
+    assert result.expected_count == 0
+    assert not result.output_file_created
+    assert not result.output_file.exists()
+    checkpoint = json.loads(result.checkpoint_file.read_text(encoding="utf-8"))
+    assert checkpoint["completed"] is True
+    assert "output_file" not in checkpoint
+
+
+def test_full_zero_count_keeps_empty_raw_file(tmp_path: Path) -> None:
+    class Auth:
+        base_url = "https://centric.example.com"
+
+        def request(self, *_args, **_kwargs):
+            return _JsonResponse({"count": 0})
+
+    spec = EndpointSpec(
+        name="styles",
+        api_version="v2",
+        path="styles",
+        count_spec=CountSpec(path="count/Style"),
+    )
+    fetcher_cfg = FetcherConfig(
+        base_url="https://centric.example.com",
+        output_dir=tmp_path / "raw",
+        checkpoint_dir=tmp_path / "checkpoints",
+    )
+
+    result = run_endpoint(spec, Auth(), fetcher_cfg, create_empty_output=True)
+
+    assert result.items_fetched == 0
+    assert result.expected_count == 0
+    assert result.output_file_created
+    assert result.output_file.is_file()
+    assert result.output_file.read_text(encoding="utf-8") == ""
 
 
 def test_schema_requires_endpoints_root(tmp_path: Path) -> None:

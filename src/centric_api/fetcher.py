@@ -740,6 +740,7 @@ def run_endpoint(
     resume: bool = False,
     append_output: bool = False,
     output_file_suffix: str = "",
+    create_empty_output: bool = True,
     delta_floor: str | None = None,
     progress_callback: Callable[[FetchProgressEvent], None] | None = None,
     api_log_callback: ApiLogCallback = None,
@@ -885,7 +886,6 @@ def run_endpoint(
         },
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     mode = "w" if force_output_rewrite else ("a" if (start_skip > 0 or append_output) else "w")
     window_start_line = 0
     if mode == "a":
@@ -1010,12 +1010,88 @@ def run_endpoint(
     duplicate_id_set: set[Any] = set()
     invalid_id_count = 0
     first_invalid_id_detail: str | None = None
-    id_validation_status = "not_run"
-    id_validation_checked_items = 0
-    id_validation_unique_ids = 0
-    id_validation_reason: str | None = None
     count_validation_status = "passed"
     count_validation_reason: str | None = None
+
+    def _finish_success(*, output_file_created: bool) -> FetchRunResult:
+        id_validation_status = "passed"
+        id_validation_checked_items = tracked_id_items
+        id_validation_unique_ids = len(seen_ids)
+        id_validation_reason = None
+        _emit_api_log(
+            api_log_callback,
+            {
+                "level": "summary",
+                "event": "id_validation_passed",
+                "endpoint": spec.name,
+                "checked_items": id_validation_checked_items,
+                "unique_ids": id_validation_unique_ids,
+            },
+        )
+
+        duration = time.time() - started
+        _write_checkpoint(
+            checkpoint_path,
+            spec.name,
+            next_skip,
+            items_fetched,
+            delta_floor=effective_delta_floor,
+            completed=True,
+            restart_from_zero=False,
+            window_start_line=window_start_line,
+            output_file=output_path if output_file_created else None,
+        )
+        _emit_api_log(
+            api_log_callback,
+            {
+                "level": "debug",
+                "event": "checkpoint_written",
+                "endpoint": spec.name,
+                "checkpoint_file": str(checkpoint_path),
+                "next_skip": next_skip,
+                "fetched_count": items_fetched,
+                "completed": True,
+                "delta_floor": effective_delta_floor,
+                "restart_from_zero": False,
+                "window_start_line": window_start_line,
+                "output_file_created": output_file_created,
+            },
+        )
+        _emit_progress(
+            progress_callback,
+            FetchProgressEvent(
+                kind="endpoint_finish",
+                endpoint=spec.name,
+                pages_fetched=pages_fetched,
+                items_fetched=items_fetched,
+                expected_count=expected_count,
+                retries_used=retries_used_ref[0],
+                warnings_count=len(warnings),
+                elapsed_seconds=duration,
+            ),
+        )
+        return FetchRunResult(
+            endpoint=spec.name,
+            pages_fetched=pages_fetched,
+            items_fetched=items_fetched,
+            expected_count=expected_count,
+            retries_used=retries_used_ref[0],
+            start_skip=start_skip,
+            next_skip=next_skip,
+            duration_seconds=duration,
+            output_file=output_path,
+            checkpoint_file=checkpoint_path,
+            output_file_created=output_file_created,
+            warnings=warnings,
+            effective_delta_floor=effective_delta_floor,
+            did_catch_up=resume,
+            count_validation_status=count_validation_status,
+            count_validation_reason=count_validation_reason,
+            id_validation_status=id_validation_status,
+            id_validation_checked_items=id_validation_checked_items,
+            id_validation_unique_ids=id_validation_unique_ids,
+            id_validation_reason=id_validation_reason,
+        )
 
     if resume and start_skip > 0:
         try:
@@ -1064,6 +1140,10 @@ def run_endpoint(
             },
         )
 
+    if expected_count == 0 and items_fetched == 0 and not create_empty_output:
+        return _finish_success(output_file_created=False)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open(mode, encoding="utf-8") as out_fh:
         for page in _iter_pages(
             spec,
@@ -1219,79 +1299,4 @@ def run_endpoint(
             "Action: exit endpoint."
         )
 
-    id_validation_status = "passed"
-    id_validation_checked_items = tracked_id_items
-    id_validation_unique_ids = unique_id_count
-    id_validation_reason = None
-    _emit_api_log(
-        api_log_callback,
-        {
-            "level": "summary",
-            "event": "id_validation_passed",
-            "endpoint": spec.name,
-            "checked_items": id_validation_checked_items,
-            "unique_ids": id_validation_unique_ids,
-        },
-    )
-
-    duration = time.time() - started
-    _write_checkpoint(
-        checkpoint_path,
-        spec.name,
-        next_skip,
-        items_fetched,
-        delta_floor=effective_delta_floor,
-        completed=True,
-        restart_from_zero=False,
-        window_start_line=window_start_line,
-        output_file=output_path,
-    )
-    _emit_api_log(
-        api_log_callback,
-        {
-            "level": "debug",
-            "event": "checkpoint_written",
-            "endpoint": spec.name,
-            "checkpoint_file": str(checkpoint_path),
-            "next_skip": next_skip,
-            "fetched_count": items_fetched,
-            "completed": True,
-            "delta_floor": effective_delta_floor,
-            "restart_from_zero": False,
-            "window_start_line": window_start_line,
-        },
-    )
-    _emit_progress(
-        progress_callback,
-        FetchProgressEvent(
-            kind="endpoint_finish",
-            endpoint=spec.name,
-            pages_fetched=pages_fetched,
-            items_fetched=items_fetched,
-            expected_count=expected_count,
-            retries_used=retries_used_ref[0],
-            warnings_count=len(warnings),
-            elapsed_seconds=duration,
-        ),
-    )
-    return FetchRunResult(
-        endpoint=spec.name,
-        pages_fetched=pages_fetched,
-        items_fetched=items_fetched,
-        expected_count=expected_count,
-        retries_used=retries_used_ref[0],
-        start_skip=start_skip,
-        next_skip=next_skip,
-        duration_seconds=duration,
-        output_file=output_path,
-        checkpoint_file=checkpoint_path,
-        warnings=warnings,
-        effective_delta_floor=effective_delta_floor,
-        did_catch_up=resume,
-        count_validation_status=count_validation_status,
-        count_validation_reason=count_validation_reason,
-        id_validation_status=id_validation_status,
-        id_validation_checked_items=id_validation_checked_items,
-        id_validation_unique_ids=id_validation_unique_ids,
-        id_validation_reason=id_validation_reason,
-    )
+    return _finish_success(output_file_created=True)
