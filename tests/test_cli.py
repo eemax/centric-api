@@ -62,7 +62,7 @@ def test_parse_jsonl_preserves_non_json_lines() -> None:
 
 
 def test_cron_log_helpers_write_jsonl_only(tmp_path) -> None:
-    log_path = tmp_path / "cron.log"
+    log_path = tmp_path / "cron.jsonl"
 
     _append_cron_event(log_path, record_type="cron_start", schedule="0 * * * *")
     _append_cron_fetch_records(
@@ -92,7 +92,7 @@ def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("centric_api.cli.run_fetch", fail_fetch)
     args = _build_parser().parse_args(["cron"])
     lock_path = tmp_path / "fetch.lock"
-    log_path = tmp_path / "cron.log"
+    log_path = tmp_path / "cron.jsonl"
 
     _run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
 

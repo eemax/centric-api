@@ -37,10 +37,9 @@ from .store import IngestResult, ingest_raw_dir
 DEFAULT_CONFIG_PATH = Path("config/fetcher.yml")
 DEFAULT_DELTA_STATE_PATH = Path("delta.yml")
 DEFAULT_FETCH_LOG_PATH = Path("logs/fetch.log")
-DEFAULT_DELTA_LOG_PATH = Path("logs/delta.log")
 DEFAULT_DB_PATH = Path("centric.db")
 DEFAULT_LOCK_PATH = Path("cron/fetch.lock")
-DEFAULT_CRON_LOG_PATH = Path("logs/cron.log")
+DEFAULT_CRON_LOG_PATH = Path("logs/cron.jsonl")
 DEFAULT_OVERLAP_MINUTES = 10
 DEFAULT_OVERLAP_DAYS = 0
 MIN_DAYS_BACK = 1
@@ -126,7 +125,6 @@ def run_fetch(args: argparse.Namespace) -> int:
     fetcher_cfg.output_dir = fetcher_cfg.output_dir / "runs" / run_id
     selected_specs = _select_endpoints(endpoint_specs, args.endpoint)
     delta_state_file = resolve_private_config_path(DEFAULT_DELTA_STATE_PATH, args.delta_state_file)
-    delta_log_file = runtime_path(DEFAULT_DELTA_LOG_PATH)
     delta_state = _load_delta_state(delta_state_file)
     overlap_minutes = _normalize_int(delta_state.get("overlap_minutes"), DEFAULT_OVERLAP_MINUTES)
     overlap_days = _normalize_int(delta_state.get("overlap_days"), DEFAULT_OVERLAP_DAYS)
@@ -219,22 +217,6 @@ def run_fetch(args: argparse.Namespace) -> int:
                             error=None,
                         )
                         _write_delta_state(delta_state_file, delta_state)
-                        _append_human_record(
-                            delta_log_file,
-                            {
-                                "level": "summary",
-                                "event": "delta_endpoint",
-                                "run_at": attempt_end,
-                                "mode": mode,
-                                "endpoint": spec.name,
-                                "status": status,
-                                "delta_floor": delta_floor,
-                                "items_fetched": result.items_fetched,
-                                "pages_fetched": result.pages_fetched,
-                                "retries_used": result.retries_used,
-                                "output_file": str(result.output_file),
-                            },
-                        )
                 except (AuthError, FetchError) as exc:
                     message = str(exc)
                     failures.append((spec.name, message))
@@ -959,12 +941,6 @@ def _changelog_record(run: ChangelogRun | None, skipped: str | None) -> dict[str
 
 def _db_path(value: str | None) -> Path:
     return Path(value).expanduser() if value else runtime_path(DEFAULT_DB_PATH)
-
-
-def _append_human_record(path: Path, record: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(_render_log_line({"timestamp": _utc_iso(), **record}) + "\n")
 
 
 def _append_cron_event(path: Path, *, record_type: str, **payload: Any) -> None:
