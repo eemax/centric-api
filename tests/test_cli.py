@@ -10,6 +10,7 @@ from centric_api.cli import (
     _build_parser,
     _parse_jsonl,
     _release_fetch_lock,
+    _render_log_line,
     _run_cron_fetch_once,
     _try_acquire_fetch_lock,
     main,
@@ -54,6 +55,44 @@ def test_fetch_log_level_defaults_to_summary() -> None:
     args = _build_parser().parse_args(["fetch"])
 
     assert args.log_level == "summary"
+
+
+def test_fetch_log_renderer_uses_human_run_and_endpoint_lines() -> None:
+    run_line = _render_log_line(
+        {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "level": "summary",
+            "event": "run_start",
+            "run_id": "run-1",
+            "mode": "delta",
+            "endpoint_count": 2,
+            "endpoints": ["styles", "boms"],
+            "output_dir": "/tmp/raw",
+        }
+    )
+    endpoint_line = _render_log_line(
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "level": "summary",
+            "event": "endpoint_ok",
+            "endpoint": "styles",
+            "expected": 10,
+            "fetched": 10,
+            "pages": 1,
+            "retries": 0,
+            "duration_seconds": 1.2,
+            "output": None,
+        }
+    )
+
+    assert run_line == (
+        "2026-01-01T00:00:00Z RUN start run_id=run-1 mode=delta "
+        "endpoint_count=2 endpoints=styles,boms output_dir=/tmp/raw"
+    )
+    assert endpoint_line == (
+        "2026-01-01T00:00:01Z ENDPOINT ok endpoint=styles expected=10 fetched=10 "
+        "pages=1 retries=0 duration=1.2s"
+    )
 
 
 def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:

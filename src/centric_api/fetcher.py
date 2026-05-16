@@ -104,9 +104,9 @@ def _is_transient_exception(exc: Exception) -> bool:
     return isinstance(exc, (httpx.TimeoutException, httpx.TransportError))
 
 
-def _sleep_backoff(fetcher_cfg: FetcherConfig, attempt: int) -> None:
+def _backoff_seconds(fetcher_cfg: FetcherConfig, attempt: int) -> float:
     base = fetcher_cfg.retry_base_seconds * (2 ** (attempt - 1))
-    time.sleep(min(base, fetcher_cfg.retry_max_seconds))
+    return min(base, fetcher_cfg.retry_max_seconds)
 
 
 def _build_endpoint_url(base_url: str, api_version: str, path: str) -> str:
@@ -195,12 +195,15 @@ def _request_json_with_retry(
             },
         )
         try:
+            request_started = _monotonic_seconds()
             response = auth_ctx.request(method, url, params=params)
+            request_duration = _monotonic_seconds() - request_started
         except Exception as exc:  # pragma: no cover - explicit branch tested indirectly
             if _is_transient_exception(exc):
                 last_error = exc
                 if attempt < fetcher_cfg.retry_max_attempts:
                     retries_used_ref[0] += 1
+                    sleep_seconds = _backoff_seconds(fetcher_cfg, attempt)
                     _emit_api_log(
                         api_log_callback,
                         {
@@ -213,6 +216,7 @@ def _request_json_with_retry(
                             "attempt": attempt,
                             "next_attempt": attempt + 1,
                             "max_attempts": fetcher_cfg.retry_max_attempts,
+                            "sleep_seconds": round(sleep_seconds, 3),
                         },
                     )
                     _emit_progress(
@@ -228,7 +232,7 @@ def _request_json_with_retry(
                             ),
                         ),
                     )
-                    _sleep_backoff(fetcher_cfg, attempt)
+                    time.sleep(sleep_seconds)
                     continue
                 _emit_api_log(
                     api_log_callback,
@@ -262,6 +266,7 @@ def _request_json_with_retry(
                 "max_attempts": fetcher_cfg.retry_max_attempts,
                 "status_code": response.status_code,
                 "reason_phrase": response.reason_phrase or "",
+                "duration_seconds": round(request_duration, 3),
             },
         )
 
@@ -269,6 +274,7 @@ def _request_json_with_retry(
             if _is_transient_status(response.status_code):
                 if attempt < fetcher_cfg.retry_max_attempts:
                     retries_used_ref[0] += 1
+                    sleep_seconds = _backoff_seconds(fetcher_cfg, attempt)
                     _emit_api_log(
                         api_log_callback,
                         {
@@ -281,6 +287,7 @@ def _request_json_with_retry(
                             "attempt": attempt,
                             "next_attempt": attempt + 1,
                             "max_attempts": fetcher_cfg.retry_max_attempts,
+                            "sleep_seconds": round(sleep_seconds, 3),
                         },
                     )
                     _emit_progress(
@@ -296,7 +303,7 @@ def _request_json_with_retry(
                             ),
                         ),
                     )
-                    _sleep_backoff(fetcher_cfg, attempt)
+                    time.sleep(sleep_seconds)
                     continue
                 _emit_api_log(
                     api_log_callback,
@@ -687,6 +694,18 @@ def _iter_pages(
             items=items,
             duration_seconds=_monotonic_seconds() - page_started,
         )
+        _emit_api_log(
+            api_log_callback,
+            {
+                "level": "http",
+                "event": "data_page",
+                "endpoint": spec.name,
+                "skip": skip,
+                "limit": spec.limit,
+                "items": len(items),
+                "duration_seconds": round(page.duration_seconds, 3),
+            },
+        )
         yield page
 
         fetched += len(items)
@@ -730,7 +749,17 @@ def get_expected_count(
         raise FetchError(f"Count path '{COUNT_RESULT_PATH}' resolved to a non-integer number.")
     if result < 0:
         raise FetchError("Count result cannot be negative.")
-    return int(result)
+    expected_count = int(result)
+    _emit_api_log(
+        api_log_callback,
+        {
+            "level": "http",
+            "event": "count_preflight",
+            "endpoint": spec.name,
+            "expected": expected_count,
+        },
+    )
+    return expected_count
 
 
 def run_endpoint(
@@ -1021,7 +1050,7 @@ def run_endpoint(
         _emit_api_log(
             api_log_callback,
             {
-                "level": "summary",
+                "level": "debug",
                 "event": "id_validation_passed",
                 "endpoint": spec.name,
                 "checked_items": id_validation_checked_items,

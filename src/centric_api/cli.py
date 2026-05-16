@@ -13,7 +13,6 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TextIO
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yaml
 from croniter import croniter
@@ -48,7 +47,6 @@ MIN_DAYS_BACK = 1
 MAX_DAYS_BACK = 3650
 MIN_MONTHS_BACK = 1
 MAX_MONTHS_BACK = 120
-SENSITIVE_QUERY_KEYS = {"token", "password", "api_key", "authorization"}
 LOG_LEVEL_RANKS = {"off": 0, "summary": 1, "http": 2, "debug": 3}
 
 LogLevel = Literal["off", "summary", "http", "debug"]
@@ -154,6 +152,20 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         fetch_log_file = log_path.open("a", encoding="utf-8")
         log_callback = _build_log_callback(fetch_log_file, log_level=args.log_level)
+        log_callback(
+            {
+                "level": "summary",
+                "event": "run_start",
+                "run_id": run_id,
+                "mode": mode,
+                "endpoints": [spec.name for spec in selected_specs],
+                "endpoint_count": len(selected_specs),
+                "output_dir": str(fetcher_cfg.output_dir),
+                "delta_state_file": str(delta_state_file),
+                "modified_since": modified_since,
+                "overlap_minutes": overlap_minutes if mode == "delta" else None,
+            }
+        )
 
     results: list[FetchRunResult] = []
     failures: list[tuple[str, str]] = []
@@ -213,6 +225,28 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     results.append(result)
                     status = "OK"
                     attempt_end = _utc_iso()
+                    if log_callback:
+                        log_callback(
+                            {
+                                "level": "summary",
+                                "event": "endpoint_ok",
+                                "endpoint": result.endpoint,
+                                "mode": mode,
+                                "expected": result.expected_count,
+                                "fetched": result.items_fetched,
+                                "pages": result.pages_fetched,
+                                "retries": result.retries_used,
+                                "duration_seconds": round(result.duration_seconds, 3),
+                                "output": (
+                                    str(result.output_file)
+                                    if result.output_file_created
+                                    else None
+                                ),
+                                "count_validation": result.count_validation_status,
+                                "id_validation": result.id_validation_status,
+                                "unique_ids": result.id_validation_unique_ids,
+                            }
+                        )
                     endpoint_records.append(
                         _endpoint_manifest_record(
                             result,
@@ -239,6 +273,20 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     failures.append((spec.name, message))
                     print(f"[{spec.name}] error: {message}", file=sys.stderr)
                     attempt_end = _utc_iso()
+                    if log_callback:
+                        log_callback(
+                            {
+                                "level": "summary",
+                                "event": "endpoint_failed",
+                                "endpoint": spec.name,
+                                "mode": mode,
+                                "duration_seconds": round(
+                                    (datetime.now(UTC) - attempt_start_dt).total_seconds(),
+                                    3,
+                                ),
+                                "error": message,
+                            }
+                        )
                     endpoint_records.append(
                         {
                             "endpoint": spec.name,
@@ -261,11 +309,13 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                             error=message,
                         )
                         _write_delta_state(delta_state_file, delta_state)
-    finally:
+    except Exception:
         if fetch_log_file is not None:
             fetch_log_file.close()
-
+        raise
     if args.delta_dry_run:
+        if fetch_log_file is not None:
+            fetch_log_file.close()
         return 0
 
     manifest_path = _write_run_manifest(
@@ -288,12 +338,87 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
         db_path = _db_path(args.db)
         schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
         ingest_result = ingest_raw_dir(fetcher_cfg.output_dir, db_path, schemas=schemas)
+        if log_callback:
+            log_callback(
+                {
+                    "level": "summary",
+                    "event": "ingest_ok",
+                    "applied_files": ingest_result.applied_files,
+                    "skipped_files": ingest_result.skipped_files,
+                    "records_read": ingest_result.records_read,
+                    "upserts": ingest_result.records_upserted,
+                    "deletes": ingest_result.records_deleted,
+                    "hard_deletes": ingest_result.records_hard_deleted,
+                    "invalid": ingest_result.invalid_records,
+                }
+            )
         try:
             changelog_run, changelog_skipped = _run_changelog_after_ingest(db_path, ingest_result)
         except Exception as exc:
             pipeline_error = f"changelog failed after ingest: {exc}"
+            if log_callback:
+                log_callback(
+                    {
+                        "level": "summary",
+                        "event": "changelog_failed",
+                        "error": str(exc),
+                    }
+                )
+        else:
+            if log_callback:
+                if changelog_run is not None:
+                    log_callback(
+                        {
+                            "level": "summary",
+                            "event": "changelog_ok",
+                            "events": changelog_run.event_count,
+                            "scoped": changelog_run.scoped_record_count,
+                            "run_id": changelog_run.run_id,
+                        }
+                    )
+                elif changelog_skipped:
+                    log_callback(
+                        {
+                            "level": "summary",
+                            "event": "changelog_skipped",
+                            "reason": changelog_skipped,
+                        }
+                    )
+    elif log_callback:
+        log_callback(
+            {
+                "level": "summary",
+                "event": "ingest_skipped",
+                "reason": "no successful endpoint fetches",
+            }
+        )
 
     duration_seconds = time.time() - started
+    if log_callback:
+        run_status = "ok"
+        if pipeline_error or (selected_specs and len(failures) == len(selected_specs)):
+            run_status = "failed"
+        elif failures:
+            run_status = "partial"
+        log_callback(
+            {
+                "level": "summary",
+                "event": f"run_{run_status}",
+                "run_id": run_id,
+                "mode": mode,
+                "endpoints_ok": len(results),
+                "endpoints_failed": len(failures),
+                "endpoints_total": len(selected_specs),
+                "fetched": sum(result.items_fetched for result in results),
+                "pages": sum(result.pages_fetched for result in results),
+                "retries": sum(result.retries_used for result in results),
+                "duration_seconds": round(duration_seconds, 3),
+                "manifest": str(manifest_path),
+                "pipeline_error": pipeline_error,
+            }
+        )
+    if fetch_log_file is not None:
+        fetch_log_file.close()
     if args.json:
         _print_json_fetch_records(
             results,
@@ -846,11 +971,7 @@ def _build_log_callback(
         event_rank = LOG_LEVEL_RANKS.get(event_level, LOG_LEVEL_RANKS["debug"])
         if event_rank > selected_rank:
             return
-        record: LogEvent = {"timestamp": _utc_iso(), **event}
-        url = record.get("url")
-        if isinstance(url, str):
-            record["url"] = _redact_url_query(url)
-        line = _render_log_line(record)
+        line = _render_log_line({"timestamp": _utc_iso(), **event})
         log_file.write(line + "\n")
         log_file.flush()
 
@@ -858,37 +979,177 @@ def _build_log_callback(
 
 
 def _render_log_line(record: LogEvent) -> str:
-    pieces = [str(record.get("timestamp", "")), str(record.get("level", "summary")).upper()]
-    pieces.append(str(record.get("event", "event")))
-    for key in sorted(key for key in record if key not in {"timestamp", "level", "event"}):
-        pieces.append(f"{key}={json.dumps(record[key], separators=(',', ':'), ensure_ascii=True)}")
+    event = str(record.get("event", "event"))
+    pieces = [str(record.get("timestamp", "")), _log_label(record)]
+    for key in _log_key_order(event, record):
+        value = record.get(key)
+        if value is None:
+            continue
+        pieces.append(f"{_log_key(key)}={_log_value(key, value)}")
     return " ".join(pieces)
 
 
-def _redact_url_query(url: str) -> str:
-    split_url = urlsplit(url)
-    if not split_url.query:
-        return url
-    params = parse_qsl(split_url.query, keep_blank_values=True)
-    changed = False
-    redacted: list[tuple[str, str]] = []
-    for key, value in params:
-        if key.lower() in SENSITIVE_QUERY_KEYS:
-            redacted.append((key, "***"))
-            changed = True
-        else:
-            redacted.append((key, value))
-    if not changed:
-        return url
-    return urlunsplit(
-        (
-            split_url.scheme,
-            split_url.netloc,
-            split_url.path,
-            urlencode(redacted, doseq=True),
-            split_url.fragment,
-        )
+def _log_label(record: LogEvent) -> str:
+    event = str(record.get("event", "event"))
+    level = str(record.get("level", "summary")).lower()
+    labels = {
+        "run_start": "RUN start",
+        "run_ok": "RUN ok",
+        "run_partial": "RUN partial",
+        "run_failed": "RUN failed",
+        "endpoint_start": "ENDPOINT start",
+        "endpoint_ok": "ENDPOINT ok",
+        "endpoint_failed": "ENDPOINT failed",
+        "ingest_ok": "INGEST ok",
+        "ingest_skipped": "INGEST skipped",
+        "changelog_ok": "CHANGELOG ok",
+        "changelog_skipped": "CHANGELOG skipped",
+        "changelog_failed": "CHANGELOG failed",
+        "request_failed": "REQUEST failed",
+        "http_request": "HTTP request",
+        "http_response": "HTTP response",
+        "count_preflight": "HTTP count",
+        "data_page": "HTTP page",
+        "retry_scheduled": "RETRY scheduled",
+    }
+    if event in labels:
+        return labels[event]
+    if level == "debug":
+        return f"DEBUG {event}"
+    return event
+
+
+def _log_key_order(event: str, record: LogEvent) -> list[str]:
+    preferred = {
+        "run_start": [
+            "run_id",
+            "mode",
+            "endpoint_count",
+            "endpoints",
+            "modified_since",
+            "overlap_minutes",
+            "delta_state_file",
+            "output_dir",
+        ],
+        "run_ok": _run_log_keys(),
+        "run_partial": _run_log_keys(),
+        "run_failed": _run_log_keys(),
+        "endpoint_start": ["endpoint", "mode", "delta_floor"],
+        "endpoint_ok": [
+            "endpoint",
+            "expected",
+            "fetched",
+            "pages",
+            "retries",
+            "duration_seconds",
+            "output",
+            "count_validation",
+            "id_validation",
+            "unique_ids",
+        ],
+        "endpoint_failed": ["endpoint", "mode", "duration_seconds", "error"],
+        "ingest_ok": [
+            "applied_files",
+            "skipped_files",
+            "records_read",
+            "upserts",
+            "deletes",
+            "hard_deletes",
+            "invalid",
+        ],
+        "changelog_ok": ["events", "scoped", "run_id"],
+        "changelog_skipped": ["reason"],
+        "changelog_failed": ["error"],
+        "request_failed": [
+            "endpoint",
+            "request_kind",
+            "reason",
+            "status_code",
+            "attempt",
+            "max_attempts",
+            "error",
+        ],
+        "http_request": [
+            "endpoint",
+            "request_kind",
+            "method",
+            "url",
+            "attempt",
+            "max_attempts",
+        ],
+        "http_response": [
+            "endpoint",
+            "request_kind",
+            "status_code",
+            "duration_seconds",
+            "attempt",
+            "max_attempts",
+            "reason_phrase",
+            "url",
+        ],
+        "count_preflight": ["endpoint", "expected"],
+        "data_page": ["endpoint", "skip", "limit", "items", "duration_seconds"],
+        "retry_scheduled": [
+            "endpoint",
+            "request_kind",
+            "reason",
+            "attempt",
+            "next_attempt",
+            "max_attempts",
+            "sleep_seconds",
+            "status_code",
+            "error",
+        ],
+        "ingest_skipped": ["reason"],
+    }
+    keys = preferred.get(event, [])
+    remaining = sorted(
+        key
+        for key in record
+        if key not in {"timestamp", "level", "event"} and key not in keys
     )
+    return [*keys, *remaining]
+
+
+def _run_log_keys() -> list[str]:
+    return [
+        "run_id",
+        "mode",
+        "endpoints_ok",
+        "endpoints_failed",
+        "endpoints_total",
+        "fetched",
+        "pages",
+        "retries",
+        "duration_seconds",
+        "manifest",
+        "pipeline_error",
+    ]
+
+
+def _log_key(key: str) -> str:
+    return {
+        "duration_seconds": "duration",
+        "sleep_seconds": "sleep",
+    }.get(key, key)
+
+
+def _log_value(key: str, value: Any) -> str:
+    if isinstance(value, float):
+        text = f"{value:.3f}".rstrip("0").rstrip(".")
+        if key.endswith("_seconds"):
+            return f"{text}s"
+        return text
+    if isinstance(value, list):
+        return ",".join(str(item) for item in value)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    text = str(value)
+    if not text or any(char.isspace() for char in text):
+        return json.dumps(text, ensure_ascii=True)
+    return text
 
 
 def _select_endpoints(all_specs: list[EndpointSpec], names: list[str]) -> list[EndpointSpec]:

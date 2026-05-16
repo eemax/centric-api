@@ -21,8 +21,10 @@ windows.
 
 Raw JSONL, checkpoints, logs, `delta.yml`, and the canonical SQLite cache live under
 `~/.centric-api`. The local database defaults to `~/.centric-api/centric.db`.
-Manual fetches append summary logs to `~/.centric-api/logs/fetch.log` by default; pass
-`--log-level off` to disable them.
+Manual fetches append human-readable run logs to `~/.centric-api/logs/fetch.log` by default. The
+default `--log-level summary` writes run, endpoint, ingest, and changelog summary lines. Use
+`--log-level http` to include API request/response diagnostics, `--log-level debug` for
+checkpoint/resume internals, or `--log-level off` to disable the log.
 
 `cron` runs in the foreground until stopped and defaults to hourly (`0 * * * *`). It prints
 scheduler lifecycle messages and concise fetch summaries to the terminal, runs fetch in quiet JSON
