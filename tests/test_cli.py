@@ -26,6 +26,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "fetch" in output
     assert "changelog" in output
     assert "cron" in output
+    assert "download" in output
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
@@ -49,6 +50,13 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
     assert "--fetch-config" in cron_help
     assert "--log-level" not in cron_help
     assert "[schedule]" in cron_help
+
+    with pytest.raises(SystemExit) as download_exc:
+        main(["download", "--help"])
+    assert download_exc.value.code == 0
+    download_help = capsys.readouterr().out
+    assert "--download-config" in download_help
+    assert "--job" in download_help
 
 
 def test_fetch_log_level_defaults_to_summary() -> None:

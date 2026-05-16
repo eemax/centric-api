@@ -1,0 +1,11 @@
+version: 1
+output_dir: downloads
+
+jobs:
+  - name: basic
+    max_documents: 5
+    sources:
+      - endpoint: documents
+    document_filters:
+      - path: node_name
+        matches: "\\.(pdf|xlsx)$"

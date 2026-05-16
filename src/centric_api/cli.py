@@ -30,6 +30,11 @@ from .changelog import (
 )
 from .config import ConfigError, load_fetcher_settings, resolve_private_config_path, runtime_path
 from .delta import apply_data_sort, strip_modified_at_filters
+from .download import (
+    DownloadRunResult,
+    load_download_config,
+    run_download_job,
+)
 from .fetcher import FetchError, run_endpoint
 from .models import EndpointSpec, FetchProgressEvent, FetchRunResult
 from .schema import load_endpoint_schemas
@@ -38,6 +43,7 @@ from .store import IngestResult, ingest_raw_dir
 DEFAULT_CONFIG_PATH = Path("config/fetcher.yml")
 DEFAULT_DELTA_STATE_PATH = Path("delta.yml")
 DEFAULT_FETCH_LOG_PATH = Path("logs/fetch.log")
+DEFAULT_DOWNLOAD_LOG_PATH = Path("logs/download.log")
 DEFAULT_DB_PATH = Path("centric.db")
 DEFAULT_LOCK_PATH = Path("fetch.lock")
 DEFAULT_CRON_LOG_PATH = Path("logs/cron.jsonl")
@@ -64,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_changelog(args)
         if args.command == "cron":
             return run_cron(args)
+        if args.command == "download":
+            return run_download(args)
     except (AuthError, ConfigError, FetchError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -102,6 +110,17 @@ def _build_parser() -> argparse.ArgumentParser:
     changelog_parser.add_argument("--since", default=None)
     changelog_parser.add_argument("--limit", type=int, default=50)
     changelog_parser.add_argument("--json", action="store_true")
+
+    download_parser = subparsers.add_parser("download", help="Download latest document revisions")
+    download_parser.add_argument("--download-config", default=None)
+    download_parser.add_argument("--job", default=None)
+    download_parser.add_argument("--db", default=None)
+    download_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
+    download_parser.add_argument("--env-file", default=None)
+    download_parser.add_argument("--dry-run", action="store_true")
+    download_parser.add_argument("--quiet", action="store_true")
+    download_parser.add_argument("--json", action="store_true")
+    download_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
 
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
     cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
@@ -502,6 +521,50 @@ def run_changelog(args: argparse.Namespace) -> int:
     return _print_rows(rows, args.json, empty_message="No changelog events found.")
 
 
+def run_download(args: argparse.Namespace) -> int:
+    config = load_download_config(args.download_config)
+    db_path = _db_path(args.db)
+    download_log_file: TextIO | None = None
+    log_callback: LogCallback | None = None
+    if args.log_level != "off":
+        log_path = runtime_path(DEFAULT_DOWNLOAD_LOG_PATH)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        download_log_file = log_path.open("a", encoding="utf-8")
+        log_callback = _build_log_callback(download_log_file, log_level=args.log_level)
+    try:
+        if args.dry_run:
+            result = run_download_job(
+                db_path=db_path,
+                auth_ctx=None,
+                config=config,
+                job_name=args.job,
+                dry_run=True,
+                log_callback=log_callback,
+            )
+        else:
+            _fetcher_cfg, auth_settings, _endpoint_specs = load_fetcher_settings(args.fetch_config)
+            with init_auth_context(
+                auth_settings,
+                env_file=Path(args.env_file).expanduser() if args.env_file else None,
+            ) as auth_ctx:
+                result = run_download_job(
+                    db_path=db_path,
+                    auth_ctx=auth_ctx,
+                    config=config,
+                    job_name=args.job,
+                    dry_run=False,
+                    log_callback=log_callback,
+                )
+    finally:
+        if download_log_file is not None:
+            download_log_file.close()
+    if args.json:
+        print(json.dumps(_download_record(result), default=str))
+    elif not args.quiet:
+        _print_human_download_summary(result)
+    return 1 if result.failed_count else 0
+
+
 def run_cron(args: argparse.Namespace) -> int:
     schedule = args.schedule.strip()
     if len(schedule.split()) != 5 or not croniter.is_valid(schedule):
@@ -886,6 +949,35 @@ def _print_json_fetch_records(
     )
 
 
+def _print_human_download_summary(result: DownloadRunResult) -> None:
+    title = "Download Complete" if not result.failed_count else "Download Finished With Failures"
+    print(title)
+    print()
+    print(f"Job:      {result.job_name}")
+    print(f"Run:      {result.run_id}")
+    print(f"Manifest: {result.manifest_path}")
+    print()
+    print("Summary")
+    print(f"Selected:        {result.selected_count}")
+    print(f"Downloaded:      {result.downloaded_count}")
+    print(f"Already present: {result.already_present_count}")
+    print(f"Skipped:         {result.skipped_count}")
+    print(f"Failed:          {result.failed_count}")
+    if result.items:
+        rows = result.items[:10]
+        width = max(len("Document"), *(len(str(row["document_id"])) for row in rows))
+        print()
+        print(f"{'Document':<{width}}  {'Revision':<12}  Status")
+        print("-" * (width + 23))
+        for row in rows:
+            print(
+                f"{str(row['document_id']):<{width}}  "
+                f"{str(row['latest_revision_id']):<12}  {row['status']}"
+            )
+        if len(result.items) > len(rows):
+            print(f"... {len(result.items) - len(rows)} more")
+
+
 def _write_run_manifest(
     *,
     output_dir: Path,
@@ -1011,6 +1103,14 @@ def _log_label(record: LogEvent) -> str:
         "count_preflight": "HTTP count",
         "data_page": "HTTP page",
         "retry_scheduled": "RETRY scheduled",
+        "download_start": "DOWNLOAD start",
+        "download_item": "DOWNLOAD item",
+        "download_ok": "DOWNLOAD ok",
+        "download_partial": "DOWNLOAD partial",
+        "download_failed": "DOWNLOAD failed",
+        "download_document_missing": "DOWNLOAD missing_document",
+        "download_revision_missing": "DOWNLOAD missing_revision",
+        "download_http_response": "DOWNLOAD http",
     }
     if event in labels:
         return labels[event]
@@ -1101,6 +1201,20 @@ def _log_key_order(event: str, record: LogEvent) -> list[str]:
             "error",
         ],
         "ingest_skipped": ["reason"],
+        "download_start": ["run_id", "job", "config", "db", "dry_run"],
+        "download_item": ["document_id", "revision_id", "status", "file"],
+        "download_ok": _download_log_keys(),
+        "download_partial": _download_log_keys(),
+        "download_failed": _download_log_keys(),
+        "download_document_missing": ["document_id"],
+        "download_revision_missing": ["document_id"],
+        "download_http_response": [
+            "status_code",
+            "duration_seconds",
+            "content_length",
+            "content_type",
+            "url",
+        ],
     }
     keys = preferred.get(event, [])
     remaining = sorted(
@@ -1124,6 +1238,20 @@ def _run_log_keys() -> list[str]:
         "duration_seconds",
         "manifest",
         "pipeline_error",
+    ]
+
+
+def _download_log_keys() -> list[str]:
+    return [
+        "run_id",
+        "job",
+        "selected",
+        "downloaded",
+        "already_present",
+        "failed",
+        "skipped",
+        "duration_seconds",
+        "manifest",
     ]
 
 
@@ -1229,6 +1357,20 @@ def _changelog_record(run: ChangelogRun | None, skipped: str | None) -> dict[str
         "event_count": run.event_count,
         "full_refresh": run.full_refresh,
         "scoped_record_count": run.scoped_record_count,
+    }
+
+
+def _download_record(result: DownloadRunResult) -> dict[str, Any]:
+    return {
+        "run_id": result.run_id,
+        "job": result.job_name,
+        "manifest": str(result.manifest_path),
+        "selected_count": result.selected_count,
+        "downloaded_count": result.downloaded_count,
+        "already_present_count": result.already_present_count,
+        "failed_count": result.failed_count,
+        "skipped_count": result.skipped_count,
+        "dry_run": result.dry_run,
     }
 
 

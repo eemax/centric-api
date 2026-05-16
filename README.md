@@ -11,6 +11,7 @@ uv run centric-api fetch --full
 uv run centric-api fetch --days 7
 uv run centric-api fetch --fetch-config config/fetcher.yml
 uv run centric-api changelog
+uv run centric-api download --dry-run
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
 ```
@@ -30,6 +31,13 @@ checkpoint/resume internals, or `--log-level off` to disable the log.
 scheduler lifecycle messages and concise fetch summaries to the terminal, runs fetch in quiet JSON
 mode, and writes JSONL-only records to `~/.centric-api/logs/cron.jsonl`. Fetch runs are serialized
 with `~/.centric-api/fetch.lock`.
+
+`download` selects document records from the local SQLite cache and downloads each document's
+`latest_revision` through `document_revisions/{revision_id}/download`. The default config is
+`config/download.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or pass
+`--download-config`. Files are stored under `CENTRIC_API_HOME/downloads/files`, each run writes a
+manifest under `CENTRIC_API_HOME/downloads/runs`, and human-readable download logs append to
+`CENTRIC_API_HOME/logs/download.log`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed
