@@ -12,6 +12,13 @@ from .store import connect
 
 CHANGELOG_SOURCE = "full-payload"
 CHANGELOG_SOURCE_SHA = hashlib.sha256(CHANGELOG_SOURCE.encode("utf-8")).hexdigest()
+MODIFIED_BY_FIELD = "modified_by"
+MODIFIED_AT_FIELD = "_modified_at"
+USER_ENDPOINT = "users"
+USER_NAME_FIELD = "node_name"
+DELETE_TYPE_TOMBSTONE = "tombstone"
+DELETE_TYPE_HARD_DELETE = "hard_delete"
+DELETE_TYPE_UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -32,12 +39,31 @@ class _IndexRow:
     payload_json: str
 
 
+@dataclass(frozen=True)
+class _ChangeEvent:
+    run_id: str
+    endpoint: str
+    record_id: str
+    changed_at: str
+    change_type: str
+    delete_type: str | None
+    modified_at: str | None
+    modified_by_id: str | None
+    modified_by_name: str | None
+    previous_hash: str | None
+    current_hash: str | None
+    changed_fields: list[str]
+    previous_payload_json: str | None
+    current_payload_json: str | None
+
+
 def record_changelog(
     db_path: Path,
     *,
     endpoints: set[str] | None = None,
     record_ids_by_endpoint: dict[str, set[str]] | None = None,
     deleted_record_ids_by_endpoint: dict[str, set[str]] | None = None,
+    deleted_record_delete_types_by_endpoint: dict[str, dict[str, str]] | None = None,
     full: bool = False,
 ) -> ChangelogRun:
     created_at = datetime.now(UTC)
@@ -46,6 +72,10 @@ def record_changelog(
         run_id = _allocate_run_id(conn, created_at)
         has_record_scope = (
             record_ids_by_endpoint is not None or deleted_record_ids_by_endpoint is not None
+        )
+        scoped_keys = _scoped_record_keys(
+            record_ids_by_endpoint=record_ids_by_endpoint or {},
+            deleted_record_ids_by_endpoint=deleted_record_ids_by_endpoint or {},
         )
         endpoint_names = _resolve_endpoint_scope(
             conn,
@@ -57,27 +87,27 @@ def record_changelog(
             conn,
             endpoint_names,
         )
-        previous_index = _load_current_index(conn, endpoints=endpoint_names)
+
         if full_refresh:
+            previous_index = _load_current_index(conn, endpoints=endpoint_names)
             current_index = _build_current_index(conn, endpoints=endpoint_names)
         else:
+            previous_index = _load_current_index_for_keys(conn, keys=scoped_keys)
             current_index = _build_scoped_current_index(
                 conn,
                 record_ids_by_endpoint=record_ids_by_endpoint or {},
             )
-            previous_index = _filter_previous_index_for_scoped_update(
-                previous_index,
-                current_index=current_index,
-                deleted_record_ids_by_endpoint=deleted_record_ids_by_endpoint or {},
-            )
 
+        user_names = _load_user_names(conn)
         events = _diff_indexes(
             run_id=run_id,
             changed_at=created_at,
             previous_index=previous_index,
             current_index=current_index,
+            user_names=user_names,
+            delete_types_by_endpoint=deleted_record_delete_types_by_endpoint or {},
         )
-        scoped_record_count = _scoped_record_count(record_ids_by_endpoint)
+        scoped_record_count = _scoped_record_count(scoped_keys)
 
         conn.execute("BEGIN")
         try:
@@ -102,8 +132,9 @@ def record_changelog(
                     scoped_record_count,
                 ],
             )
+            event_ids = _insert_change_events_and_fields(conn, events) if events else []
             if events:
-                _insert_change_events_and_fields(conn, events)
+                _insert_rollups(conn, events, event_ids)
             _replace_current_index(
                 conn,
                 full_refresh=full_refresh,
@@ -161,6 +192,10 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
             record_id TEXT NOT NULL,
             changed_at TEXT NOT NULL,
             change_type TEXT NOT NULL,
+            delete_type TEXT,
+            modified_at TEXT,
+            modified_by_id TEXT,
+            modified_by_name TEXT,
             previous_hash TEXT,
             current_hash TEXT,
             changed_fields_json TEXT NOT NULL,
@@ -178,16 +213,86 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
             field TEXT NOT NULL,
             field_change_type TEXT NOT NULL,
             event_change_type TEXT NOT NULL,
+            delete_type TEXT,
+            modified_at TEXT,
+            modified_by_id TEXT,
+            modified_by_name TEXT,
             previous_value_json TEXT,
             current_value_json TEXT,
             FOREIGN KEY (event_id) REFERENCES endpoint_change_events(id)
         );
+
+        CREATE TABLE IF NOT EXISTS endpoint_change_summary (
+            run_id TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            change_type TEXT NOT NULL,
+            delete_type TEXT,
+            count INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS endpoint_field_change_summary (
+            run_id TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            field TEXT NOT NULL,
+            field_change_type TEXT NOT NULL,
+            event_change_type TEXT NOT NULL,
+            count INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS endpoint_actor_change_summary (
+            run_id TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            modified_by_id TEXT,
+            modified_by_name TEXT,
+            change_type TEXT NOT NULL,
+            delete_type TEXT,
+            count INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS endpoint_actor_field_change_summary (
+            run_id TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            modified_by_id TEXT,
+            modified_by_name TEXT,
+            field TEXT NOT NULL,
+            field_change_type TEXT NOT NULL,
+            event_change_type TEXT NOT NULL,
+            count INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_changed_at
+        ON endpoint_change_events(changed_at);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_endpoint_changed_at
+        ON endpoint_change_events(endpoint, changed_at);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_actor
+        ON endpoint_change_events(modified_by_id, changed_at);
 
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_fields_changed_at
         ON endpoint_change_fields(changed_at);
 
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_fields_endpoint_field
         ON endpoint_change_fields(endpoint, field);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_summary_changed_at
+        ON endpoint_change_summary(changed_at);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_field_change_summary_endpoint_changed_at
+        ON endpoint_field_change_summary(endpoint, changed_at);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_actor_change_summary_actor
+        ON endpoint_actor_change_summary(modified_by_id, changed_at);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_actor_change_summary_endpoint_changed_at
+        ON endpoint_actor_change_summary(endpoint, changed_at);
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_actor_field_change_summary_endpoint_changed_at
+        ON endpoint_actor_field_change_summary(endpoint, changed_at);
         """
     )
 
@@ -230,11 +335,11 @@ def list_change_summary(
         ensure_changelog_tables(conn)
         rows = conn.execute(
             f"""
-            SELECT endpoint, change_type, COUNT(*) AS count
-            FROM endpoint_change_events
+            SELECT endpoint, change_type, delete_type, SUM(count) AS count
+            FROM endpoint_change_summary
             {clause}
-            GROUP BY endpoint, change_type
-            ORDER BY endpoint, change_type
+            GROUP BY endpoint, change_type, delete_type
+            ORDER BY endpoint, change_type, delete_type
             LIMIT ?
             """,
             [*params, limit],
@@ -264,11 +369,46 @@ def list_field_summary(
         ensure_changelog_tables(conn)
         rows = conn.execute(
             f"""
-            SELECT endpoint, field, field_change_type, COUNT(*) AS count
-            FROM endpoint_change_fields
+            SELECT endpoint, field, field_change_type, event_change_type, SUM(count) AS count
+            FROM endpoint_field_change_summary
             {clause}
-            GROUP BY endpoint, field, field_change_type
-            ORDER BY count DESC, endpoint, field, field_change_type
+            GROUP BY endpoint, field, field_change_type, event_change_type
+            ORDER BY count DESC, endpoint, field, field_change_type, event_change_type
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_actor_summary(
+    db_path: Path,
+    *,
+    endpoint: str | None = None,
+    since: datetime | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    clauses: list[str] = []
+    params: list[Any] = []
+    if endpoint:
+        clauses.append("endpoint = ?")
+        params.append(endpoint)
+    if since is not None:
+        clauses.append("changed_at >= ?")
+        params.append(_datetime_to_db(since))
+    clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+    with connect(db_path) as conn:
+        ensure_changelog_tables(conn)
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, modified_by_id, modified_by_name, change_type,
+                   delete_type, SUM(count) AS count
+            FROM endpoint_actor_change_summary
+            {clause}
+            GROUP BY endpoint, modified_by_id, modified_by_name, change_type, delete_type
+            ORDER BY count DESC, endpoint, modified_by_name, modified_by_id, change_type
             LIMIT ?
             """,
             [*params, limit],
@@ -299,6 +439,7 @@ def list_changes(
         rows = conn.execute(
             f"""
             SELECT run_id, endpoint, record_id, changed_at, change_type,
+                   delete_type, modified_at, modified_by_id, modified_by_name,
                    changed_fields_json, previous_payload_json, current_payload_json
             FROM endpoint_change_events
             {clause}
@@ -395,15 +536,7 @@ def _build_current_index(
         """,
         sorted(endpoints),
     ).fetchall()
-    return {
-        (row["endpoint"], row["record_id"]): _IndexRow(
-            endpoint=row["endpoint"],
-            record_id=row["record_id"],
-            payload_hash=row["payload_sha256"],
-            payload_json=row["payload_json"],
-        )
-        for row in rows
-    }
+    return _index_from_rows(rows, hash_column="payload_sha256")
 
 
 def _build_scoped_current_index(
@@ -425,13 +558,7 @@ def _build_scoped_current_index(
             """,
             [endpoint, *sorted(record_ids)],
         ).fetchall()
-        for row in rows:
-            index[(row["endpoint"], row["record_id"])] = _IndexRow(
-                endpoint=row["endpoint"],
-                record_id=row["record_id"],
-                payload_hash=row["payload_sha256"],
-                payload_json=row["payload_json"],
-            )
+        index.update(_index_from_rows(rows, hash_column="payload_sha256"))
     return index
 
 
@@ -450,15 +577,58 @@ def _load_current_index(
         """,
         sorted(endpoints),
     ).fetchall()
+    return _index_from_rows(rows, hash_column="payload_hash")
+
+
+def _load_current_index_for_keys(
+    conn: sqlite3.Connection,
+    *,
+    keys: dict[str, set[str]],
+) -> dict[tuple[str, str], _IndexRow]:
+    index: dict[tuple[str, str], _IndexRow] = {}
+    for endpoint, record_ids in sorted(keys.items()):
+        if not record_ids:
+            continue
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, record_id, payload_hash, payload_json
+            FROM endpoint_changelog_index_current
+            WHERE endpoint = ?
+              AND record_id IN ({",".join("?" for _ in record_ids)})
+            """,
+            [endpoint, *sorted(record_ids)],
+        ).fetchall()
+        index.update(_index_from_rows(rows, hash_column="payload_hash"))
+    return index
+
+
+def _index_from_rows(
+    rows: list[sqlite3.Row],
+    *,
+    hash_column: str,
+) -> dict[tuple[str, str], _IndexRow]:
     return {
         (row["endpoint"], row["record_id"]): _IndexRow(
             endpoint=row["endpoint"],
             record_id=row["record_id"],
-            payload_hash=row["payload_hash"],
+            payload_hash=row[hash_column],
             payload_json=row["payload_json"],
         )
         for row in rows
     }
+
+
+def _scoped_record_keys(
+    *,
+    record_ids_by_endpoint: dict[str, set[str]],
+    deleted_record_ids_by_endpoint: dict[str, set[str]],
+) -> dict[str, set[str]]:
+    keys: dict[str, set[str]] = {}
+    for endpoint, record_ids in record_ids_by_endpoint.items():
+        keys.setdefault(endpoint, set()).update(record_ids)
+    for endpoint, record_ids in deleted_record_ids_by_endpoint.items():
+        keys.setdefault(endpoint, set()).update(record_ids)
+    return keys
 
 
 def _diff_indexes(
@@ -467,8 +637,11 @@ def _diff_indexes(
     changed_at: datetime,
     previous_index: dict[tuple[str, str], _IndexRow],
     current_index: dict[tuple[str, str], _IndexRow],
-) -> list[list[Any]]:
-    events: list[list[Any]] = []
+    user_names: dict[str, str],
+    delete_types_by_endpoint: dict[str, dict[str, str]],
+) -> list[_ChangeEvent]:
+    events: list[_ChangeEvent] = []
+    changed_at_text = _datetime_to_db(changed_at)
     for endpoint, record_id in sorted(set(previous_index) | set(current_index)):
         previous = previous_index.get((endpoint, record_id))
         current = current_index.get((endpoint, record_id))
@@ -480,70 +653,91 @@ def _diff_indexes(
             change_type = "changed"
         else:
             continue
-        events.append(
-            [
-                run_id,
-                endpoint,
+
+        delete_type = None
+        if change_type == "removed":
+            delete_type = delete_types_by_endpoint.get(endpoint, {}).get(
                 record_id,
-                _datetime_to_db(changed_at),
-                change_type,
-                previous.payload_hash if previous else None,
-                current.payload_hash if current else None,
-                json.dumps(_changed_fields(previous, current), sort_keys=True),
-                previous.payload_json if previous else None,
-                current.payload_json if current else None,
-            ]
+                DELETE_TYPE_UNKNOWN,
+            )
+        actor_payload = _actor_payload(previous=previous, current=current)
+        modified_by_id = _string_value(actor_payload.get(MODIFIED_BY_FIELD))
+        events.append(
+            _ChangeEvent(
+                run_id=run_id,
+                endpoint=endpoint,
+                record_id=record_id,
+                changed_at=changed_at_text,
+                change_type=change_type,
+                delete_type=delete_type,
+                modified_at=_string_value(actor_payload.get(MODIFIED_AT_FIELD)),
+                modified_by_id=modified_by_id,
+                modified_by_name=user_names.get(modified_by_id or ""),
+                previous_hash=previous.payload_hash if previous else None,
+                current_hash=current.payload_hash if current else None,
+                changed_fields=_changed_fields(previous, current),
+                previous_payload_json=previous.payload_json if previous else None,
+                current_payload_json=current.payload_json if current else None,
+            )
         )
     return events
 
 
 def _insert_change_events_and_fields(
     conn: sqlite3.Connection,
-    events: list[list[Any]],
-) -> None:
+    events: list[_ChangeEvent],
+) -> list[int]:
+    event_ids: list[int] = []
     for event in events:
         cursor = conn.execute(
             """
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type,
+                delete_type, modified_at, modified_by_id, modified_by_name,
                 previous_hash, current_hash, changed_fields_json,
                 previous_payload_json, current_payload_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            event,
+            [
+                event.run_id,
+                event.endpoint,
+                event.record_id,
+                event.changed_at,
+                event.change_type,
+                event.delete_type,
+                event.modified_at,
+                event.modified_by_id,
+                event.modified_by_name,
+                event.previous_hash,
+                event.current_hash,
+                json.dumps(event.changed_fields, sort_keys=True),
+                event.previous_payload_json,
+                event.current_payload_json,
+            ],
         )
         event_id = int(cursor.lastrowid)
+        event_ids.append(event_id)
         field_rows = _field_change_rows(event_id, event)
         if field_rows:
             conn.executemany(
                 """
                 INSERT INTO endpoint_change_fields (
                     run_id, event_id, endpoint, record_id, changed_at, field,
-                    field_change_type, event_change_type, previous_value_json,
+                    field_change_type, event_change_type, delete_type, modified_at,
+                    modified_by_id, modified_by_name, previous_value_json,
                     current_value_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 field_rows,
             )
+    return event_ids
 
 
-def _field_change_rows(event_id: int, event: list[Any]) -> list[list[Any]]:
-    (
-        run_id,
-        endpoint,
-        record_id,
-        changed_at,
-        event_change_type,
-        _previous_hash,
-        _current_hash,
-        _changed_fields_json,
-        previous_payload_json,
-        current_payload_json,
-    ) = event
-    previous_payload = _json_dict(previous_payload_json)
-    current_payload = _json_dict(current_payload_json)
+def _field_change_rows(event_id: int, event: _ChangeEvent) -> list[list[Any]]:
+    previous_payload = _json_dict(event.previous_payload_json)
+    current_payload = _json_dict(event.current_payload_json)
     rows: list[list[Any]] = []
     for field in sorted(set(previous_payload) | set(current_payload)):
         previous_exists = field in previous_payload
@@ -560,19 +754,173 @@ def _field_change_rows(event_id: int, event: list[Any]) -> list[list[Any]]:
             field_change_type = "removed_field"
         rows.append(
             [
-                run_id,
+                event.run_id,
                 event_id,
-                endpoint,
-                record_id,
-                changed_at,
+                event.endpoint,
+                event.record_id,
+                event.changed_at,
                 field,
                 field_change_type,
-                event_change_type,
+                event.change_type,
+                event.delete_type,
+                event.modified_at,
+                event.modified_by_id,
+                event.modified_by_name,
                 _json_or_none(previous_value) if previous_exists else None,
                 _json_or_none(current_value) if current_exists else None,
             ]
         )
     return rows
+
+
+def _insert_rollups(
+    conn: sqlite3.Connection,
+    events: list[_ChangeEvent],
+    event_ids: list[int],
+) -> None:
+    change_counts: dict[tuple[str, str, str, str | None], int] = {}
+    actor_counts: dict[tuple[str, str, str | None, str | None, str, str | None], int] = {}
+    field_counts: dict[tuple[str, str, str, str, str], int] = {}
+    actor_field_counts: dict[tuple[str, str, str | None, str | None, str, str, str], int] = {}
+
+    for event_id, event in zip(event_ids, events, strict=True):
+        change_key = (event.run_id, event.endpoint, event.change_type, event.delete_type)
+        change_counts[change_key] = change_counts.get(change_key, 0) + 1
+        actor_key = (
+            event.run_id,
+            event.endpoint,
+            event.modified_by_id,
+            event.modified_by_name,
+            event.change_type,
+            event.delete_type,
+        )
+        actor_counts[actor_key] = actor_counts.get(actor_key, 0) + 1
+        for field_row in _field_change_rows(event_id, event):
+            field = field_row[5]
+            field_change_type = field_row[6]
+            event_change_type = field_row[7]
+            field_key = (
+                event.run_id,
+                event.endpoint,
+                field,
+                field_change_type,
+                event_change_type,
+            )
+            actor_field_key = (
+                event.run_id,
+                event.endpoint,
+                event.modified_by_id,
+                event.modified_by_name,
+                field,
+                field_change_type,
+                event_change_type,
+            )
+            field_counts[field_key] = field_counts.get(field_key, 0) + 1
+            actor_field_counts[actor_field_key] = actor_field_counts.get(actor_field_key, 0) + 1
+
+    if change_counts:
+        conn.executemany(
+            """
+            INSERT INTO endpoint_change_summary (
+                run_id, changed_at, endpoint, change_type, delete_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                [run_id, events[0].changed_at, endpoint, change_type, delete_type, count]
+                for (run_id, endpoint, change_type, delete_type), count in change_counts.items()
+            ],
+        )
+    if field_counts:
+        conn.executemany(
+            """
+            INSERT INTO endpoint_field_change_summary (
+                run_id, changed_at, endpoint, field, field_change_type,
+                event_change_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                [
+                    run_id,
+                    events[0].changed_at,
+                    endpoint,
+                    field,
+                    field_change_type,
+                    event_change_type,
+                    count,
+                ]
+                for (
+                    run_id,
+                    endpoint,
+                    field,
+                    field_change_type,
+                    event_change_type,
+                ), count in field_counts.items()
+            ],
+        )
+    if actor_counts:
+        conn.executemany(
+            """
+            INSERT INTO endpoint_actor_change_summary (
+                run_id, changed_at, endpoint, modified_by_id, modified_by_name,
+                change_type, delete_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                [
+                    run_id,
+                    events[0].changed_at,
+                    endpoint,
+                    modified_by_id,
+                    modified_by_name,
+                    change_type,
+                    delete_type,
+                    count,
+                ]
+                for (
+                    run_id,
+                    endpoint,
+                    modified_by_id,
+                    modified_by_name,
+                    change_type,
+                    delete_type,
+                ), count in actor_counts.items()
+            ],
+        )
+    if actor_field_counts:
+        conn.executemany(
+            """
+            INSERT INTO endpoint_actor_field_change_summary (
+                run_id, changed_at, endpoint, modified_by_id, modified_by_name,
+                field, field_change_type, event_change_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                [
+                    run_id,
+                    events[0].changed_at,
+                    endpoint,
+                    modified_by_id,
+                    modified_by_name,
+                    field,
+                    field_change_type,
+                    event_change_type,
+                    count,
+                ]
+                for (
+                    run_id,
+                    endpoint,
+                    modified_by_id,
+                    modified_by_name,
+                    field,
+                    field_change_type,
+                    event_change_type,
+                ), count in actor_field_counts.items()
+            ],
+        )
 
 
 def _replace_current_index(
@@ -625,18 +973,6 @@ def _replace_current_index(
         )
 
 
-def _filter_previous_index_for_scoped_update(
-    previous_index: dict[tuple[str, str], _IndexRow],
-    *,
-    current_index: dict[tuple[str, str], _IndexRow],
-    deleted_record_ids_by_endpoint: dict[str, set[str]],
-) -> dict[tuple[str, str], _IndexRow]:
-    keys = set(current_index)
-    for endpoint, record_ids in deleted_record_ids_by_endpoint.items():
-        keys.update((endpoint, record_id) for record_id in record_ids)
-    return {key: previous_index[key] for key in keys if key in previous_index}
-
-
 def _changed_fields(previous: _IndexRow | None, current: _IndexRow | None) -> list[str]:
     previous_payload = _json_dict(previous.payload_json if previous else None)
     current_payload = _json_dict(current.payload_json if current else None)
@@ -645,6 +981,38 @@ def _changed_fields(previous: _IndexRow | None, current: _IndexRow | None) -> li
         for field in set(previous_payload) | set(current_payload)
         if previous_payload.get(field) != current_payload.get(field)
     )
+
+
+def _actor_payload(
+    *,
+    previous: _IndexRow | None,
+    current: _IndexRow | None,
+) -> dict[str, Any]:
+    if current is not None:
+        payload_json = current.payload_json
+    elif previous is not None:
+        payload_json = previous.payload_json
+    else:
+        payload_json = None
+    return _json_dict(payload_json)
+
+
+def _load_user_names(conn: sqlite3.Connection) -> dict[str, str]:
+    rows = conn.execute(
+        """
+        SELECT record_id, payload_json
+        FROM endpoint_records
+        WHERE endpoint = ?
+        """,
+        [USER_ENDPOINT],
+    ).fetchall()
+    names: dict[str, str] = {}
+    for row in rows:
+        payload = _json_dict(row["payload_json"])
+        name = _string_value(payload.get(USER_NAME_FIELD))
+        if name:
+            names[str(row["record_id"])] = name
+    return names
 
 
 def _allocate_run_id(conn: sqlite3.Connection, created_at: datetime) -> str:
@@ -682,6 +1050,13 @@ def _json_dict(value: str | None) -> dict[str, Any]:
 
 def _json_or_none(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _string_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text.strip() else None
 
 
 def _datetime_to_db(value: datetime) -> str:

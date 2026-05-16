@@ -56,11 +56,15 @@ endpoints:
 Private schema overlays resolve from `~/.centric-api/endpoint-schema.yml`.
 
 Changelog tracking is automatic. It compares canonical full payloads for current records and records
-added, changed, and removed events after ingest.
+added, changed, and removed events after ingest. Event rows keep the previous and current payloads
+for drill-down, plus delete type for removals and actor fields from `modified_by`. Actor names are
+resolved from the `users` endpoint `node_name`.
 
 Full fetch ingest is authoritative per successful endpoint. Current local records missing from a
 successful full snapshot are removed from `endpoint_records` and written as synthetic hard-delete
 tombstones.
 
-For dashboard-style queries, changelog also writes `endpoint_change_fields`, one row per top-level
-field change. Use `centric-api changelog fields` for a quick aggregate view.
+For dashboard-style queries, changelog also writes field-level rows and compact rollups:
+`endpoint_change_summary`, `endpoint_field_change_summary`, `endpoint_actor_change_summary`, and
+`endpoint_actor_field_change_summary`. Use `centric-api changelog fields` and
+`centric-api changelog actors` for quick aggregate views.

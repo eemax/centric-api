@@ -17,6 +17,8 @@ HARD_DELETE_TYPE_FIELD = "_centric_api_delete_type"
 HARD_DELETE_DELETED_AT_FIELD = "_centric_api_deleted_at"
 HARD_DELETE_SOURCE_RUN_ID_FIELD = "_centric_api_source_run_id"
 HARD_DELETE_SOURCE_FILE_FIELD = "_centric_api_source_file"
+DELETE_TYPE_TOMBSTONE = "tombstone"
+DELETE_TYPE_HARD_DELETE = "hard_delete"
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,7 @@ class IngestResult:
     endpoints: dict[str, int]
     upserted_record_ids_by_endpoint: dict[str, tuple[str, ...]]
     deleted_record_ids_by_endpoint: dict[str, tuple[str, ...]]
+    deleted_record_delete_types_by_endpoint: dict[str, dict[str, str]]
 
     @property
     def changed_record_ids_by_endpoint(self) -> dict[str, tuple[str, ...]]:
@@ -144,6 +147,7 @@ def ingest_raw_dir(
     endpoints: defaultdict[str, int] = defaultdict(int)
     upserted_ids: defaultdict[str, set[str]] = defaultdict(set)
     deleted_ids: defaultdict[str, set[str]] = defaultdict(set)
+    deleted_types: defaultdict[str, dict[str, str]] = defaultdict(dict)
 
     with connect(db_path) as conn:
         for raw_file in raw_files:
@@ -192,6 +196,7 @@ def ingest_raw_dir(
             endpoints[raw_file.endpoint] += file_result["records_read"]
             upserted_ids[raw_file.endpoint].update(file_result["upserted_ids"])
             deleted_ids[raw_file.endpoint].update(file_result["deleted_ids"])
+            deleted_types[raw_file.endpoint].update(file_result["deleted_types"])
 
     return IngestResult(
         applied_files=applied_files,
@@ -211,6 +216,11 @@ def ingest_raw_dir(
             endpoint: tuple(sorted(record_ids))
             for endpoint, record_ids in sorted(deleted_ids.items())
             if record_ids
+        },
+        deleted_record_delete_types_by_endpoint={
+            endpoint: dict(sorted(record_types.items()))
+            for endpoint, record_types in sorted(deleted_types.items())
+            if record_types
         },
     )
 
@@ -284,6 +294,7 @@ def _apply_raw_file(
 
     upserted_ids: set[str] = set()
     deleted_ids: set[str] = set()
+    deleted_types: dict[str, str] = {}
     retained_ids: set[str] = set()
     for record_id, (payload, _) in sorted(winners.items()):
         payload_json = _canonical_json(payload)
@@ -315,6 +326,7 @@ def _apply_raw_file(
                     ingested_at=now,
                 )
                 deleted_ids.add(record_id)
+                deleted_types[record_id] = DELETE_TYPE_TOMBSTONE
             elif existing is None:
                 _upsert_tombstone(
                     conn,
@@ -372,6 +384,8 @@ def _apply_raw_file(
         ingested_at=now,
     )
     deleted_ids.update(hard_deleted_ids)
+    for record_id in hard_deleted_ids:
+        deleted_types[record_id] = DELETE_TYPE_HARD_DELETE
 
     return {
         "records_read": records_read,
@@ -381,6 +395,7 @@ def _apply_raw_file(
         "invalid_records": invalid_records,
         "upserted_ids": upserted_ids,
         "deleted_ids": deleted_ids,
+        "deleted_types": deleted_types,
     }
 
 

@@ -21,6 +21,7 @@ from croniter import croniter
 from .auth import AuthError, init_auth_context
 from .changelog import (
     ChangelogRun,
+    list_actor_summary,
     list_change_summary,
     list_changelog_runs,
     list_changes,
@@ -95,7 +96,7 @@ def _build_parser() -> argparse.ArgumentParser:
     changelog_parser.add_argument(
         "action",
         nargs="?",
-        choices=["summary", "fields", "runs", "changes", "update"],
+        choices=["summary", "fields", "actors", "runs", "changes", "update"],
         default="summary",
     )
     changelog_parser.add_argument("--db", default=None)
@@ -337,6 +338,7 @@ def run_changelog(args: argparse.Namespace) -> int:
                 "record_count": run.record_count,
                 "event_count": run.event_count,
                 "full_refresh": run.full_refresh,
+                "scoped_record_count": run.scoped_record_count,
             },
             (
                 f"Changelog updated: {run.record_count} records tracked across "
@@ -363,6 +365,14 @@ def run_changelog(args: argparse.Namespace) -> int:
             limit=args.limit,
         )
         return _print_rows(rows, args.json, empty_message="No changelog field changes found.")
+    if args.action == "actors":
+        rows = list_actor_summary(
+            db_path,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+            since=since,
+            limit=args.limit,
+        )
+        return _print_rows(rows, args.json, empty_message="No changelog actor changes found.")
     rows = list_change_summary(db_path, since=since, limit=args.limit)
     return _print_rows(rows, args.json, empty_message="No changelog events found.")
 
@@ -590,6 +600,7 @@ def _run_changelog_after_ingest(
                 endpoint: set(record_ids)
                 for endpoint, record_ids in ingest_result.deleted_record_ids_by_endpoint.items()
             },
+            deleted_record_delete_types_by_endpoint=ingest_result.deleted_record_delete_types_by_endpoint,
         ),
         None,
     )
@@ -694,6 +705,7 @@ def _print_human_fetch_summary(
         print()
         print("Changelog")
         print(f"Events:    {changelog_run.event_count}")
+        print(f"Scoped:    {changelog_run.scoped_record_count}")
         print(f"Run:       {changelog_run.run_id}")
     elif changelog_skipped:
         print()
@@ -955,6 +967,7 @@ def _changelog_record(run: ChangelogRun | None, skipped: str | None) -> dict[str
         "record_count": run.record_count,
         "event_count": run.event_count,
         "full_refresh": run.full_refresh,
+        "scoped_record_count": run.scoped_record_count,
     }
 
 
