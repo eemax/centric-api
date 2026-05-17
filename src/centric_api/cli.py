@@ -1171,6 +1171,8 @@ def _log_label(record: LogEvent) -> str:
         "download_failed": "DOWNLOAD failed",
         "download_document_missing": "DOWNLOAD missing_document",
         "download_revision_missing": "DOWNLOAD missing_revision",
+        "download_revision_record_missing": "DOWNLOAD missing_revision_record",
+        "download_revision_filtered": "DOWNLOAD filtered_revision",
         "download_http_response": "DOWNLOAD http",
     }
     if event in labels:
@@ -1271,6 +1273,8 @@ def _log_key_order(event: str, record: LogEvent) -> list[str]:
         "download_failed": _download_log_keys(),
         "download_document_missing": ["document_id"],
         "download_revision_missing": ["document_id"],
+        "download_revision_record_missing": ["document_id", "revision_id"],
+        "download_revision_filtered": ["document_id", "revision_id"],
         "download_http_response": [
             "status_code",
             "duration_seconds",

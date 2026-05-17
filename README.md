@@ -35,18 +35,26 @@ mode, and writes JSONL-only records to `~/.centric-api/logs/cron.jsonl`. Fetch r
 with `~/.centric-api/fetch.lock`.
 
 `download` selects document records from the local SQLite cache and downloads each selected
-document's `latest_revision` through `document_revisions/{revision_id}/download`. The default mode is
-delta: documents already marked current in SQLite and present on disk are skipped. `--sync` verifies
-all selected latest revisions exist without overwriting existing files. `--rebuild` redownloads
-selected latest revisions and tombstones current download rows that are no longer selected, while
-preserving the last known good current revision if a replacement download fails. Download runs are
-serialized with `CENTRIC_API_HOME/download.lock`, and binary downloads retry transient HTTP/server
-hiccups with a simple 15s/30s backoff. The default config is
-`config/download.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or pass
-`--download-config`. Files are stored under `CENTRIC_API_HOME/downloads/files`, each run writes a
-manifest under `CENTRIC_API_HOME/downloads/runs`, current download state is tracked in the
-`download_current` SQLite table, and human-readable download logs append to
-`CENTRIC_API_HOME/logs/download.log`.
+document's `latest_revision` through `document_revisions/{revision_id}/download`. Source endpoint
+`documents` selects document records directly; every other source endpoint automatically collects
+document IDs from `documents` and `referenced_documents`. Filter document metadata with
+`document_filters`, and filter real revision metadata such as filename with `revision_filters`
+against the cached `document_revisions` endpoint. Source filters also support a narrow `lookup`
+operator for single reference IDs, such as filtering styles by the referenced season's `node_name`.
+Download preflight fails before selection if a job's source endpoints, `document_revisions`
+dependency, or lookup endpoints have not been fetched into the local cache yet. The default mode is
+delta: documents already marked current in SQLite and present on disk are
+skipped. `--sync` verifies all selected latest revisions exist without overwriting existing files.
+`--rebuild` redownloads selected latest revisions and tombstones current download rows that are no
+longer selected, while preserving the last known good current revision if a replacement download
+fails. Download runs are serialized with
+`CENTRIC_API_HOME/download.lock`, and binary downloads retry transient HTTP/server hiccups with a
+simple 15s/30s backoff. The default config is `config/download.yml`, with a fuller multi-job example
+in `config/download.example.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or
+pass `--download-config`. Files are stored under
+`CENTRIC_API_HOME/downloads/files`, each run writes a manifest under
+`CENTRIC_API_HOME/downloads/runs`, current download state is tracked in the `download_current` SQLite
+table, and human-readable download logs append to `CENTRIC_API_HOME/logs/download.log`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed

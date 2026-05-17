@@ -136,6 +136,11 @@ endpoints:
     path: documents
     count_spec:
       path: count/Document
+  - name: document_revisions
+    api_version: v2
+    path: document_revisions
+    count_spec:
+      path: count/DocumentRevision
   - name: duty_rates
     api_version: v2
     path: duty_rates

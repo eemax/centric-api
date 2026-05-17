@@ -53,6 +53,7 @@ DEFAULT_ENDPOINT_SCHEMAS: dict[str, EndpointSchema] = {
         "material_types",
         "style_types",
         "documents",
+        "document_revisions",
         "duty_rates",
         "users",
     )

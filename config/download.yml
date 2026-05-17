@@ -5,6 +5,6 @@ jobs:
   - name: basic
     sources:
       - endpoint: documents
-    document_filters:
-      - path: node_name
+    revision_filters:
+      - path: file_name
         matches: "\\.(pdf|xlsx)$"

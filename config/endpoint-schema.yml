@@ -103,6 +103,10 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  document_revisions:
+    delete_when_any:
+      - field: active
+        equals: false
   duty_rates:
     delete_when_any:
       - field: active

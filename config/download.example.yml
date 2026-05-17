@@ -1,0 +1,64 @@
+version: 1
+output_dir: downloads
+
+jobs:
+  - name: ss26-style-techpacks
+    sources:
+      - endpoint: styles
+        filters:
+          - path: active
+            equals: true
+          - path: season
+            lookup:
+              endpoint: seasons
+              path: node_name
+              in:
+                - SS26
+                - Summer 2026
+
+    document_filters:
+      - path: document_type
+        in:
+          - Tech Pack
+          - Specification
+
+    revision_filters:
+      - path: file_name
+        matches: "\\.pdf$"
+
+  - name: approved-material-certificates
+    sources:
+      - endpoint: materials
+        filters:
+          - path: active
+            equals: true
+          - path: material_type
+            lookup:
+              endpoint: material_types
+              path: node_name
+              equals: Fabric
+
+    document_filters:
+      - path: Status
+        equals: Approved
+
+    revision_filters:
+      - path: file_name
+        matches: "\\.(pdf|xlsx)$"
+
+  - name: fw26-supplier-audits
+    sources:
+      - endpoint: suppliers
+        filters:
+          - path: active
+            equals: true
+
+    document_filters:
+      - path: document_type
+        matches: "Audit|Certificate|Agreement"
+
+    revision_filters:
+      - path: file_name
+        matches: "\\.(pdf|docx|xlsx)$"
+      - path: file
+        exists: true

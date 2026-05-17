@@ -24,6 +24,11 @@ DEFAULT_DOWNLOAD_CONFIG_PATH = Path("config/download.yml")
 PRIVATE_DOWNLOAD_CONFIG_PATH = Path("download.yml")
 DEFAULT_DOWNLOAD_DIR = Path("downloads")
 DOCUMENT_ENDPOINT = "documents"
+DOCUMENT_REVISION_ENDPOINT = "document_revisions"
+DOCUMENT_REFERENCE_PATHS = ("documents", "referenced_documents")
+LATEST_REVISION_FIELD = "latest_revision"
+DOCUMENT_NAME_FIELD = "node_name"
+REVISION_FILENAME_FIELD = "file_name"
 REVISION_DOWNLOAD_API_VERSION = "v2"
 
 DownloadLogCallback = Callable[[dict[str, Any]], None] | None
@@ -34,10 +39,23 @@ DOWNLOAD_RETRY_BASE_SECONDS = 15
 DOWNLOAD_RETRY_MAX_SECONDS = 30
 RETRYABLE_DOWNLOAD_STATUSES = {408, 429, 500, 502, 503, 504}
 ROOT_CONFIG_KEYS = {"version", "output_dir", "jobs"}
-JOB_CONFIG_KEYS = {"name", "sources", "document_filters", "revision_field", "filename_field"}
-SOURCE_CONFIG_KEYS = {"endpoint", "filters", "document_paths"}
-FILTER_OPERATORS = {"equals", "in", "contains", "matches", "exists"}
+JOB_CONFIG_KEYS = {"name", "sources", "document_filters", "revision_filters"}
+SOURCE_CONFIG_KEYS = {"endpoint", "filters"}
+FILTER_OPERATORS = {"equals", "in", "contains", "matches", "exists", "lookup"}
 FILTER_CONFIG_KEYS = {"path", *FILTER_OPERATORS}
+LOOKUP_CONFIG_KEYS = {"endpoint", "path", "equals", "in", "contains", "matches", "exists"}
+LOOKUP_OPERATORS = {"equals", "in", "contains", "matches", "exists"}
+
+
+@dataclass(frozen=True)
+class DownloadLookupFilter:
+    endpoint: str
+    path: str
+    equals: Any = None
+    in_values: tuple[Any, ...] | None = None
+    contains: Any = None
+    matches: str | None = None
+    exists: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -48,13 +66,13 @@ class DownloadFilter:
     contains: Any = None
     matches: str | None = None
     exists: bool | None = None
+    lookup: DownloadLookupFilter | None = None
 
 
 @dataclass(frozen=True)
 class DownloadSource:
     endpoint: str
     filters: tuple[DownloadFilter, ...] = ()
-    document_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,8 +80,7 @@ class DownloadJob:
     name: str
     sources: tuple[DownloadSource, ...]
     document_filters: tuple[DownloadFilter, ...] = ()
-    revision_field: str = "latest_revision"
-    filename_field: str = "node_name"
+    revision_filters: tuple[DownloadFilter, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -85,6 +102,7 @@ class CandidateDocument:
 class ResolvedDocument:
     document_id: str
     document_payload: dict[str, Any]
+    revision_payload: dict[str, Any] | None
     latest_revision_id: str
     filename: str
     candidates: tuple[CandidateDocument, ...]
@@ -195,6 +213,7 @@ def run_download_job(
 
     with connect(db_path) as conn:
         ensure_download_tables(conn)
+        _preflight_download_cache(conn, job)
         candidates = _collect_candidate_documents(conn, job, log_callback=log_callback)
         documents = _resolve_documents(conn, job, candidates, log_callback=log_callback)
         current_downloads = _load_current_downloads(conn, job.name)
@@ -627,14 +646,6 @@ def ensure_download_tables(conn: sqlite3.Connection) -> None:
         ON download_current(document_id, revision_id);
         """
     )
-    _ensure_table_columns(
-        conn,
-        "download_runs",
-        {
-            "dry_run_count": "INTEGER NOT NULL DEFAULT 0",
-            "superseded_count": "INTEGER NOT NULL DEFAULT 0",
-        },
-    )
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
@@ -670,14 +681,17 @@ def _parse_job(raw: Any, index: int) -> DownloadJob:
             _list(raw.get("document_filters", []), f"job[{name}].document_filters")
         )
     )
-    revision_field = _optional_path(raw.get("revision_field"), "latest_revision")
-    filename_field = _optional_path(raw.get("filename_field"), "node_name")
+    revision_filters = tuple(
+        _parse_filter(item, f"job[{name}].revision_filters[{i}]")
+        for i, item in enumerate(
+            _list(raw.get("revision_filters", []), f"job[{name}].revision_filters")
+        )
+    )
     return DownloadJob(
         name=name.strip(),
         sources=sources,
         document_filters=document_filters,
-        revision_field=revision_field,
-        filename_field=filename_field,
+        revision_filters=revision_filters,
     )
 
 
@@ -694,18 +708,7 @@ def _parse_source(raw: Any, index: int, job_name: str) -> DownloadSource:
             _list(raw.get("filters", []), f"job[{job_name}].sources[{index}].filters")
         )
     )
-    paths_raw = raw.get("document_paths", [])
-    paths_field = f"job[{job_name}].sources[{index}].document_paths"
-    if endpoint.strip() != DOCUMENT_ENDPOINT:
-        document_paths = tuple(_string_list(paths_raw, paths_field))
-        if not document_paths:
-            raise ConfigError(
-                f"job[{job_name}].sources[{index}].document_paths is required "
-                f"when endpoint is not {DOCUMENT_ENDPOINT!r}."
-            )
-    else:
-        document_paths = tuple(_string_list(paths_raw, paths_field))
-    return DownloadSource(endpoint=endpoint.strip(), filters=filters, document_paths=document_paths)
+    return DownloadSource(endpoint=endpoint.strip(), filters=filters)
 
 
 def _parse_filter(raw: Any, field_name: str) -> DownloadFilter:
@@ -715,11 +718,7 @@ def _parse_filter(raw: Any, field_name: str) -> DownloadFilter:
     path = raw.get("path")
     if not isinstance(path, str) or not path.strip():
         raise ConfigError(f"{field_name}.path must be a non-empty string.")
-    operators = [
-        key
-        for key in ("equals", "in", "contains", "matches", "exists")
-        if key in raw
-    ]
+    operators = [key for key in FILTER_OPERATORS if key in raw]
     if len(operators) != 1:
         raise ConfigError(f"{field_name} must set exactly one filter operator.")
     in_values = None
@@ -733,7 +732,48 @@ def _parse_filter(raw: Any, field_name: str) -> DownloadFilter:
         if not isinstance(matches, str):
             raise ConfigError(f"{field_name}.matches must be a string.")
         re.compile(matches)
+    lookup = (
+        _parse_lookup_filter(raw.get("lookup"), f"{field_name}.lookup")
+        if "lookup" in raw
+        else None
+    )
     return DownloadFilter(
+        path=path.strip(),
+        equals=raw.get("equals"),
+        in_values=in_values,
+        contains=raw.get("contains"),
+        matches=matches,
+        exists=exists,
+        lookup=lookup,
+    )
+
+
+def _parse_lookup_filter(raw: Any, field_name: str) -> DownloadLookupFilter:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{field_name} must be an object.")
+    _reject_unknown_keys(raw, LOOKUP_CONFIG_KEYS, field_name)
+    endpoint = raw.get("endpoint")
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise ConfigError(f"{field_name}.endpoint must be a non-empty string.")
+    path = raw.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise ConfigError(f"{field_name}.path must be a non-empty string.")
+    operators = [key for key in LOOKUP_OPERATORS if key in raw]
+    if len(operators) != 1:
+        raise ConfigError(f"{field_name} must set exactly one filter operator.")
+    in_values = None
+    if "in" in raw:
+        in_values = tuple(_list(raw.get("in"), f"{field_name}.in"))
+    exists = raw.get("exists") if "exists" in raw else None
+    if exists is not None and not isinstance(exists, bool):
+        raise ConfigError(f"{field_name}.exists must be true or false.")
+    matches = raw.get("matches")
+    if matches is not None:
+        if not isinstance(matches, str):
+            raise ConfigError(f"{field_name}.matches must be a string.")
+        re.compile(matches)
+    return DownloadLookupFilter(
+        endpoint=endpoint.strip(),
         path=path.strip(),
         equals=raw.get("equals"),
         in_values=in_values,
@@ -749,41 +789,10 @@ def _list(value: Any, field_name: str) -> list[Any]:
     return value
 
 
-def _string_list(value: Any, field_name: str) -> list[str]:
-    values = _list(value, field_name)
-    output: list[str] = []
-    for index, item in enumerate(values):
-        if not isinstance(item, str) or not item.strip():
-            raise ConfigError(f"{field_name}[{index}] must be a non-empty string.")
-        output.append(item.strip())
-    return output
-
-
-def _optional_path(value: Any, default: str) -> str:
-    if value is None:
-        return default
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError("download path fields must be non-empty strings.")
-    return value.strip()
-
-
 def _reject_unknown_keys(payload: dict[str, Any], allowed: set[str], field_name: str) -> None:
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ConfigError(f"{field_name} has unknown keys: {', '.join(unknown)}")
-
-
-def _ensure_table_columns(
-    conn: sqlite3.Connection,
-    table_name: str,
-    columns: dict[str, str],
-) -> None:
-    existing = set()
-    for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall():
-        existing.add(str(row["name"] if isinstance(row, sqlite3.Row) else row[1]))
-    for column_name, column_sql in columns.items():
-        if column_name not in existing:
-            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
 def _ensure_unique_job_names(jobs: tuple[DownloadJob, ...]) -> None:
@@ -801,6 +810,49 @@ def _select_job(config: DownloadConfig, job_name: str | None) -> DownloadJob:
         if job.name == job_name:
             return job
     raise ConfigError(f"Unknown download job: {job_name}")
+
+
+def _preflight_download_cache(conn: sqlite3.Connection, job: DownloadJob) -> None:
+    required_endpoints = {source.endpoint for source in job.sources}
+    if job.revision_filters:
+        required_endpoints.add(DOCUMENT_REVISION_ENDPOINT)
+    required_endpoints.update(_lookup_filter_endpoints(job))
+    missing = [
+        endpoint
+        for endpoint in sorted(required_endpoints)
+        if not _endpoint_has_cached_records(conn, endpoint)
+    ]
+    if missing:
+        raise ConfigError(
+            f"Download job {job.name!r} requires cached endpoint records for: "
+            f"{', '.join(missing)}. Run centric-api fetch for those endpoints first."
+        )
+
+
+def _lookup_filter_endpoints(job: DownloadJob) -> set[str]:
+    endpoints: set[str] = set()
+    for source in job.sources:
+        endpoints.update(_lookup_endpoints_from_filters(source.filters))
+    endpoints.update(_lookup_endpoints_from_filters(job.document_filters))
+    endpoints.update(_lookup_endpoints_from_filters(job.revision_filters))
+    return endpoints
+
+
+def _lookup_endpoints_from_filters(filters: tuple[DownloadFilter, ...]) -> set[str]:
+    return {item.lookup.endpoint for item in filters if item.lookup is not None}
+
+
+def _endpoint_has_cached_records(conn: sqlite3.Connection, endpoint: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM endpoint_records
+        WHERE endpoint = ?
+        LIMIT 1
+        """,
+        [endpoint],
+    ).fetchone()
+    return row is not None
 
 
 def _collect_candidate_documents(
@@ -822,7 +874,7 @@ def _collect_candidate_documents(
         ).fetchall()
         for row in rows:
             payload = _json_dict(row["payload_json"])
-            if not _matches_filters(payload, source.filters):
+            if not _matches_filters(conn, payload, source.filters):
                 _emit(
                     log_callback,
                     {
@@ -833,7 +885,7 @@ def _collect_candidate_documents(
                     },
                 )
                 continue
-            if source.endpoint == DOCUMENT_ENDPOINT and not source.document_paths:
+            if source.endpoint == DOCUMENT_ENDPOINT:
                 candidates.setdefault(str(row["record_id"]), []).append(
                     CandidateDocument(
                         document_id=str(row["record_id"]),
@@ -843,7 +895,7 @@ def _collect_candidate_documents(
                     )
                 )
             else:
-                for path in source.document_paths:
+                for path in DOCUMENT_REFERENCE_PATHS:
                     for document_id in sorted(
                         set(_document_ids_from_value(_extract_path(payload, path)))
                     ):
@@ -886,7 +938,7 @@ def _resolve_documents(
             )
             continue
         payload = _json_dict(row["payload_json"])
-        if not _matches_filters(payload, job.document_filters):
+        if not _matches_filters(conn, payload, job.document_filters):
             _emit(
                 log_callback,
                 {
@@ -896,7 +948,7 @@ def _resolve_documents(
                 },
             )
             continue
-        revision_id = _string_value(_extract_path(payload, job.revision_field))
+        revision_id = _string_value(_extract_path(payload, LATEST_REVISION_FIELD))
         if not revision_id:
             _emit(
                 log_callback,
@@ -907,11 +959,41 @@ def _resolve_documents(
                 },
             )
             continue
-        filename = _string_value(_extract_path(payload, job.filename_field)) or f"{document_id}.bin"
+        revision_payload = _load_revision_payload(
+            conn,
+            revision_id=revision_id,
+            document_id=document_id,
+            log_callback=log_callback,
+        )
+        if revision_payload is None and job.revision_filters:
+            continue
+        if revision_payload is not None and not _matches_filters(
+            conn,
+            revision_payload,
+            job.revision_filters,
+        ):
+            _emit(
+                log_callback,
+                {
+                    "level": "debug",
+                    "event": "download_revision_filtered",
+                    "document_id": document_id,
+                    "revision_id": revision_id,
+                },
+            )
+            continue
+        filename = (
+            _string_value(
+                _extract_path(revision_payload or {}, REVISION_FILENAME_FIELD)
+            )
+            or _string_value(_extract_path(payload, DOCUMENT_NAME_FIELD))
+            or f"{document_id}.bin"
+        )
         documents.append(
             ResolvedDocument(
                 document_id=document_id,
                 document_payload=payload,
+                revision_payload=revision_payload,
                 latest_revision_id=revision_id,
                 filename=filename,
                 candidates=tuple(refs),
@@ -920,11 +1002,75 @@ def _resolve_documents(
     return documents
 
 
-def _matches_filters(payload: dict[str, Any], filters: tuple[DownloadFilter, ...]) -> bool:
-    return all(_matches_filter(payload, item) for item in filters)
+def _load_revision_payload(
+    conn: sqlite3.Connection,
+    *,
+    revision_id: str,
+    document_id: str,
+    log_callback: DownloadLogCallback,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT payload_json
+        FROM endpoint_records
+        WHERE endpoint = ? AND record_id = ?
+        """,
+        [DOCUMENT_REVISION_ENDPOINT, revision_id],
+    ).fetchone()
+    if row is None:
+        _emit(
+            log_callback,
+            {
+                "level": "summary",
+                "event": "download_revision_record_missing",
+                "document_id": document_id,
+                "revision_id": revision_id,
+            },
+        )
+        return None
+    return _json_dict(row["payload_json"])
 
 
-def _matches_filter(payload: dict[str, Any], item: DownloadFilter) -> bool:
+def _matches_filters(
+    conn: sqlite3.Connection,
+    payload: dict[str, Any],
+    filters: tuple[DownloadFilter, ...],
+) -> bool:
+    return all(_matches_filter(conn, payload, item) for item in filters)
+
+
+def _matches_filter(
+    conn: sqlite3.Connection,
+    payload: dict[str, Any],
+    item: DownloadFilter,
+) -> bool:
+    found, value = _extract_path_with_presence(payload, item.path)
+    if item.lookup is not None:
+        if not found or not isinstance(value, str) or not value or value == "centric:":
+            return False
+        lookup_payload = _load_lookup_payload(
+            conn,
+            endpoint=item.lookup.endpoint,
+            record_id=value,
+        )
+        if lookup_payload is None:
+            return False
+        return _matches_lookup_filter(lookup_payload, item.lookup)
+    values = value if isinstance(value, list) else [value]
+    if item.exists is not None:
+        return found == item.exists
+    if not found:
+        return False
+    if item.in_values is not None:
+        return any(value_item in item.in_values for value_item in values)
+    if item.contains is not None:
+        return any(_contains(value_item, item.contains) for value_item in values)
+    if item.matches is not None:
+        return any(re.search(item.matches, str(value_item or "")) for value_item in values)
+    return any(value_item == item.equals for value_item in values)
+
+
+def _matches_lookup_filter(payload: dict[str, Any], item: DownloadLookupFilter) -> bool:
     found, value = _extract_path_with_presence(payload, item.path)
     values = value if isinstance(value, list) else [value]
     if item.exists is not None:
@@ -938,6 +1084,23 @@ def _matches_filter(payload: dict[str, Any], item: DownloadFilter) -> bool:
     if item.matches is not None:
         return any(re.search(item.matches, str(value_item or "")) for value_item in values)
     return any(value_item == item.equals for value_item in values)
+
+
+def _load_lookup_payload(
+    conn: sqlite3.Connection,
+    *,
+    endpoint: str,
+    record_id: str,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        SELECT payload_json
+        FROM endpoint_records
+        WHERE endpoint = ? AND record_id = ?
+        """,
+        [endpoint, record_id],
+    ).fetchone()
+    return _json_dict(row["payload_json"]) if row is not None else None
 
 
 def _contains(value: Any, expected: Any) -> bool:

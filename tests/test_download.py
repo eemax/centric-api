@@ -68,9 +68,6 @@ jobs:
         filters:
           - path: active
             equals: true
-        document_paths:
-          - documents
-          - referenced_documents
     document_filters:
       - path: node_name
         matches: '\\.(pdf|xlsx)$'
@@ -109,6 +106,22 @@ jobs:
     assert run_count == 1
     assert item_count == 2
     assert current_count == 0
+
+
+def test_download_requires_cached_source_endpoint(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path):
+        pass
+
+    config = _download_config(tmp_path)
+
+    with pytest.raises(ConfigError, match="documents"):
+        run_download_job(
+            db_path=db_path,
+            auth_ctx=None,
+            config=config,
+            mode="rebuild",
+        )
 
 
 def test_download_delta_skips_current_revision_present_on_disk(tmp_path: Path) -> None:
@@ -195,6 +208,12 @@ def test_download_rebuild_redownloads_and_tombstones_unselected(tmp_path: Path) 
 
     with connect(db_path) as conn:
         conn.execute("DELETE FROM endpoint_records WHERE endpoint = 'documents'")
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D2",
+            payload={"id": "D2", "node_name": "art.ai", "latest_revision": "R2"},
+        )
 
     tombstone_result = run_download_job(
         db_path=db_path,
@@ -250,6 +269,309 @@ def test_download_sync_uses_stored_content_disposition_path(tmp_path: Path) -> N
 
     assert sync.already_present_count == 1
     assert sync.items[0]["file_path"].endswith("/real-name.pdf")
+
+
+def test_download_uses_revision_filters_and_filename(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "display-name", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "node_name": "1", "file_name": "actual.pdf"},
+        )
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D2",
+            payload={"id": "D2", "node_name": "other-display", "latest_revision": "R2"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R2",
+            payload={"id": "R2", "node_name": "1", "file_name": "art.ai"},
+        )
+
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: docs
+    sources:
+      - endpoint: documents
+    revision_filters:
+      - path: file_name
+        matches: '\\.pdf$'
+""",
+        encoding="utf-8",
+    )
+    config = replace(load_download_config(config_path), output_dir=tmp_path / "downloads")
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=config,
+        dry_run=True,
+    )
+
+    assert result.selected_count == 1
+    assert result.items[0]["document_id"] == "D1"
+    assert result.items[0]["document_name"] == "actual.pdf"
+    assert result.items[0]["file_path"].endswith("/actual.pdf")
+
+
+def test_download_revision_filters_require_cached_revisions(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: docs
+    sources:
+      - endpoint: documents
+    revision_filters:
+      - path: file_name
+        matches: '\\.pdf$'
+""",
+        encoding="utf-8",
+    )
+    config = replace(load_download_config(config_path), output_dir=tmp_path / "downloads")
+
+    with pytest.raises(ConfigError, match="document_revisions"):
+        run_download_job(
+            db_path=db_path,
+            auth_ctx=None,
+            config=config,
+            mode="rebuild",
+        )
+
+    with sqlite3.connect(db_path) as conn:
+        current_count = conn.execute("SELECT COUNT(*) FROM download_current").fetchone()[0]
+    assert current_count == 0
+
+
+def test_download_source_filter_lookup_matches_referenced_record(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="seasons",
+            record_id="SEASON1",
+            payload={"id": "SEASON1", "node_name": "SS26"},
+        )
+        _insert_record(
+            conn,
+            endpoint="seasons",
+            record_id="SEASON2",
+            payload={"id": "SEASON2", "node_name": "FW26"},
+        )
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "active": True,
+                "season": "SEASON1",
+                "documents": ["D1"],
+                "referenced_documents": [],
+            },
+        )
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S2",
+            payload={
+                "id": "S2",
+                "active": True,
+                "season": "SEASON2",
+                "documents": ["D2"],
+                "referenced_documents": [],
+            },
+        )
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "one", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "one.pdf"},
+        )
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D2",
+            payload={"id": "D2", "node_name": "two", "latest_revision": "R2"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R2",
+            payload={"id": "R2", "file_name": "two.pdf"},
+        )
+
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: ss26-style-docs
+    sources:
+      - endpoint: styles
+        filters:
+          - path: season
+            lookup:
+              endpoint: seasons
+              path: node_name
+              equals: SS26
+    revision_filters:
+      - path: file_name
+        matches: '\\.pdf$'
+""",
+        encoding="utf-8",
+    )
+    config = replace(load_download_config(config_path), output_dir=tmp_path / "downloads")
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=config,
+        dry_run=True,
+    )
+
+    assert result.selected_count == 1
+    assert result.items[0]["document_id"] == "D1"
+
+
+def test_download_lookup_filters_require_cached_lookup_endpoint(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "season": "SEASON1",
+                "documents": ["D1"],
+                "referenced_documents": [],
+            },
+        )
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "one.pdf", "latest_revision": "R1"},
+        )
+
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: ss26-style-docs
+    sources:
+      - endpoint: styles
+        filters:
+          - path: season
+            lookup:
+              endpoint: seasons
+              path: node_name
+              equals: SS26
+""",
+        encoding="utf-8",
+    )
+    config = replace(load_download_config(config_path), output_dir=tmp_path / "downloads")
+
+    with pytest.raises(ConfigError, match="seasons"):
+        run_download_job(
+            db_path=db_path,
+            auth_ctx=None,
+            config=config,
+            mode="rebuild",
+        )
+
+
+def test_download_lookup_filter_rejects_source_arrays(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="seasons",
+            record_id="SEASON1",
+            payload={"id": "SEASON1", "node_name": "SS26"},
+        )
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "season": ["SEASON1"],
+                "documents": ["D1"],
+                "referenced_documents": [],
+            },
+        )
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "one", "latest_revision": "R1"},
+        )
+
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: no-array-lookups
+    sources:
+      - endpoint: styles
+        filters:
+          - path: season
+            lookup:
+              endpoint: seasons
+              path: node_name
+              equals: SS26
+""",
+        encoding="utf-8",
+    )
+    config = replace(load_download_config(config_path), output_dir=tmp_path / "downloads")
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=config,
+        dry_run=True,
+    )
+
+    assert result.matched_count == 0
 
 
 def test_download_rebuild_failure_preserves_previous_current_revision(
