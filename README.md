@@ -12,6 +12,8 @@ uv run centric-api fetch --days 7
 uv run centric-api fetch --fetch-config config/fetcher.yml
 uv run centric-api changelog
 uv run centric-api download --dry-run
+uv run centric-api download --sync
+uv run centric-api download --rebuild
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
 ```
@@ -32,11 +34,16 @@ scheduler lifecycle messages and concise fetch summaries to the terminal, runs f
 mode, and writes JSONL-only records to `~/.centric-api/logs/cron.jsonl`. Fetch runs are serialized
 with `~/.centric-api/fetch.lock`.
 
-`download` selects document records from the local SQLite cache and downloads each document's
-`latest_revision` through `document_revisions/{revision_id}/download`. The default config is
+`download` selects document records from the local SQLite cache and downloads each selected
+document's `latest_revision` through `document_revisions/{revision_id}/download`. The default mode is
+delta: documents already marked current in SQLite and present on disk are skipped. `--sync` verifies
+all selected latest revisions exist without overwriting existing files. `--rebuild` redownloads
+selected latest revisions and tombstones current download rows that are no longer selected, which is
+the authoritative cleanup path for hard-deleted or filtered-out documents. The default config is
 `config/download.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or pass
 `--download-config`. Files are stored under `CENTRIC_API_HOME/downloads/files`, each run writes a
-manifest under `CENTRIC_API_HOME/downloads/runs`, and human-readable download logs append to
+manifest under `CENTRIC_API_HOME/downloads/runs`, current download state is tracked in the
+`download_current` SQLite table, and human-readable download logs append to
 `CENTRIC_API_HOME/logs/download.log`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it

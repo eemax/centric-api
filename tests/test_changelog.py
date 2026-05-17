@@ -258,3 +258,53 @@ def test_changelog_records_delete_type_for_removed_records(tmp_path: Path) -> No
         and row["modified_by_name"] == "Ava Admin"
         for row in actor_summary
     )
+
+
+def test_changelog_allows_missing_modified_by(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "documents",
+                "D1",
+                json.dumps(
+                    {
+                        "id": "D1",
+                        "node_name": "spec.pdf",
+                        "_modified_at": "2026-01-01T00:00:00Z",
+                    },
+                    sort_keys=True,
+                ),
+                "hash-document",
+                "2026-01-01T00:00:00Z",
+                "documents.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+
+    result = record_changelog(db_path, endpoints={"documents"}, full=True)
+    event = list_changes(db_path, endpoint="documents", limit=10)[0]
+    actor_summary = list_actor_summary(db_path, endpoint="documents", limit=10)
+
+    assert result.event_count == 1
+    assert event["modified_at"] == "2026-01-01T00:00:00Z"
+    assert event["modified_by_id"] is None
+    assert event["modified_by_name"] is None
+    assert actor_summary == [
+        {
+            "endpoint": "documents",
+            "modified_by_id": None,
+            "modified_by_name": None,
+            "change_type": "added",
+            "delete_type": None,
+            "count": 1,
+        }
+    ]

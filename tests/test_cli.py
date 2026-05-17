@@ -57,6 +57,8 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
     download_help = capsys.readouterr().out
     assert "--download-config" in download_help
     assert "--job" in download_help
+    assert "--sync" in download_help
+    assert "--rebuild" in download_help
 
 
 def test_fetch_log_level_defaults_to_summary() -> None:

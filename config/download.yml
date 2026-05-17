@@ -3,7 +3,6 @@ output_dir: downloads
 
 jobs:
   - name: basic
-    max_documents: 5
     sources:
       - endpoint: documents
     document_filters:

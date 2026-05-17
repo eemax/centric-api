@@ -1,6 +1,11 @@
 # Example delta state. Copy to ~/.centric-api/delta.yml only if you want to seed
 # the first delta floor manually; otherwise centric-api creates this file after
 # the first successful fetch.
+#
+# This file is only for `centric-api fetch` delta state. `centric-api download`
+# keeps its delta/current state in the local SQLite database, in the
+# `download_current` table, and verifies that the current file still exists on
+# disk before skipping it.
 version: 1
 updated_at: "2026-01-01T01:12:00.000Z"
 overlap_minutes: 10

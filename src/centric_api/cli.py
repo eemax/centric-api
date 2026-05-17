@@ -118,6 +118,9 @@ def _build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
     download_parser.add_argument("--env-file", default=None)
     download_parser.add_argument("--dry-run", action="store_true")
+    download_mode = download_parser.add_mutually_exclusive_group()
+    download_mode.add_argument("--sync", action="store_true")
+    download_mode.add_argument("--rebuild", action="store_true")
     download_parser.add_argument("--quiet", action="store_true")
     download_parser.add_argument("--json", action="store_true")
     download_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
@@ -524,6 +527,12 @@ def run_changelog(args: argparse.Namespace) -> int:
 def run_download(args: argparse.Namespace) -> int:
     config = load_download_config(args.download_config)
     db_path = _db_path(args.db)
+    mode = "rebuild" if args.rebuild else ("sync" if args.sync else "delta")
+    progress_callback = None
+    if args.json:
+        progress_callback = _write_json_download_progress
+    elif not args.quiet:
+        progress_callback = _write_download_progress_line
     download_log_file: TextIO | None = None
     log_callback: LogCallback | None = None
     if args.log_level != "off":
@@ -538,8 +547,10 @@ def run_download(args: argparse.Namespace) -> int:
                 auth_ctx=None,
                 config=config,
                 job_name=args.job,
+                mode=mode,
                 dry_run=True,
                 log_callback=log_callback,
+                progress_callback=progress_callback,
             )
         else:
             _fetcher_cfg, auth_settings, _endpoint_specs = load_fetcher_settings(args.fetch_config)
@@ -552,8 +563,10 @@ def run_download(args: argparse.Namespace) -> int:
                     auth_ctx=auth_ctx,
                     config=config,
                     job_name=args.job,
+                    mode=mode,
                     dry_run=False,
                     log_callback=log_callback,
+                    progress_callback=progress_callback,
                 )
     finally:
         if download_log_file is not None:
@@ -833,6 +846,33 @@ def _write_progress_line(event: FetchProgressEvent) -> None:
         )
 
 
+def _write_download_progress_line(event: dict[str, Any]) -> None:
+    if event.get("event") == "download_start":
+        print(
+            f"[download] start: job={event.get('job')} mode={event.get('mode')} "
+            f"matched={event.get('matched')} selected={event.get('selected')} "
+            f"skipped_current={event.get('skipped_current')}",
+            file=sys.stderr,
+        )
+        return
+    if event.get("event") == "download_item":
+        line = (
+            f"[download] {event.get('index')}/{event.get('total')} "
+            f"{event.get('status')} document={event.get('document_id')} "
+            f"revision={event.get('revision_id')} "
+            f"elapsed={_format_seconds(event.get('elapsed_seconds'))}"
+        )
+        if event.get("bytes") is not None:
+            line += f" bytes={event.get('bytes')}"
+        if event.get("error"):
+            line += f" error={json.dumps(event.get('error'))}"
+        print(line, file=sys.stderr)
+
+
+def _write_json_download_progress(event: dict[str, Any]) -> None:
+    print(json.dumps({"record_type": event.get("event"), **event}, default=str))
+
+
 def _print_human_fetch_summary(
     *,
     mode: str,
@@ -954,14 +994,18 @@ def _print_human_download_summary(result: DownloadRunResult) -> None:
     print(title)
     print()
     print(f"Job:      {result.job_name}")
+    print(f"Mode:     {result.mode}")
     print(f"Run:      {result.run_id}")
     print(f"Manifest: {result.manifest_path}")
     print()
     print("Summary")
+    print(f"Matched:         {result.matched_count}")
     print(f"Selected:        {result.selected_count}")
     print(f"Downloaded:      {result.downloaded_count}")
     print(f"Already present: {result.already_present_count}")
     print(f"Skipped:         {result.skipped_count}")
+    print(f"Skipped current: {result.skipped_current_count}")
+    print(f"Tombstoned:      {result.tombstoned_count}")
     print(f"Failed:          {result.failed_count}")
     if result.items:
         rows = result.items[:10]
@@ -1201,7 +1245,7 @@ def _log_key_order(event: str, record: LogEvent) -> list[str]:
             "error",
         ],
         "ingest_skipped": ["reason"],
-        "download_start": ["run_id", "job", "config", "db", "dry_run"],
+        "download_start": ["run_id", "job", "mode", "config", "db", "dry_run"],
         "download_item": ["document_id", "revision_id", "status", "file"],
         "download_ok": _download_log_keys(),
         "download_partial": _download_log_keys(),
@@ -1245,11 +1289,15 @@ def _download_log_keys() -> list[str]:
     return [
         "run_id",
         "job",
+        "mode",
+        "matched",
         "selected",
         "downloaded",
         "already_present",
         "failed",
         "skipped",
+        "skipped_current",
+        "tombstoned",
         "duration_seconds",
         "manifest",
     ]
@@ -1364,12 +1412,16 @@ def _download_record(result: DownloadRunResult) -> dict[str, Any]:
     return {
         "run_id": result.run_id,
         "job": result.job_name,
+        "mode": result.mode,
         "manifest": str(result.manifest_path),
+        "matched_count": result.matched_count,
         "selected_count": result.selected_count,
         "downloaded_count": result.downloaded_count,
         "already_present_count": result.already_present_count,
         "failed_count": result.failed_count,
         "skipped_count": result.skipped_count,
+        "skipped_current_count": result.skipped_current_count,
+        "tombstoned_count": result.tombstoned_count,
         "dry_run": result.dry_run,
     }
 

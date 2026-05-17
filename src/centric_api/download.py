@@ -27,6 +27,8 @@ DOCUMENT_ENDPOINT = "documents"
 REVISION_DOWNLOAD_API_VERSION = "v2"
 
 DownloadLogCallback = Callable[[dict[str, Any]], None] | None
+DownloadProgressCallback = Callable[[dict[str, Any]], None] | None
+DOWNLOAD_MODES = {"delta", "sync", "rebuild"}
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,6 @@ class DownloadJob:
     name: str
     sources: tuple[DownloadSource, ...]
     document_filters: tuple[DownloadFilter, ...] = ()
-    max_documents: int | None = None
     revision_field: str = "latest_revision"
     filename_field: str = "node_name"
 
@@ -84,14 +85,28 @@ class ResolvedDocument:
 class DownloadRunResult:
     run_id: str
     job_name: str
+    mode: str
     manifest_path: Path
+    matched_count: int
     selected_count: int
     downloaded_count: int
     already_present_count: int
     failed_count: int
     skipped_count: int
+    skipped_current_count: int
+    tombstoned_count: int
     dry_run: bool
     items: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class CurrentDownload:
+    document_id: str
+    revision_id: str
+    status: str
+    file_path: str | None
+    sha256: str | None
+    bytes: int | None
 
 
 def resolve_download_config_path(path: str | Path | None = None) -> Path:
@@ -124,9 +139,13 @@ def run_download_job(
     auth_ctx: AuthContext | None,
     config: DownloadConfig,
     job_name: str | None = None,
+    mode: str = "delta",
     dry_run: bool = False,
     log_callback: DownloadLogCallback = None,
+    progress_callback: DownloadProgressCallback = None,
 ) -> DownloadRunResult:
+    if mode not in DOWNLOAD_MODES:
+        raise ConfigError(f"download mode must be one of: {', '.join(sorted(DOWNLOAD_MODES))}.")
     job = _select_job(config, job_name)
     started = time.time()
     created_at = datetime.now(UTC)
@@ -141,6 +160,7 @@ def run_download_job(
             "event": "download_start",
             "run_id": run_id,
             "job": job.name,
+            "mode": mode,
             "config": str(config.path),
             "db": str(db_path),
             "dry_run": dry_run,
@@ -151,54 +171,58 @@ def run_download_job(
         ensure_download_tables(conn)
         candidates = _collect_candidate_documents(conn, job, log_callback=log_callback)
         documents = _resolve_documents(conn, job, candidates, log_callback=log_callback)
-        previous = _load_previous_downloads(conn)
+        current_downloads = _load_current_downloads(conn, job.name)
 
-    if job.max_documents is not None:
-        documents = documents[: job.max_documents]
+    matched_count = len(documents)
+    selected_documents, skipped_current_items = _select_documents_for_mode(
+        documents=documents,
+        mode=mode,
+        files_dir=files_dir,
+        current_downloads=current_downloads,
+    )
+
+    _emit_progress(
+        progress_callback,
+        {
+            "event": "download_start",
+            "run_id": run_id,
+            "job": job.name,
+            "mode": mode,
+            "matched": matched_count,
+            "selected": len(selected_documents),
+            "skipped_current": len(skipped_current_items),
+        },
+    )
 
     items: list[dict[str, Any]] = []
     downloaded_count = 0
     already_present_count = 0
     failed_count = 0
-    skipped_count = 0
+    skipped_count = len(skipped_current_items)
+    skipped_current_count = len(skipped_current_items)
+    tombstoned_count = 0
 
-    for document in documents:
-        previous_revision = previous.get(document.document_id)
+    for skipped_item in skipped_current_items:
+        items.append(skipped_item)
+
+    for index, document in enumerate(selected_documents, start=1):
+        previous_current = current_downloads.get(document.document_id)
+        previous_revision = previous_current.revision_id if previous_current else None
         target_path = _document_target_path(
             files_dir,
             document_id=document.document_id,
             revision_id=document.latest_revision_id,
             filename=document.filename,
         )
-        base_item = {
-            "document_id": document.document_id,
-            "document_name": document.filename,
-            "latest_revision_id": document.latest_revision_id,
-            "current_revision_id": _string_value(
-                _extract_path(document.document_payload, "current_revision")
-            ),
-            "document_modified_at": _string_value(
-                _extract_path(document.document_payload, "_modified_at")
-            ),
-            "latest_at_run": True,
-            "previous_downloaded_revision_id": previous_revision,
-            "previous_was_outdated": (
-                previous_revision is not None and previous_revision != document.latest_revision_id
-            ),
-            "source_refs": [
-                {
-                    "endpoint": candidate.source_endpoint,
-                    "record_id": candidate.source_record_id,
-                    "document_path": candidate.source_path,
-                }
-                for candidate in document.candidates
-            ],
-            "file_path": str(target_path),
-        }
+        base_item = _base_item(
+            document,
+            previous_revision=previous_revision,
+            target_path=target_path,
+        )
         if dry_run:
             item = {**base_item, "status": "dry_run"}
             skipped_count += 1
-        elif target_path.is_file():
+        elif mode != "rebuild" and target_path.is_file():
             item = {
                 **base_item,
                 "status": "already_present",
@@ -232,33 +256,52 @@ def run_download_job(
                 downloaded_count += 1
 
         items.append(item)
-        _emit(
-            log_callback,
+        _emit_download_item(log_callback, item)
+        _emit_progress(
+            progress_callback,
             {
-                "level": "summary",
                 "event": "download_item",
+                "index": index,
+                "total": len(selected_documents),
                 "document_id": item["document_id"],
                 "revision_id": item["latest_revision_id"],
                 "status": item["status"],
-                "file": item["file_path"],
+                "bytes": item.get("bytes"),
+                "error": item.get("error"),
+                "elapsed_seconds": round(time.time() - started, 3),
             },
         )
+
+    if mode == "rebuild" and not dry_run:
+        with connect(db_path) as conn:
+            ensure_download_tables(conn)
+            tombstoned_count = _tombstone_unselected_current(
+                conn,
+                job_name=job.name,
+                desired_documents={document.document_id: document for document in documents},
+                run_id=run_id,
+                tombstoned_at=_datetime_to_db(datetime.now(UTC)),
+            )
 
     duration_seconds = time.time() - started
     manifest = {
         "run_id": run_id,
         "job": job.name,
+        "mode": mode,
         "config": str(config.path),
         "db": str(db_path),
         "dry_run": dry_run,
         "started_at": _datetime_to_db(created_at),
         "finished_at": _datetime_to_db(datetime.now(UTC)),
         "duration_seconds": round(duration_seconds, 3),
-        "selected_count": len(documents),
+        "matched_count": matched_count,
+        "selected_count": len(selected_documents),
         "downloaded_count": downloaded_count,
         "already_present_count": already_present_count,
         "failed_count": failed_count,
         "skipped_count": skipped_count,
+        "skipped_current_count": skipped_current_count,
+        "tombstoned_count": tombstoned_count,
         "items": items,
     }
     manifest_path = _write_manifest(run_dir, manifest)
@@ -266,9 +309,11 @@ def run_download_job(
     with connect(db_path) as conn:
         ensure_download_tables(conn)
         _record_download_run(conn, manifest_path=manifest_path, manifest=manifest)
+        if not dry_run:
+            _update_download_current(conn, manifest=manifest)
 
-    status = "failed" if failed_count and failed_count == len(documents) else "ok"
-    if failed_count and failed_count < len(documents):
+    status = "failed" if failed_count and failed_count == len(selected_documents) else "ok"
+    if failed_count and failed_count < len(selected_documents):
         status = "partial"
     _emit(
         log_callback,
@@ -277,11 +322,15 @@ def run_download_job(
             "event": f"download_{status}",
             "run_id": run_id,
             "job": job.name,
-            "selected": len(documents),
+            "mode": mode,
+            "matched": matched_count,
+            "selected": len(selected_documents),
             "downloaded": downloaded_count,
             "already_present": already_present_count,
             "failed": failed_count,
             "skipped": skipped_count,
+            "skipped_current": skipped_current_count,
+            "tombstoned": tombstoned_count,
             "duration_seconds": round(duration_seconds, 3),
             "manifest": str(manifest_path),
         },
@@ -290,14 +339,65 @@ def run_download_job(
     return DownloadRunResult(
         run_id=run_id,
         job_name=job.name,
+        mode=mode,
         manifest_path=manifest_path,
-        selected_count=len(documents),
+        matched_count=matched_count,
+        selected_count=len(selected_documents),
         downloaded_count=downloaded_count,
         already_present_count=already_present_count,
         failed_count=failed_count,
         skipped_count=skipped_count,
+        skipped_current_count=skipped_current_count,
+        tombstoned_count=tombstoned_count,
         dry_run=dry_run,
         items=tuple(items),
+    )
+
+
+def _base_item(
+    document: ResolvedDocument,
+    *,
+    previous_revision: str | None,
+    target_path: Path,
+) -> dict[str, Any]:
+    return {
+        "document_id": document.document_id,
+        "document_name": document.filename,
+        "latest_revision_id": document.latest_revision_id,
+        "current_revision_id": _string_value(
+            _extract_path(document.document_payload, "current_revision")
+        ),
+        "document_modified_at": _string_value(
+            _extract_path(document.document_payload, "_modified_at")
+        ),
+        "latest_at_run": True,
+        "previous_downloaded_revision_id": previous_revision,
+        "previous_was_outdated": (
+            previous_revision is not None and previous_revision != document.latest_revision_id
+        ),
+        "source_refs": [
+            {
+                "endpoint": candidate.source_endpoint,
+                "record_id": candidate.source_record_id,
+                "document_path": candidate.source_path,
+            }
+            for candidate in document.candidates
+        ],
+        "file_path": str(target_path),
+    }
+
+
+def _emit_download_item(log_callback: DownloadLogCallback, item: dict[str, Any]) -> None:
+    _emit(
+        log_callback,
+        {
+            "level": "summary",
+            "event": "download_item",
+            "document_id": item["document_id"],
+            "revision_id": item["latest_revision_id"],
+            "status": item["status"],
+            "file": item["file_path"],
+        },
     )
 
 
@@ -353,14 +453,18 @@ def ensure_download_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS download_runs (
             run_id TEXT PRIMARY KEY,
             job_name TEXT NOT NULL,
+            mode TEXT NOT NULL,
             started_at TEXT NOT NULL,
             finished_at TEXT NOT NULL,
             manifest_path TEXT NOT NULL,
+            matched_count INTEGER NOT NULL,
             selected_count INTEGER NOT NULL,
             downloaded_count INTEGER NOT NULL,
             already_present_count INTEGER NOT NULL,
             failed_count INTEGER NOT NULL,
             skipped_count INTEGER NOT NULL,
+            skipped_current_count INTEGER NOT NULL,
+            tombstoned_count INTEGER NOT NULL,
             dry_run INTEGER NOT NULL
         );
 
@@ -391,6 +495,31 @@ def ensure_download_tables(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_download_items_status
         ON download_items(status, created_at);
+
+        CREATE TABLE IF NOT EXISTS download_current (
+            job_name TEXT NOT NULL,
+            document_id TEXT NOT NULL,
+            revision_id TEXT NOT NULL,
+            document_name TEXT,
+            current_revision_id TEXT,
+            document_modified_at TEXT,
+            status TEXT NOT NULL,
+            file_path TEXT,
+            sha256 TEXT,
+            bytes INTEGER,
+            last_run_id TEXT NOT NULL,
+            selected_at TEXT,
+            tombstoned_at TEXT,
+            tombstone_reason TEXT,
+            source_refs_json TEXT NOT NULL,
+            PRIMARY KEY (job_name, document_id, revision_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_download_current_job_status
+        ON download_current(job_name, status);
+
+        CREATE INDEX IF NOT EXISTS idx_download_current_document
+        ON download_current(document_id, revision_id);
         """
     )
 
@@ -427,14 +556,12 @@ def _parse_job(raw: Any, index: int) -> DownloadJob:
             _list(raw.get("document_filters", []), f"job[{name}].document_filters")
         )
     )
-    max_documents = _optional_positive_int(raw.get("max_documents"), f"job[{name}].max_documents")
     revision_field = _optional_path(raw.get("revision_field"), "latest_revision")
     filename_field = _optional_path(raw.get("filename_field"), "node_name")
     return DownloadJob(
         name=name.strip(),
         sources=sources,
         document_filters=document_filters,
-        max_documents=max_documents,
         revision_field=revision_field,
         filename_field=filename_field,
     )
@@ -514,14 +641,6 @@ def _string_list(value: Any, field_name: str) -> list[str]:
             raise ConfigError(f"{field_name}[{index}] must be a non-empty string.")
         output.append(item.strip())
     return output
-
-
-def _optional_positive_int(value: Any, field_name: str) -> int | None:
-    if value is None:
-        return None
-    if not isinstance(value, int) or value <= 0:
-        raise ConfigError(f"{field_name} must be a positive integer.")
-    return value
 
 
 def _optional_path(value: Any, default: str) -> str:
@@ -733,20 +852,74 @@ def _document_ids_from_value(value: Any) -> list[str]:
     return []
 
 
-def _load_previous_downloads(conn: sqlite3.Connection) -> dict[str, str]:
+def _load_current_downloads(conn: sqlite3.Connection, job_name: str) -> dict[str, CurrentDownload]:
     ensure_download_tables(conn)
     rows = conn.execute(
         """
-        SELECT document_id, revision_id
-        FROM download_items
-        WHERE status IN ('downloaded', 'already_present')
-        ORDER BY created_at ASC, id ASC
-        """
+        SELECT document_id, revision_id, status, file_path, sha256, bytes
+        FROM download_current
+        WHERE job_name = ? AND status = 'current'
+        ORDER BY selected_at ASC
+        """,
+        [job_name],
     ).fetchall()
-    previous: dict[str, str] = {}
+    current: dict[str, CurrentDownload] = {}
     for row in rows:
-        previous[str(row["document_id"])] = str(row["revision_id"])
-    return previous
+        current[str(row["document_id"])] = CurrentDownload(
+            document_id=str(row["document_id"]),
+            revision_id=str(row["revision_id"]),
+            status=str(row["status"]),
+            file_path=row["file_path"],
+            sha256=row["sha256"],
+            bytes=row["bytes"],
+        )
+    return current
+
+
+def _select_documents_for_mode(
+    *,
+    documents: list[ResolvedDocument],
+    mode: str,
+    files_dir: Path,
+    current_downloads: dict[str, CurrentDownload],
+) -> tuple[list[ResolvedDocument], list[dict[str, Any]]]:
+    if mode in {"sync", "rebuild"}:
+        return documents, []
+
+    selected: list[ResolvedDocument] = []
+    skipped: list[dict[str, Any]] = []
+    for document in documents:
+        current = current_downloads.get(document.document_id)
+        target_path = _document_target_path(
+            files_dir,
+            document_id=document.document_id,
+            revision_id=document.latest_revision_id,
+            filename=document.filename,
+        )
+        current_path = Path(current.file_path) if current and current.file_path else target_path
+        if (
+            current is not None
+            and current.revision_id == document.latest_revision_id
+            and current_path.is_file()
+        ):
+            current_bytes = (
+                current.bytes if current.bytes is not None else current_path.stat().st_size
+            )
+            skipped.append(
+                {
+                    **_base_item(
+                        document,
+                        previous_revision=current.revision_id,
+                        target_path=current_path,
+                    ),
+                    "status": "skipped_current",
+                    "sha256": current.sha256 or _sha256(current_path),
+                    "bytes": current_bytes,
+                }
+            )
+        else:
+            selected.append(document)
+    return selected, skipped
 
 
 def _record_download_run(
@@ -758,23 +931,28 @@ def _record_download_run(
     conn.execute(
         """
         INSERT INTO download_runs (
-            run_id, job_name, started_at, finished_at, manifest_path,
-            selected_count, downloaded_count, already_present_count,
-            failed_count, skipped_count, dry_run
+            run_id, job_name, mode, started_at, finished_at, manifest_path,
+            matched_count, selected_count, downloaded_count, already_present_count,
+            failed_count, skipped_count, skipped_current_count, tombstoned_count,
+            dry_run
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             manifest["run_id"],
             manifest["job"],
+            manifest["mode"],
             manifest["started_at"],
             manifest["finished_at"],
             str(manifest_path),
+            manifest["matched_count"],
             manifest["selected_count"],
             manifest["downloaded_count"],
             manifest["already_present_count"],
             manifest["failed_count"],
             manifest["skipped_count"],
+            manifest["skipped_current_count"],
+            manifest["tombstoned_count"],
             int(bool(manifest["dry_run"])),
         ],
     )
@@ -815,6 +993,159 @@ def _record_download_run(
             """,
             rows,
         )
+
+
+def _update_download_current(conn: sqlite3.Connection, *, manifest: dict[str, Any]) -> None:
+    now = manifest["finished_at"]
+    for item in manifest["items"]:
+        if item["status"] in {"downloaded", "already_present"}:
+            _mark_superseded_current(conn, manifest=manifest, item=item, now=now)
+            conn.execute(
+                """
+                INSERT INTO download_current (
+                    job_name, document_id, revision_id, document_name,
+                    current_revision_id, document_modified_at, status, file_path,
+                    sha256, bytes, last_run_id, selected_at, tombstoned_at,
+                    tombstone_reason, source_refs_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)
+                ON CONFLICT(job_name, document_id, revision_id) DO UPDATE SET
+                    document_name = excluded.document_name,
+                    current_revision_id = excluded.current_revision_id,
+                    document_modified_at = excluded.document_modified_at,
+                    status = excluded.status,
+                    file_path = excluded.file_path,
+                    sha256 = excluded.sha256,
+                    bytes = excluded.bytes,
+                    last_run_id = excluded.last_run_id,
+                    selected_at = excluded.selected_at,
+                    tombstoned_at = NULL,
+                    tombstone_reason = NULL,
+                    source_refs_json = excluded.source_refs_json
+                """,
+                [
+                    manifest["job"],
+                    item["document_id"],
+                    item["latest_revision_id"],
+                    item.get("document_name"),
+                    item.get("current_revision_id"),
+                    item.get("document_modified_at"),
+                    "current",
+                    item.get("file_path"),
+                    item.get("sha256"),
+                    item.get("bytes"),
+                    manifest["run_id"],
+                    now,
+                    json.dumps(item.get("source_refs", []), sort_keys=True),
+                ],
+            )
+        elif item["status"] == "failed":
+            conn.execute(
+                """
+                INSERT INTO download_current (
+                    job_name, document_id, revision_id, document_name,
+                    current_revision_id, document_modified_at, status, file_path,
+                    sha256, bytes, last_run_id, selected_at, tombstoned_at,
+                    tombstone_reason, source_refs_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, NULL, NULL, ?)
+                ON CONFLICT(job_name, document_id, revision_id) DO UPDATE SET
+                    document_name = excluded.document_name,
+                    current_revision_id = excluded.current_revision_id,
+                    document_modified_at = excluded.document_modified_at,
+                    status = excluded.status,
+                    file_path = excluded.file_path,
+                    last_run_id = excluded.last_run_id,
+                    selected_at = excluded.selected_at,
+                    source_refs_json = excluded.source_refs_json
+                """,
+                [
+                    manifest["job"],
+                    item["document_id"],
+                    item["latest_revision_id"],
+                    item.get("document_name"),
+                    item.get("current_revision_id"),
+                    item.get("document_modified_at"),
+                    "failed",
+                    item.get("file_path"),
+                    manifest["run_id"],
+                    now,
+                    json.dumps(item.get("source_refs", []), sort_keys=True),
+                ],
+            )
+
+
+def _mark_superseded_current(
+    conn: sqlite3.Connection,
+    *,
+    manifest: dict[str, Any],
+    item: dict[str, Any],
+    now: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE download_current
+        SET status = 'superseded',
+            last_run_id = ?,
+            tombstoned_at = ?,
+            tombstone_reason = 'revision_superseded'
+        WHERE job_name = ?
+          AND document_id = ?
+          AND revision_id <> ?
+          AND status = 'current'
+        """,
+        [
+            manifest["run_id"],
+            now,
+            manifest["job"],
+            item["document_id"],
+            item["latest_revision_id"],
+        ],
+    )
+
+
+def _tombstone_unselected_current(
+    conn: sqlite3.Connection,
+    *,
+    job_name: str,
+    desired_documents: dict[str, ResolvedDocument],
+    run_id: str,
+    tombstoned_at: str,
+) -> int:
+    rows = conn.execute(
+        """
+        SELECT document_id, revision_id
+        FROM download_current
+        WHERE job_name = ? AND status = 'current'
+        """,
+        [job_name],
+    ).fetchall()
+    tombstone_rows: list[tuple[str, str, str]] = []
+    for row in rows:
+        document_id = str(row["document_id"])
+        revision_id = str(row["revision_id"])
+        desired = desired_documents.get(document_id)
+        if desired is None:
+            tombstone_rows.append((document_id, revision_id, "no_longer_selected"))
+        elif desired.latest_revision_id != revision_id:
+            tombstone_rows.append((document_id, revision_id, "revision_superseded"))
+    if not tombstone_rows:
+        return 0
+    conn.executemany(
+        """
+        UPDATE download_current
+        SET status = 'tombstoned',
+            last_run_id = ?,
+            tombstoned_at = ?,
+            tombstone_reason = ?
+        WHERE job_name = ? AND document_id = ? AND revision_id = ?
+        """,
+        [
+            [run_id, tombstoned_at, reason, job_name, document_id, revision_id]
+            for document_id, revision_id, reason in tombstone_rows
+        ],
+    )
+    return len(tombstone_rows)
 
 
 @contextmanager
@@ -950,5 +1281,10 @@ def _sha256(path: Path) -> str:
 
 
 def _emit(callback: DownloadLogCallback, event: dict[str, Any]) -> None:
+    if callback is not None:
+        callback(event)
+
+
+def _emit_progress(callback: DownloadProgressCallback, event: dict[str, Any]) -> None:
     if callback is not None:
         callback(event)
