@@ -116,6 +116,17 @@ def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     assert "fetch lock exists" in capsys.readouterr().err
 
 
+def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    lock_path = tmp_path / "download.lock"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    exit_code = main(["download"])
+
+    assert exit_code == 1
+    assert "download lock exists" in capsys.readouterr().err
+
+
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     lock_path = tmp_path / "fetch.lock"
 

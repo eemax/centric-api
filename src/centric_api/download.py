@@ -29,6 +29,15 @@ REVISION_DOWNLOAD_API_VERSION = "v2"
 DownloadLogCallback = Callable[[dict[str, Any]], None] | None
 DownloadProgressCallback = Callable[[dict[str, Any]], None] | None
 DOWNLOAD_MODES = {"delta", "sync", "rebuild"}
+DOWNLOAD_RETRY_MAX_ATTEMPTS = 3
+DOWNLOAD_RETRY_BASE_SECONDS = 15
+DOWNLOAD_RETRY_MAX_SECONDS = 30
+RETRYABLE_DOWNLOAD_STATUSES = {408, 429, 500, 502, 503, 504}
+ROOT_CONFIG_KEYS = {"version", "output_dir", "jobs"}
+JOB_CONFIG_KEYS = {"name", "sources", "document_filters", "revision_field", "filename_field"}
+SOURCE_CONFIG_KEYS = {"endpoint", "filters", "document_paths"}
+FILTER_OPERATORS = {"equals", "in", "contains", "matches", "exists"}
+FILTER_CONFIG_KEYS = {"path", *FILTER_OPERATORS}
 
 
 @dataclass(frozen=True)
@@ -94,6 +103,8 @@ class DownloadRunResult:
     failed_count: int
     skipped_count: int
     skipped_current_count: int
+    dry_run_count: int
+    superseded_count: int
     tombstoned_count: int
     dry_run: bool
     items: tuple[dict[str, Any], ...]
@@ -109,6 +120,20 @@ class CurrentDownload:
     bytes: int | None
 
 
+@dataclass(frozen=True)
+class ExistingDownloadFile:
+    path: Path
+    sha256: str
+    bytes: int
+
+
+class DownloadHTTPError(RuntimeError):
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"download failed with HTTP {status_code}: {body}")
+        self.status_code = status_code
+        self.body = body
+
+
 def resolve_download_config_path(path: str | Path | None = None) -> Path:
     if path is not None:
         return Path(path).expanduser()
@@ -121,6 +146,7 @@ def resolve_download_config_path(path: str | Path | None = None) -> Path:
 def load_download_config(path: str | Path | None = None) -> DownloadConfig:
     config_path = resolve_download_config_path(path)
     payload = _load_payload(config_path)
+    _reject_unknown_keys(payload, ROOT_CONFIG_KEYS, "download config")
     version = payload.get("version", 1)
     if version != 1:
         raise ConfigError("download config version must be 1.")
@@ -200,6 +226,8 @@ def run_download_job(
     failed_count = 0
     skipped_count = len(skipped_current_items)
     skipped_current_count = len(skipped_current_items)
+    dry_run_count = 0
+    superseded_count = 0
     tombstoned_count = 0
 
     for skipped_item in skipped_current_items:
@@ -214,6 +242,11 @@ def run_download_job(
             revision_id=document.latest_revision_id,
             filename=document.filename,
         )
+        existing_file = _existing_latest_file(
+            document=document,
+            target_path=target_path,
+            current=previous_current,
+        )
         base_item = _base_item(
             document,
             previous_revision=previous_revision,
@@ -222,12 +255,14 @@ def run_download_job(
         if dry_run:
             item = {**base_item, "status": "dry_run"}
             skipped_count += 1
-        elif mode != "rebuild" and target_path.is_file():
+            dry_run_count += 1
+        elif mode != "rebuild" and existing_file is not None:
             item = {
                 **base_item,
                 "status": "already_present",
-                "sha256": _sha256(target_path),
-                "bytes": target_path.stat().st_size,
+                "file_path": str(existing_file.path),
+                "sha256": existing_file.sha256,
+                "bytes": existing_file.bytes,
             }
             already_present_count += 1
         else:
@@ -283,6 +318,11 @@ def run_download_job(
                 tombstoned_at=_datetime_to_db(datetime.now(UTC)),
             )
 
+    superseded_count = _count_superseded_current(
+        items=items,
+        current_downloads=current_downloads,
+    )
+
     duration_seconds = time.time() - started
     manifest = {
         "run_id": run_id,
@@ -301,6 +341,8 @@ def run_download_job(
         "failed_count": failed_count,
         "skipped_count": skipped_count,
         "skipped_current_count": skipped_current_count,
+        "dry_run_count": dry_run_count,
+        "superseded_count": superseded_count,
         "tombstoned_count": tombstoned_count,
         "items": items,
     }
@@ -330,6 +372,8 @@ def run_download_job(
             "failed": failed_count,
             "skipped": skipped_count,
             "skipped_current": skipped_current_count,
+            "dry_run": dry_run_count,
+            "superseded": superseded_count,
             "tombstoned": tombstoned_count,
             "duration_seconds": round(duration_seconds, 3),
             "manifest": str(manifest_path),
@@ -348,6 +392,8 @@ def run_download_job(
         failed_count=failed_count,
         skipped_count=skipped_count,
         skipped_current_count=skipped_current_count,
+        dry_run_count=dry_run_count,
+        superseded_count=superseded_count,
         tombstoned_count=tombstoned_count,
         dry_run=dry_run,
         items=tuple(items),
@@ -417,6 +463,59 @@ def download_revision_file(
     fallback_filename: str,
     log_callback: DownloadLogCallback = None,
 ) -> DownloadedFile:
+    last_error: Exception | None = None
+    for attempt in range(1, DOWNLOAD_RETRY_MAX_ATTEMPTS + 1):
+        _emit(
+            log_callback,
+            {
+                "level": "http",
+                "event": "download_attempt",
+                "revision_id": revision_id,
+                "attempt": attempt,
+                "max_attempts": DOWNLOAD_RETRY_MAX_ATTEMPTS,
+            },
+        )
+        try:
+            return _download_revision_file_once(
+                auth_ctx,
+                revision_id=revision_id,
+                target_path=target_path,
+                fallback_filename=fallback_filename,
+                log_callback=log_callback,
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt >= DOWNLOAD_RETRY_MAX_ATTEMPTS or not _is_retryable_download_error(exc):
+                raise
+            delay_seconds = _download_retry_delay(attempt)
+            _emit(
+                log_callback,
+                {
+                    "level": "summary",
+                    "event": "download_retry",
+                    "revision_id": revision_id,
+                    "attempt": attempt,
+                    "delay_seconds": delay_seconds,
+                    "error": str(exc),
+                    "status_code": (
+                        exc.status_code if isinstance(exc, DownloadHTTPError) else None
+                    ),
+                },
+            )
+            time.sleep(delay_seconds)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("download failed unexpectedly.")
+
+
+def _download_revision_file_once(
+    auth_ctx: AuthContext,
+    *,
+    revision_id: str,
+    target_path: Path,
+    fallback_filename: str,
+    log_callback: DownloadLogCallback = None,
+) -> DownloadedFile:
     url = (
         f"{auth_ctx.base_url}/api/{REVISION_DOWNLOAD_API_VERSION}"
         f"/document_revisions/{revision_id}/download"
@@ -436,9 +535,13 @@ def download_revision_file(
 
         sha = hashlib.sha256()
         bytes_written = 0
-        with temp_path.open("wb") as fh:
-            bytes_written = _write_response_body(response, fh, sha)
-        temp_path.replace(target_path)
+        try:
+            with temp_path.open("wb") as fh:
+                bytes_written = _write_response_body(response, fh, sha)
+            temp_path.replace(target_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
     return DownloadedFile(
         path=target_path,
         sha256=sha.hexdigest(),
@@ -464,6 +567,8 @@ def ensure_download_tables(conn: sqlite3.Connection) -> None:
             failed_count INTEGER NOT NULL,
             skipped_count INTEGER NOT NULL,
             skipped_current_count INTEGER NOT NULL,
+            dry_run_count INTEGER NOT NULL,
+            superseded_count INTEGER NOT NULL,
             tombstoned_count INTEGER NOT NULL,
             dry_run INTEGER NOT NULL
         );
@@ -522,6 +627,14 @@ def ensure_download_tables(conn: sqlite3.Connection) -> None:
         ON download_current(document_id, revision_id);
         """
     )
+    _ensure_table_columns(
+        conn,
+        "download_runs",
+        {
+            "dry_run_count": "INTEGER NOT NULL DEFAULT 0",
+            "superseded_count": "INTEGER NOT NULL DEFAULT 0",
+        },
+    )
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
@@ -545,6 +658,7 @@ def _runtime_output_dir(value: Any) -> Path:
 def _parse_job(raw: Any, index: int) -> DownloadJob:
     if not isinstance(raw, dict):
         raise ConfigError(f"download jobs[{index}] must be an object.")
+    _reject_unknown_keys(raw, JOB_CONFIG_KEYS, f"download jobs[{index}]")
     name = raw.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ConfigError(f"download jobs[{index}].name must be a non-empty string.")
@@ -570,6 +684,7 @@ def _parse_job(raw: Any, index: int) -> DownloadJob:
 def _parse_source(raw: Any, index: int, job_name: str) -> DownloadSource:
     if not isinstance(raw, dict):
         raise ConfigError(f"job[{job_name}].sources[{index}] must be an object.")
+    _reject_unknown_keys(raw, SOURCE_CONFIG_KEYS, f"job[{job_name}].sources[{index}]")
     endpoint = raw.get("endpoint")
     if not isinstance(endpoint, str) or not endpoint.strip():
         raise ConfigError(f"job[{job_name}].sources[{index}].endpoint must be a string.")
@@ -596,6 +711,7 @@ def _parse_source(raw: Any, index: int, job_name: str) -> DownloadSource:
 def _parse_filter(raw: Any, field_name: str) -> DownloadFilter:
     if not isinstance(raw, dict):
         raise ConfigError(f"{field_name} must be an object.")
+    _reject_unknown_keys(raw, FILTER_CONFIG_KEYS, field_name)
     path = raw.get("path")
     if not isinstance(path, str) or not path.strip():
         raise ConfigError(f"{field_name}.path must be a non-empty string.")
@@ -649,6 +765,25 @@ def _optional_path(value: Any, default: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError("download path fields must be non-empty strings.")
     return value.strip()
+
+
+def _reject_unknown_keys(payload: dict[str, Any], allowed: set[str], field_name: str) -> None:
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ConfigError(f"{field_name} has unknown keys: {', '.join(unknown)}")
+
+
+def _ensure_table_columns(
+    conn: sqlite3.Connection,
+    table_name: str,
+    columns: dict[str, str],
+) -> None:
+    existing = set()
+    for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall():
+        existing.add(str(row["name"] if isinstance(row, sqlite3.Row) else row[1]))
+    for column_name, column_sql in columns.items():
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
 
 def _ensure_unique_job_names(jobs: tuple[DownloadJob, ...]) -> None:
@@ -896,30 +1031,65 @@ def _select_documents_for_mode(
             revision_id=document.latest_revision_id,
             filename=document.filename,
         )
-        current_path = Path(current.file_path) if current and current.file_path else target_path
-        if (
-            current is not None
-            and current.revision_id == document.latest_revision_id
-            and current_path.is_file()
-        ):
-            current_bytes = (
-                current.bytes if current.bytes is not None else current_path.stat().st_size
-            )
+        existing_file = _existing_latest_file(
+            document=document,
+            target_path=target_path,
+            current=current,
+        )
+        if current is not None and existing_file is not None:
             skipped.append(
                 {
                     **_base_item(
                         document,
                         previous_revision=current.revision_id,
-                        target_path=current_path,
+                        target_path=existing_file.path,
                     ),
                     "status": "skipped_current",
-                    "sha256": current.sha256 or _sha256(current_path),
-                    "bytes": current_bytes,
+                    "sha256": existing_file.sha256,
+                    "bytes": existing_file.bytes,
                 }
             )
         else:
             selected.append(document)
     return selected, skipped
+
+
+def _existing_latest_file(
+    *,
+    document: ResolvedDocument,
+    target_path: Path,
+    current: CurrentDownload | None,
+) -> ExistingDownloadFile | None:
+    if current is not None and current.revision_id == document.latest_revision_id:
+        current_path = Path(current.file_path) if current.file_path else target_path
+        if current_path.is_file():
+            return ExistingDownloadFile(
+                path=current_path,
+                sha256=current.sha256 or _sha256(current_path),
+                bytes=current.bytes if current.bytes is not None else current_path.stat().st_size,
+            )
+    if target_path.is_file():
+        return ExistingDownloadFile(
+            path=target_path,
+            sha256=_sha256(target_path),
+            bytes=target_path.stat().st_size,
+        )
+    return None
+
+
+def _count_superseded_current(
+    *,
+    items: list[dict[str, Any]],
+    current_downloads: dict[str, CurrentDownload],
+) -> int:
+    count = 0
+    for item in items:
+        if item["status"] not in {"downloaded", "already_present"}:
+            continue
+        current = current_downloads.get(str(item["document_id"]))
+        if current is not None and current.revision_id != item["latest_revision_id"]:
+            count += 1
+    return count
 
 
 def _record_download_run(
@@ -933,10 +1103,10 @@ def _record_download_run(
         INSERT INTO download_runs (
             run_id, job_name, mode, started_at, finished_at, manifest_path,
             matched_count, selected_count, downloaded_count, already_present_count,
-            failed_count, skipped_count, skipped_current_count, tombstoned_count,
-            dry_run
+            failed_count, skipped_count, skipped_current_count, dry_run_count,
+            superseded_count, tombstoned_count, dry_run
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             manifest["run_id"],
@@ -952,6 +1122,8 @@ def _record_download_run(
             manifest["failed_count"],
             manifest["skipped_count"],
             manifest["skipped_current_count"],
+            manifest["dry_run_count"],
+            manifest["superseded_count"],
             manifest["tombstoned_count"],
             int(bool(manifest["dry_run"])),
         ],
@@ -1127,8 +1299,6 @@ def _tombstone_unselected_current(
         desired = desired_documents.get(document_id)
         if desired is None:
             tombstone_rows.append((document_id, revision_id, "no_longer_selected"))
-        elif desired.latest_revision_id != revision_id:
-            tombstone_rows.append((document_id, revision_id, "revision_superseded"))
     if not tombstone_rows:
         return 0
     conn.executemany(
@@ -1182,10 +1352,23 @@ def _stream_download_response(
         )
         if response.status_code >= 400:
             body = response.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"download failed with HTTP {response.status_code}: {body}")
+            raise DownloadHTTPError(response.status_code, body)
         yield response
     finally:
         stream_cm.__exit__(None, None, None)
+
+
+def _is_retryable_download_error(exc: Exception) -> bool:
+    if isinstance(exc, DownloadHTTPError):
+        return exc.status_code in RETRYABLE_DOWNLOAD_STATUSES
+    return isinstance(exc, httpx.TransportError)
+
+
+def _download_retry_delay(failed_attempt: int) -> int:
+    return min(
+        DOWNLOAD_RETRY_BASE_SECONDS * (2 ** (failed_attempt - 1)),
+        DOWNLOAD_RETRY_MAX_SECONDS,
+    )
 
 
 def _write_response_body(response: httpx.Response, fh: BinaryIO, sha: Any) -> int:

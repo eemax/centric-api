@@ -46,6 +46,7 @@ DEFAULT_FETCH_LOG_PATH = Path("logs/fetch.log")
 DEFAULT_DOWNLOAD_LOG_PATH = Path("logs/download.log")
 DEFAULT_DB_PATH = Path("centric.db")
 DEFAULT_LOCK_PATH = Path("fetch.lock")
+DEFAULT_DOWNLOAD_LOCK_PATH = Path("download.lock")
 DEFAULT_CRON_LOG_PATH = Path("logs/cron.jsonl")
 DEFAULT_OVERLAP_MINUTES = 10
 DEFAULT_OVERLAP_DAYS = 0
@@ -525,6 +526,18 @@ def run_changelog(args: argparse.Namespace) -> int:
 
 
 def run_download(args: argparse.Namespace) -> int:
+    lock_file = runtime_path(DEFAULT_DOWNLOAD_LOCK_PATH)
+    lock_error = _try_acquire_download_lock(lock_file)
+    if lock_error is not None:
+        print(f"Error: {lock_error}", file=sys.stderr)
+        return 1
+    try:
+        return _run_download_unlocked(args)
+    finally:
+        _release_download_lock(lock_file)
+
+
+def _run_download_unlocked(args: argparse.Namespace) -> int:
     config = load_download_config(args.download_config)
     db_path = _db_path(args.db)
     mode = "rebuild" if args.rebuild else ("sync" if args.sync else "delta")
@@ -1003,8 +1016,10 @@ def _print_human_download_summary(result: DownloadRunResult) -> None:
     print(f"Selected:        {result.selected_count}")
     print(f"Downloaded:      {result.downloaded_count}")
     print(f"Already present: {result.already_present_count}")
-    print(f"Skipped:         {result.skipped_count}")
+    print(f"Skipped total:   {result.skipped_count}")
     print(f"Skipped current: {result.skipped_current_count}")
+    print(f"Dry run:         {result.dry_run_count}")
+    print(f"Superseded:      {result.superseded_count}")
     print(f"Tombstoned:      {result.tombstoned_count}")
     print(f"Failed:          {result.failed_count}")
     if result.items:
@@ -1149,6 +1164,8 @@ def _log_label(record: LogEvent) -> str:
         "retry_scheduled": "RETRY scheduled",
         "download_start": "DOWNLOAD start",
         "download_item": "DOWNLOAD item",
+        "download_attempt": "DOWNLOAD attempt",
+        "download_retry": "DOWNLOAD retry",
         "download_ok": "DOWNLOAD ok",
         "download_partial": "DOWNLOAD partial",
         "download_failed": "DOWNLOAD failed",
@@ -1247,6 +1264,8 @@ def _log_key_order(event: str, record: LogEvent) -> list[str]:
         "ingest_skipped": ["reason"],
         "download_start": ["run_id", "job", "mode", "config", "db", "dry_run"],
         "download_item": ["document_id", "revision_id", "status", "file"],
+        "download_attempt": ["revision_id", "attempt", "max_attempts"],
+        "download_retry": ["revision_id", "attempt", "delay_seconds", "error", "status_code"],
         "download_ok": _download_log_keys(),
         "download_partial": _download_log_keys(),
         "download_failed": _download_log_keys(),
@@ -1297,6 +1316,8 @@ def _download_log_keys() -> list[str]:
         "failed",
         "skipped",
         "skipped_current",
+        "dry_run",
+        "superseded",
         "tombstoned",
         "duration_seconds",
         "manifest",
@@ -1421,6 +1442,8 @@ def _download_record(result: DownloadRunResult) -> dict[str, Any]:
         "failed_count": result.failed_count,
         "skipped_count": result.skipped_count,
         "skipped_current_count": result.skipped_current_count,
+        "dry_run_count": result.dry_run_count,
+        "superseded_count": result.superseded_count,
         "tombstoned_count": result.tombstoned_count,
         "dry_run": result.dry_run,
     }
@@ -1430,19 +1453,35 @@ def _db_path(value: str | None) -> Path:
     return Path(value).expanduser() if value else runtime_path(DEFAULT_DB_PATH)
 
 
-def _try_acquire_fetch_lock(path: Path) -> str | None:
+def _try_acquire_lock(path: Path, name: str) -> str | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
-        return f"fetch lock exists: {path}"
+        return f"{name} lock exists: {path}"
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"pid": os.getpid(), "created_at": _utc_iso()}) + "\n")
     return None
 
 
-def _release_fetch_lock(path: Path) -> None:
+def _try_acquire_fetch_lock(path: Path) -> str | None:
+    return _try_acquire_lock(path, "fetch")
+
+
+def _try_acquire_download_lock(path: Path) -> str | None:
+    return _try_acquire_lock(path, "download")
+
+
+def _release_lock(path: Path) -> None:
     path.unlink(missing_ok=True)
+
+
+def _release_fetch_lock(path: Path) -> None:
+    _release_lock(path)
+
+
+def _release_download_lock(path: Path) -> None:
+    _release_lock(path)
 
 
 def _append_cron_event(path: Path, *, record_type: str, **payload: Any) -> None:

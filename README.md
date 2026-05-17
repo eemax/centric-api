@@ -38,8 +38,10 @@ with `~/.centric-api/fetch.lock`.
 document's `latest_revision` through `document_revisions/{revision_id}/download`. The default mode is
 delta: documents already marked current in SQLite and present on disk are skipped. `--sync` verifies
 all selected latest revisions exist without overwriting existing files. `--rebuild` redownloads
-selected latest revisions and tombstones current download rows that are no longer selected, which is
-the authoritative cleanup path for hard-deleted or filtered-out documents. The default config is
+selected latest revisions and tombstones current download rows that are no longer selected, while
+preserving the last known good current revision if a replacement download fails. Download runs are
+serialized with `CENTRIC_API_HOME/download.lock`, and binary downloads retry transient HTTP/server
+hiccups with a simple 15s/30s backoff. The default config is
 `config/download.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or pass
 `--download-config`. Files are stored under `CENTRIC_API_HOME/downloads/files`, each run writes a
 manifest under `CENTRIC_API_HOME/downloads/runs`, current download state is tracked in the

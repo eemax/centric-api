@@ -6,7 +6,9 @@ from dataclasses import replace
 from pathlib import Path
 
 import httpx
+import pytest
 
+from centric_api.config import ConfigError
 from centric_api.download import (
     download_revision_file,
     load_download_config,
@@ -91,6 +93,8 @@ jobs:
     assert result.selected_count == 2
     assert result.skipped_count == 2
     assert result.skipped_current_count == 0
+    assert result.dry_run_count == 2
+    assert result.superseded_count == 0
     assert result.tombstoned_count == 0
     assert {item["document_id"] for item in result.items} == {"D1", "D3"}
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
@@ -186,6 +190,7 @@ def test_download_rebuild_redownloads_and_tombstones_unselected(tmp_path: Path) 
 
     assert rebuild_result.selected_count == 1
     assert rebuild_result.downloaded_count == 1
+    assert rebuild_result.superseded_count == 0
     assert existing_file.read_bytes() == b"new"
 
     with connect(db_path) as conn:
@@ -208,6 +213,100 @@ def test_download_rebuild_redownloads_and_tombstones_unselected(tmp_path: Path) 
             """
         ).fetchall()
     assert rows == [("D1", "R1", "tombstoned", "no_longer_selected")]
+
+
+def test_download_sync_uses_stored_content_disposition_path(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+
+    config = _download_config(tmp_path)
+    first = run_download_job(
+        db_path=db_path,
+        auth_ctx=_Auth(
+            httpx.Response(
+                200,
+                headers={"content-disposition": 'inline;filename="real-name.pdf"'},
+                content=b"hello",
+            )
+        ),
+        config=config,
+    )
+
+    assert first.downloaded_count == 1
+    assert first.items[0]["file_path"].endswith("/real-name.pdf")
+
+    sync = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=config,
+        mode="sync",
+    )
+
+    assert sync.already_present_count == 1
+    assert sync.items[0]["file_path"].endswith("/real-name.pdf")
+
+
+def test_download_rebuild_failure_preserves_previous_current_revision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("centric_api.download.time.sleep", lambda _seconds: None)
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+
+    config = _download_config(tmp_path)
+    old_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    old_file.parent.mkdir(parents=True)
+    old_file.write_bytes(b"old")
+    run_download_job(db_path=db_path, auth_ctx=None, config=config, mode="sync")
+
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE endpoint_records
+            SET payload_json = ?, payload_sha256 = ?
+            WHERE endpoint = 'documents' AND record_id = 'D1'
+            """,
+            [
+                json.dumps(
+                    {"id": "D1", "node_name": "spec.pdf", "latest_revision": "R2"},
+                    sort_keys=True,
+                ),
+                "hash-documents-D1-r2",
+            ],
+        )
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=_Auth(httpx.Response(503, content=b"try later")),
+        config=config,
+        mode="rebuild",
+    )
+
+    assert result.failed_count == 1
+    assert result.superseded_count == 0
+    assert result.tombstoned_count == 0
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT revision_id, status
+            FROM download_current
+            ORDER BY revision_id
+            """
+        ).fetchall()
+    assert rows == [("R1", "current"), ("R2", "failed")]
 
 
 def test_download_revision_file_uses_content_disposition_filename(tmp_path: Path) -> None:
@@ -233,6 +332,49 @@ def test_download_revision_file_uses_content_disposition_filename(tmp_path: Path
     assert result.path.read_bytes() == b"hello"
     assert result.bytes_written == 5
     assert result.content_type == "application/pdf"
+
+
+def test_download_revision_file_retries_retryable_http(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[int] = []
+    monkeypatch.setattr("centric_api.download.time.sleep", sleeps.append)
+    auth = _Auth(
+        [
+            httpx.Response(503, content=b"reload"),
+            httpx.Response(200, content=b"ok"),
+        ]
+    )
+
+    result = download_revision_file(
+        auth,
+        revision_id="R1",
+        target_path=tmp_path / "fallback.pdf",
+        fallback_filename="fallback.pdf",
+    )
+
+    assert result.path.read_bytes() == b"ok"
+    assert sleeps == [15]
+
+
+def test_download_config_rejects_unknown_keys(tmp_path: Path) -> None:
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: docs
+    max_documents: 5
+    sources:
+      - endpoint: documents
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="unknown keys: max_documents"):
+        load_download_config(config_path)
 
 
 def _insert_record(
@@ -285,11 +427,14 @@ jobs:
 
 
 class _Client:
-    def __init__(self, response: httpx.Response) -> None:
-        self.response = response
+    def __init__(self, responses: httpx.Response | list[httpx.Response]) -> None:
+        self.responses = responses if isinstance(responses, list) else [responses]
+        self.index = 0
 
     def stream(self, *_args, **_kwargs) -> _Stream:
-        return _Stream(self.response)
+        response = self.responses[min(self.index, len(self.responses) - 1)]
+        self.index += 1
+        return _Stream(response)
 
 
 class _Stream:
@@ -306,7 +451,7 @@ class _Stream:
 class _Auth:
     base_url = "https://centric.example.com"
 
-    def __init__(self, response: httpx.Response) -> None:
+    def __init__(self, response: httpx.Response | list[httpx.Response]) -> None:
         self.client = _Client(response)
 
     def ensure_token(self) -> str:
