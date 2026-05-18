@@ -136,6 +136,18 @@ def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     assert "download lock exists" in capsys.readouterr().err
 
 
+def test_download_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    lock_path = tmp_path / "download.lock"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    exit_code = main(["download", "--dry-run", "--db", str(tmp_path / "missing.db")])
+
+    assert exit_code == 1
+    assert "SQLite database not found" in capsys.readouterr().err
+    assert not (tmp_path / "logs" / "download.log").exists()
+
+
 def test_bundle_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
     lock_path = tmp_path / "bundle.lock"
@@ -145,6 +157,18 @@ def test_bundle_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
 
     assert exit_code == 1
     assert "bundle lock exists" in capsys.readouterr().err
+
+
+def test_bundle_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    lock_path = tmp_path / "bundle.lock"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    exit_code = main(["bundle", "--dry-run", "--db", str(tmp_path / "missing.db")])
+
+    assert exit_code == 1
+    assert "SQLite database not found" in capsys.readouterr().err
+    assert not (tmp_path / "logs").exists()
 
 
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:

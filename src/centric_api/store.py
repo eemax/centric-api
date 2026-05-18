@@ -71,6 +71,24 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def connect_readonly(db_path: Path) -> sqlite3.Connection:
+    if not db_path.is_file():
+        raise FileNotFoundError(f"SQLite database not found: {db_path}")
+    uri = f"file:{db_path.resolve()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        [name],
+    ).fetchone()
+    return row is not None
+
+
 def initialize_store(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """

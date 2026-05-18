@@ -18,7 +18,7 @@ import yaml
 
 from .auth import AuthContext
 from .config import ConfigError, runtime_home, runtime_path
-from .store import connect
+from .store import connect, connect_readonly, table_exists
 
 DEFAULT_DOWNLOAD_CONFIG_PATH = Path("config/download.yml")
 PRIVATE_DOWNLOAD_CONFIG_PATH = Path("download.yml")
@@ -211,8 +211,9 @@ def run_download_job(
         },
     )
 
-    with connect(db_path) as conn:
-        ensure_download_tables(conn)
+    with _connect_for_download(db_path, dry_run=dry_run) as conn:
+        if not dry_run:
+            ensure_download_tables(conn)
         _preflight_download_cache(conn, job)
         candidates = _collect_candidate_documents(conn, job, log_callback=log_callback)
         documents = _resolve_documents(conn, job, candidates, log_callback=log_callback)
@@ -365,6 +366,27 @@ def run_download_job(
         "tombstoned_count": tombstoned_count,
         "items": items,
     }
+    manifest_path = run_dir / "manifest.json"
+    if dry_run:
+        return DownloadRunResult(
+            run_id=run_id,
+            job_name=job.name,
+            mode=mode,
+            manifest_path=manifest_path,
+            matched_count=matched_count,
+            selected_count=len(selected_documents),
+            downloaded_count=downloaded_count,
+            already_present_count=already_present_count,
+            failed_count=failed_count,
+            skipped_count=skipped_count,
+            skipped_current_count=skipped_current_count,
+            dry_run_count=dry_run_count,
+            superseded_count=superseded_count,
+            tombstoned_count=tombstoned_count,
+            dry_run=dry_run,
+            items=tuple(items),
+        )
+
     manifest_path = _write_manifest(run_dir, manifest)
 
     with connect(db_path) as conn:
@@ -646,6 +668,10 @@ def ensure_download_tables(conn: sqlite3.Connection) -> None:
         ON download_current(document_id, revision_id);
         """
     )
+
+
+def _connect_for_download(db_path: Path, *, dry_run: bool) -> sqlite3.Connection:
+    return connect_readonly(db_path) if dry_run else connect(db_path)
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
@@ -1151,7 +1177,8 @@ def _document_ids_from_value(value: Any) -> list[str]:
 
 
 def _load_current_downloads(conn: sqlite3.Connection, job_name: str) -> dict[str, CurrentDownload]:
-    ensure_download_tables(conn)
+    if not table_exists(conn, "download_current"):
+        return {}
     rows = conn.execute(
         """
         SELECT document_id, revision_id, status, file_path, sha256, bytes

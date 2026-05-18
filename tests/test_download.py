@@ -94,18 +94,32 @@ jobs:
     assert result.superseded_count == 0
     assert result.tombstoned_count == 0
     assert {item["document_id"] for item in result.items} == {"D1", "D3"}
-    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["mode"] == "delta"
-    assert manifest["matched_count"] == 2
-    assert manifest["items"][0]["status"] == "dry_run"
+    assert not result.manifest_path.exists()
 
     with sqlite3.connect(db_path) as conn:
-        run_count = conn.execute("SELECT COUNT(*) FROM download_runs").fetchone()[0]
-        item_count = conn.execute("SELECT COUNT(*) FROM download_items").fetchone()[0]
-        current_count = conn.execute("SELECT COUNT(*) FROM download_current").fetchone()[0]
-    assert run_count == 1
-    assert item_count == 2
-    assert current_count == 0
+        download_tables = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'download_%'
+            ORDER BY name
+            """
+        ).fetchall()
+    assert download_tables == []
+
+
+def test_download_dry_run_requires_existing_db_without_creating_it(tmp_path: Path) -> None:
+    db_path = tmp_path / "missing.db"
+
+    with pytest.raises(FileNotFoundError, match="SQLite database not found"):
+        run_download_job(
+            db_path=db_path,
+            auth_ctx=None,
+            config=_download_config(tmp_path),
+            dry_run=True,
+        )
+
+    assert not db_path.exists()
 
 
 def test_download_requires_cached_source_endpoint(tmp_path: Path) -> None:

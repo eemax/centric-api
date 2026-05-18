@@ -15,7 +15,7 @@ import yaml
 
 from .config import ConfigError, runtime_home, runtime_path
 from .download import ensure_download_tables
-from .store import connect
+from .store import connect, connect_readonly, table_exists
 
 DEFAULT_BUNDLE_CONFIG_PATH = Path("config/bundle.yml")
 PRIVATE_BUNDLE_CONFIG_PATH = Path("bundle.yml")
@@ -122,9 +122,10 @@ def run_bundle_job(
         else None
     )
 
-    with connect(db_path) as conn:
-        ensure_bundle_tables(conn)
-        ensure_download_tables(conn)
+    with _connect_for_bundle(db_path, dry_run=dry_run) as conn:
+        if not dry_run:
+            ensure_bundle_tables(conn)
+            ensure_download_tables(conn)
         rows = _load_download_current_rows(conn, job.download_job)
         items = _build_bundle_items(conn, rows, job=job, files_dir=files_dir)
         previous = _load_bundle_current(conn, job.name)
@@ -290,7 +291,13 @@ def ensure_bundle_tables(conn: sqlite3.Connection) -> None:
     )
 
 
+def _connect_for_bundle(db_path: Path, *, dry_run: bool) -> sqlite3.Connection:
+    return connect_readonly(db_path) if dry_run else connect(db_path)
+
+
 def _load_download_current_rows(conn: sqlite3.Connection, download_job: str) -> list[sqlite3.Row]:
+    if not table_exists(conn, "download_current"):
+        return []
     return conn.execute(
         """
         SELECT document_id, revision_id, document_name, file_path, sha256, bytes,
@@ -433,6 +440,8 @@ def _load_bundle_current(
     conn: sqlite3.Connection,
     bundle_name: str,
 ) -> dict[str, dict[str, Any]]:
+    if not table_exists(conn, "bundle_current"):
+        return {}
     rows = conn.execute(
         """
         SELECT identity, archive_path, source_endpoint, source_record_id, source_label,

@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_download(args)
         if args.command == "bundle":
             return run_bundle(args)
-    except (AuthError, ConfigError, FetchError, ValueError) as exc:
+    except (AuthError, ConfigError, FetchError, FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     return 0
@@ -539,6 +539,8 @@ def run_changelog(args: argparse.Namespace) -> int:
 
 
 def run_download(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        return _run_download_unlocked(args)
     lock_file = runtime_path(DEFAULT_DOWNLOAD_LOCK_PATH)
     lock_error = _try_acquire_download_lock(lock_file)
     if lock_error is not None:
@@ -561,7 +563,7 @@ def _run_download_unlocked(args: argparse.Namespace) -> int:
         progress_callback = _write_download_progress_line
     download_log_file: TextIO | None = None
     log_callback: LogCallback | None = None
-    if args.log_level != "off":
+    if not args.dry_run and args.log_level != "off":
         log_path = runtime_path(DEFAULT_DOWNLOAD_LOG_PATH)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         download_log_file = log_path.open("a", encoding="utf-8")
@@ -605,6 +607,8 @@ def _run_download_unlocked(args: argparse.Namespace) -> int:
 
 
 def run_bundle(args: argparse.Namespace) -> int:
+    if args.dry_run:
+        return _run_bundle_unlocked(args)
     lock_file = runtime_path(DEFAULT_BUNDLE_LOCK_PATH)
     lock_error = _try_acquire_bundle_lock(lock_file)
     if lock_error is not None:

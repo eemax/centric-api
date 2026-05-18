@@ -251,10 +251,29 @@ def test_bundle_dry_run_does_not_write_artifacts_or_state(tmp_path: Path) -> Non
     assert not result.changelog_md_path.exists()
     assert not (tmp_path / "bundles" / "runs").exists()
     with sqlite3.connect(db_path) as conn:
-        run_count = conn.execute("SELECT COUNT(*) FROM bundle_runs").fetchone()[0]
-        current_count = conn.execute("SELECT COUNT(*) FROM bundle_current").fetchone()[0]
-    assert run_count == 0
-    assert current_count == 0
+        bundle_tables = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'bundle_%'
+            ORDER BY name
+            """
+        ).fetchall()
+    assert bundle_tables == []
+
+
+def test_bundle_dry_run_requires_existing_db_without_creating_it(tmp_path: Path) -> None:
+    db_path = tmp_path / "missing.db"
+
+    with pytest.raises(FileNotFoundError, match="SQLite database not found"):
+        run_bundle_job(
+            db_path=db_path,
+            config=_bundle_config(tmp_path),
+            job_name="style-bundle",
+            dry_run=True,
+        )
+
+    assert not db_path.exists()
 
 
 def test_bundle_fails_when_current_download_file_is_missing(tmp_path: Path) -> None:
