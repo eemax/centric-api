@@ -1,0 +1,29 @@
+version: 1
+output_dir: bundles
+
+bundles:
+  - name: ss26-style-techpacks
+    download_job: ss26-style-techpacks
+    layout:
+      source_label:
+        default:
+          fields:
+            - node_name
+        styles:
+          fields:
+            - style_code
+            - node_name
+          join: " - "
+        materials:
+          fields:
+            - material_code
+            - node_name
+          join: " - "
+
+  - name: supplier-audits
+    download_job: fw26-supplier-audits
+    layout:
+      source_label:
+        suppliers:
+          fields:
+            - node_name

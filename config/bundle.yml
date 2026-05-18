@@ -1,0 +1,12 @@
+version: 1
+output_dir: bundles
+
+bundles:
+  - name: basic
+    download_job: basic
+    layout:
+      source_label:
+        default:
+          fields:
+            - node_name
+          join: " - "

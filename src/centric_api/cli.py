@@ -18,6 +18,7 @@ import yaml
 from croniter import croniter
 
 from .auth import AuthError, init_auth_context
+from .bundle import BundleRunResult, load_bundle_config, run_bundle_job
 from .changelog import (
     ChangelogRun,
     list_actor_summary,
@@ -47,6 +48,7 @@ DEFAULT_DOWNLOAD_LOG_PATH = Path("logs/download.log")
 DEFAULT_DB_PATH = Path("centric.db")
 DEFAULT_LOCK_PATH = Path("fetch.lock")
 DEFAULT_DOWNLOAD_LOCK_PATH = Path("download.lock")
+DEFAULT_BUNDLE_LOCK_PATH = Path("bundle.lock")
 DEFAULT_CRON_LOG_PATH = Path("logs/cron.jsonl")
 DEFAULT_OVERLAP_MINUTES = 10
 DEFAULT_OVERLAP_DAYS = 0
@@ -73,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_cron(args)
         if args.command == "download":
             return run_download(args)
+        if args.command == "bundle":
+            return run_bundle(args)
     except (AuthError, ConfigError, FetchError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -125,6 +129,15 @@ def _build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument("--quiet", action="store_true")
     download_parser.add_argument("--json", action="store_true")
     download_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
+
+    bundle_parser = subparsers.add_parser("bundle", help="Package downloaded files into a bundle")
+    bundle_parser.add_argument("--bundle-config", default=None)
+    bundle_parser.add_argument("--job", default=None)
+    bundle_parser.add_argument("--db", default=None)
+    bundle_parser.add_argument("--dry-run", action="store_true")
+    bundle_parser.add_argument("--no-zip", action="store_true")
+    bundle_parser.add_argument("--quiet", action="store_true")
+    bundle_parser.add_argument("--json", action="store_true")
 
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
     cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
@@ -591,6 +604,33 @@ def _run_download_unlocked(args: argparse.Namespace) -> int:
     return 1 if result.failed_count else 0
 
 
+def run_bundle(args: argparse.Namespace) -> int:
+    lock_file = runtime_path(DEFAULT_BUNDLE_LOCK_PATH)
+    lock_error = _try_acquire_bundle_lock(lock_file)
+    if lock_error is not None:
+        print(f"Error: {lock_error}", file=sys.stderr)
+        return 1
+    try:
+        return _run_bundle_unlocked(args)
+    finally:
+        _release_bundle_lock(lock_file)
+
+
+def _run_bundle_unlocked(args: argparse.Namespace) -> int:
+    result = run_bundle_job(
+        db_path=_db_path(args.db),
+        config=load_bundle_config(args.bundle_config),
+        job_name=args.job,
+        dry_run=args.dry_run,
+        zip_bundle=not args.no_zip,
+    )
+    if args.json:
+        print(json.dumps(_bundle_record(result), default=str))
+    elif not args.quiet:
+        _print_human_bundle_summary(result)
+    return 1 if result.missing_count else 0
+
+
 def run_cron(args: argparse.Namespace) -> int:
     schedule = args.schedule.strip()
     if len(schedule.split()) != 5 or not croniter.is_valid(schedule):
@@ -1037,6 +1077,27 @@ def _print_human_download_summary(result: DownloadRunResult) -> None:
             print(f"... {len(result.items) - len(rows)} more")
 
 
+def _print_human_bundle_summary(result: BundleRunResult) -> None:
+    print("Bundle Complete")
+    print()
+    print(f"Job:       {result.bundle_name}")
+    print(f"Download:  {result.download_job}")
+    print(f"Run:       {result.run_id}")
+    print(f"Manifest:  {result.manifest_path}")
+    print(f"Changelog: {result.changelog_md_path}")
+    if result.zip_path is not None:
+        print(f"Zip:       {result.zip_path}")
+    print()
+    print("Summary")
+    print(f"Items:     {result.item_count}")
+    print(f"Added:     {result.added_count}")
+    print(f"Changed:   {result.changed_count}")
+    print(f"Renamed:   {result.renamed_count}")
+    print(f"Removed:   {result.removed_count}")
+    print(f"Unchanged: {result.unchanged_count}")
+    print(f"Missing:   {result.missing_count}")
+
+
 def _write_run_manifest(
     *,
     output_dir: Path,
@@ -1453,6 +1514,26 @@ def _download_record(result: DownloadRunResult) -> dict[str, Any]:
     }
 
 
+def _bundle_record(result: BundleRunResult) -> dict[str, Any]:
+    return {
+        "run_id": result.run_id,
+        "bundle": result.bundle_name,
+        "download_job": result.download_job,
+        "manifest": str(result.manifest_path),
+        "changelog_json": str(result.changelog_json_path),
+        "changelog_md": str(result.changelog_md_path),
+        "zip": str(result.zip_path) if result.zip_path else None,
+        "item_count": result.item_count,
+        "added_count": result.added_count,
+        "changed_count": result.changed_count,
+        "renamed_count": result.renamed_count,
+        "removed_count": result.removed_count,
+        "unchanged_count": result.unchanged_count,
+        "missing_count": result.missing_count,
+        "dry_run": result.dry_run,
+    }
+
+
 def _db_path(value: str | None) -> Path:
     return Path(value).expanduser() if value else runtime_path(DEFAULT_DB_PATH)
 
@@ -1476,6 +1557,10 @@ def _try_acquire_download_lock(path: Path) -> str | None:
     return _try_acquire_lock(path, "download")
 
 
+def _try_acquire_bundle_lock(path: Path) -> str | None:
+    return _try_acquire_lock(path, "bundle")
+
+
 def _release_lock(path: Path) -> None:
     path.unlink(missing_ok=True)
 
@@ -1485,6 +1570,10 @@ def _release_fetch_lock(path: Path) -> None:
 
 
 def _release_download_lock(path: Path) -> None:
+    _release_lock(path)
+
+
+def _release_bundle_lock(path: Path) -> None:
     _release_lock(path)
 
 

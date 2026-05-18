@@ -27,6 +27,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "changelog" in output
     assert "cron" in output
     assert "download" in output
+    assert "bundle" in output
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
@@ -59,6 +60,14 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
     assert "--job" in download_help
     assert "--sync" in download_help
     assert "--rebuild" in download_help
+
+    with pytest.raises(SystemExit) as bundle_exc:
+        main(["bundle", "--help"])
+    assert bundle_exc.value.code == 0
+    bundle_help = capsys.readouterr().out
+    assert "--bundle-config" in bundle_help
+    assert "--job" in bundle_help
+    assert "--no-zip" in bundle_help
 
 
 def test_fetch_log_level_defaults_to_summary() -> None:
@@ -125,6 +134,17 @@ def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
 
     assert exit_code == 1
     assert "download lock exists" in capsys.readouterr().err
+
+
+def test_bundle_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    lock_path = tmp_path / "bundle.lock"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    exit_code = main(["bundle"])
+
+    assert exit_code == 1
+    assert "bundle lock exists" in capsys.readouterr().err
 
 
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:

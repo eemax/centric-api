@@ -14,6 +14,8 @@ uv run centric-api changelog
 uv run centric-api download --dry-run
 uv run centric-api download --sync
 uv run centric-api download --rebuild
+uv run centric-api bundle
+uv run centric-api bundle --job ss26-style-techpacks
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
 ```
@@ -55,6 +57,17 @@ pass `--download-config`. Files are stored under
 `CENTRIC_API_HOME/downloads/files`, each run writes a manifest under
 `CENTRIC_API_HOME/downloads/runs`, current download state is tracked in the `download_current` SQLite
 table, and human-readable download logs append to `CENTRIC_API_HOME/logs/download.log`.
+
+`bundle` packages already-downloaded current files for distribution. Bundle jobs live in
+`config/bundle.yml` or private `CENTRIC_API_HOME/bundle.yml`, point at a `download_job`, and use a
+human-friendly archive layout of `files/{source_endpoint}/{source_label}/{filename}`. Source labels
+default to `node_name` and can be configured per endpoint by concatenating fields such as
+`style_code` and `node_name`. If the same document is referenced by multiple selected source
+objects, the bundle includes one copy under each source object folder. Each run writes
+`manifest.json`, `changelog.json`, and `changelog.md`, then creates a zip by default. Bundle
+changelog compares against the previous successful run of the same bundle and reports added,
+changed, renamed, removed, and unchanged files. Bundle state is tracked in `bundle_current`, and
+runs are serialized with `CENTRIC_API_HOME/bundle.lock`.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed
