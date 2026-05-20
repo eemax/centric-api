@@ -14,7 +14,7 @@ from typing import Any
 import yaml
 
 from .config import ConfigError, runtime_home, runtime_path
-from .download import ensure_download_tables
+from .db_schema import ensure_bundle_tables, ensure_download_tables
 from .store import connect, connect_readonly, table_exists
 
 DEFAULT_BUNDLE_CONFIG_PATH = Path("config/bundle.yml")
@@ -71,6 +71,14 @@ class BundleRunResult:
     unchanged_count: int
     missing_count: int
     dry_run: bool
+
+
+@dataclass(frozen=True)
+class BundleComparison:
+    from_run: dict[str, Any]
+    to_run: dict[str, Any]
+    summary: dict[str, int]
+    items: tuple[dict[str, Any], ...]
 
 
 def resolve_bundle_config_path(path: str | Path | None = None) -> Path:
@@ -169,6 +177,8 @@ def run_bundle_job(
     changelog = _bundle_changelog(manifest, previous_run_id=_previous_run_id(previous))
 
     if not dry_run:
+        final_run_dir_created = False
+        final_zip_created = False
         try:
             _write_json(temp_run_dir / "manifest.json", manifest)
             _write_json(temp_run_dir / "changelog.json", changelog)
@@ -176,6 +186,11 @@ def run_bundle_job(
             _copy_bundle_files(items)
             if temp_zip_path is not None:
                 _write_zip(temp_zip_path, temp_run_dir)
+            temp_run_dir.replace(run_dir)
+            final_run_dir_created = True
+            if temp_zip_path is not None and zip_path is not None:
+                temp_zip_path.replace(zip_path)
+                final_zip_created = True
             with connect(db_path) as conn:
                 ensure_bundle_tables(conn)
                 _record_bundle_run(
@@ -188,13 +203,14 @@ def run_bundle_job(
                     zip_path=zip_path,
                 )
                 _replace_bundle_current(conn, bundle_name=job.name, run_id=run_id, items=items)
-            temp_run_dir.replace(run_dir)
-            if temp_zip_path is not None and zip_path is not None:
-                temp_zip_path.replace(zip_path)
         except Exception:
             shutil.rmtree(temp_run_dir, ignore_errors=True)
             if temp_zip_path is not None:
                 temp_zip_path.unlink(missing_ok=True)
+            if final_run_dir_created:
+                shutil.rmtree(run_dir, ignore_errors=True)
+            if final_zip_created and zip_path is not None:
+                zip_path.unlink(missing_ok=True)
             raise
 
     return BundleRunResult(
@@ -216,78 +232,113 @@ def run_bundle_job(
     )
 
 
-def ensure_bundle_tables(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS bundle_runs (
-            run_id TEXT PRIMARY KEY,
-            bundle_name TEXT NOT NULL,
-            download_job TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            finished_at TEXT NOT NULL,
-            manifest_path TEXT NOT NULL,
-            changelog_json_path TEXT NOT NULL,
-            changelog_md_path TEXT NOT NULL,
-            zip_path TEXT,
-            item_count INTEGER NOT NULL,
-            added_count INTEGER NOT NULL,
-            changed_count INTEGER NOT NULL,
-            renamed_count INTEGER NOT NULL,
-            removed_count INTEGER NOT NULL,
-            unchanged_count INTEGER NOT NULL,
-            missing_count INTEGER NOT NULL,
-            dry_run INTEGER NOT NULL
-        );
+def list_bundle_runs(
+    db_path: Path,
+    *,
+    bundle_name: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "bundle_runs"):
+            return []
+        clauses: list[str] = []
+        params: list[Any] = []
+        if bundle_name:
+            clauses.append("bundle_name = ?")
+            params.append(bundle_name)
+        clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = conn.execute(
+            f"""
+            SELECT run_id, bundle_name, download_job, started_at, finished_at,
+                   zip_path, item_count, added_count, changed_count, renamed_count,
+                   removed_count, unchanged_count, missing_count, dry_run
+            FROM bundle_runs
+            {clause}
+            ORDER BY finished_at DESC, run_id DESC
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
 
-        CREATE TABLE IF NOT EXISTS bundle_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL,
-            bundle_name TEXT NOT NULL,
-            archive_path TEXT NOT NULL,
-            identity TEXT NOT NULL,
-            source_endpoint TEXT NOT NULL,
-            source_record_id TEXT NOT NULL,
-            source_label TEXT NOT NULL,
-            document_id TEXT NOT NULL,
-            revision_id TEXT NOT NULL,
-            file_path TEXT,
-            sha256 TEXT,
-            bytes INTEGER,
-            status TEXT NOT NULL,
-            change_type TEXT NOT NULL,
-            previous_archive_path TEXT,
-            previous_revision_id TEXT,
-            previous_sha256 TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES bundle_runs(run_id)
-        );
 
-        CREATE INDEX IF NOT EXISTS idx_bundle_items_bundle_archive
-        ON bundle_items(bundle_name, archive_path, created_at);
+def get_bundle_run(db_path: Path, run_id: str) -> dict[str, Any] | None:
+    if not db_path.is_file():
+        return None
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "bundle_runs"):
+            return None
+        row = conn.execute(
+            """
+            SELECT run_id, bundle_name, download_job, started_at, finished_at,
+                   manifest_path, changelog_json_path, changelog_md_path, zip_path,
+                   item_count, added_count, changed_count, renamed_count,
+                   removed_count, unchanged_count, missing_count, dry_run
+            FROM bundle_runs
+            WHERE run_id = ?
+            """,
+            [run_id],
+        ).fetchone()
+    return dict(row) if row is not None else None
 
-        CREATE TABLE IF NOT EXISTS bundle_current (
-            bundle_name TEXT NOT NULL,
-            archive_path TEXT NOT NULL,
-            identity TEXT NOT NULL,
-            source_endpoint TEXT NOT NULL,
-            source_record_id TEXT NOT NULL,
-            source_label TEXT NOT NULL,
-            document_id TEXT NOT NULL,
-            revision_id TEXT NOT NULL,
-            file_path TEXT NOT NULL,
-            sha256 TEXT NOT NULL,
-            bytes INTEGER NOT NULL,
-            last_run_id TEXT NOT NULL,
-            selected_at TEXT NOT NULL,
-            PRIMARY KEY (bundle_name, identity)
-        );
 
-        CREATE INDEX IF NOT EXISTS idx_bundle_current_document
-        ON bundle_current(document_id, revision_id);
+def list_bundle_items(db_path: Path, run_id: str) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "bundle_items"):
+            return []
+        rows = conn.execute(
+            """
+            SELECT archive_path, identity, source_endpoint, source_record_id,
+                   source_label, document_id, revision_id, file_path, sha256,
+                   bytes, status, change_type, previous_archive_path,
+                   previous_revision_id, previous_sha256, created_at
+            FROM bundle_items
+            WHERE run_id = ?
+            ORDER BY archive_path
+            """,
+            [run_id],
+        ).fetchall()
+    return [dict(row) for row in rows]
 
-        CREATE INDEX IF NOT EXISTS idx_bundle_current_archive
-        ON bundle_current(bundle_name, archive_path);
-        """
+
+def compare_bundle_runs(
+    db_path: Path,
+    *,
+    from_run_id: str,
+    to_run_id: str | None = None,
+) -> BundleComparison:
+    from_run = get_bundle_run(db_path, from_run_id)
+    if from_run is None:
+        raise ConfigError(f"Unknown bundle run id: {from_run_id}. Run centric-api bundle list.")
+    if to_run_id is None or to_run_id == "latest":
+        to_run = _latest_bundle_run_after(db_path, from_run)
+        if to_run is None:
+            raise ConfigError(f"No later bundle run found for {from_run['bundle_name']!r}.")
+    else:
+        to_run = get_bundle_run(db_path, to_run_id)
+        if to_run is None:
+            raise ConfigError(f"Unknown bundle run id: {to_run_id}. Run centric-api bundle list.")
+        if to_run["bundle_name"] != from_run["bundle_name"]:
+            raise ConfigError(
+                "Bundle changelog comparison requires runs from the same bundle: "
+                f"{from_run['bundle_name']} != {to_run['bundle_name']}."
+            )
+        if _bundle_run_order_key(to_run) < _bundle_run_order_key(from_run):
+            raise ConfigError(
+                f"Bundle changelog target {to_run_id} is older than {from_run_id}."
+            )
+    from_items = _included_items_by_identity(list_bundle_items(db_path, str(from_run["run_id"])))
+    to_items = _included_items_by_identity(list_bundle_items(db_path, str(to_run["run_id"])))
+    items = _compare_bundle_items(from_items, to_items)
+    return BundleComparison(
+        from_run=from_run,
+        to_run=to_run,
+        summary=_change_counts(items),
+        items=tuple(items),
     )
 
 
@@ -455,6 +506,77 @@ def _load_bundle_current(
     return {str(row["identity"]): dict(row) for row in rows}
 
 
+def _latest_bundle_run_after(db_path: Path, from_run: dict[str, Any]) -> dict[str, Any] | None:
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "bundle_runs"):
+            return None
+        row = conn.execute(
+            """
+            SELECT run_id, bundle_name, download_job, started_at, finished_at,
+                   manifest_path, changelog_json_path, changelog_md_path, zip_path,
+                   item_count, added_count, changed_count, renamed_count,
+                   removed_count, unchanged_count, missing_count, dry_run
+            FROM bundle_runs
+            WHERE bundle_name = ?
+              AND (finished_at > ? OR (finished_at = ? AND run_id > ?))
+            ORDER BY finished_at DESC, run_id DESC
+            LIMIT 1
+            """,
+            [
+                from_run["bundle_name"],
+                from_run["finished_at"],
+                from_run["finished_at"],
+                from_run["run_id"],
+            ],
+        ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def _included_items_by_identity(items: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {str(item["identity"]): item for item in items if item["status"] == "included"}
+
+
+def _bundle_run_order_key(run: dict[str, Any]) -> tuple[str, str]:
+    return (str(run["finished_at"]), str(run["run_id"]))
+
+
+def _compare_bundle_items(
+    from_items: dict[str, dict[str, Any]],
+    to_items: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    compared: list[dict[str, Any]] = []
+    for identity in sorted(set(from_items) | set(to_items)):
+        previous = from_items.get(identity)
+        current = to_items.get(identity)
+        if previous is None and current is not None:
+            change_type = "added"
+        elif previous is not None and current is None:
+            change_type = "removed"
+        elif previous and current and (
+            previous["revision_id"] != current["revision_id"]
+            or previous["sha256"] != current["sha256"]
+        ):
+            change_type = "changed"
+        elif previous and current and previous["archive_path"] != current["archive_path"]:
+            change_type = "renamed"
+        else:
+            change_type = "unchanged"
+        item = current or previous
+        if item is None:
+            continue
+        compared.append(
+            {
+                **item,
+                "status": "included" if current is not None else "removed",
+                "change_type": change_type,
+                "previous_archive_path": previous["archive_path"] if previous else None,
+                "previous_revision_id": previous["revision_id"] if previous else None,
+                "previous_sha256": previous["sha256"] if previous else None,
+            }
+        )
+    return compared
+
+
 def _record_bundle_run(
     conn: sqlite3.Connection,
     *,
@@ -502,9 +624,9 @@ def _record_bundle_run(
                 manifest["run_id"],
                 manifest["bundle"],
                 item["archive_path"],
-                item["identity"],
                 item["source_endpoint"],
                 item["source_record_id"],
+                item["identity"],
                 item["source_label"],
                 item["document_id"],
                 item["revision_id"],

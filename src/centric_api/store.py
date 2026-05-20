@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .db_schema import ensure_dashboard_views, ensure_feature_tables
 from .schema import DeleteCondition, EndpointSchema
 
 PRIMARY_KEY_FIELD = "id"
@@ -68,6 +69,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     initialize_store(conn)
+    ensure_feature_tables(conn)
+    ensure_dashboard_views(conn)
     return conn
 
 

@@ -18,6 +18,7 @@ import yaml
 
 from .auth import AuthContext
 from .config import ConfigError, runtime_home, runtime_path
+from .db_schema import ensure_download_tables
 from .store import connect, connect_readonly, table_exists
 
 DEFAULT_DOWNLOAD_CONFIG_PATH = Path("config/download.yml")
@@ -591,85 +592,6 @@ def _download_revision_file_once(
     )
 
 
-def ensure_download_tables(conn: sqlite3.Connection) -> None:
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS download_runs (
-            run_id TEXT PRIMARY KEY,
-            job_name TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            finished_at TEXT NOT NULL,
-            manifest_path TEXT NOT NULL,
-            matched_count INTEGER NOT NULL,
-            selected_count INTEGER NOT NULL,
-            downloaded_count INTEGER NOT NULL,
-            already_present_count INTEGER NOT NULL,
-            failed_count INTEGER NOT NULL,
-            skipped_count INTEGER NOT NULL,
-            skipped_current_count INTEGER NOT NULL,
-            dry_run_count INTEGER NOT NULL,
-            superseded_count INTEGER NOT NULL,
-            tombstoned_count INTEGER NOT NULL,
-            dry_run INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS download_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL,
-            job_name TEXT NOT NULL,
-            document_id TEXT NOT NULL,
-            document_name TEXT,
-            revision_id TEXT NOT NULL,
-            current_revision_id TEXT,
-            document_modified_at TEXT,
-            latest_at_run INTEGER NOT NULL,
-            previous_downloaded_revision_id TEXT,
-            previous_was_outdated INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            file_path TEXT,
-            sha256 TEXT,
-            bytes INTEGER,
-            error TEXT,
-            source_refs_json TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (run_id) REFERENCES download_runs(run_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_download_items_document
-        ON download_items(document_id, revision_id, created_at);
-
-        CREATE INDEX IF NOT EXISTS idx_download_items_status
-        ON download_items(status, created_at);
-
-        CREATE TABLE IF NOT EXISTS download_current (
-            job_name TEXT NOT NULL,
-            document_id TEXT NOT NULL,
-            revision_id TEXT NOT NULL,
-            document_name TEXT,
-            current_revision_id TEXT,
-            document_modified_at TEXT,
-            status TEXT NOT NULL,
-            file_path TEXT,
-            sha256 TEXT,
-            bytes INTEGER,
-            last_run_id TEXT NOT NULL,
-            selected_at TEXT,
-            tombstoned_at TEXT,
-            tombstone_reason TEXT,
-            source_refs_json TEXT NOT NULL,
-            PRIMARY KEY (job_name, document_id, revision_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_download_current_job_status
-        ON download_current(job_name, status);
-
-        CREATE INDEX IF NOT EXISTS idx_download_current_document
-        ON download_current(document_id, revision_id);
-        """
-    )
-
-
 def _connect_for_download(db_path: Path, *, dry_run: bool) -> sqlite3.Connection:
     return connect_readonly(db_path) if dry_run else connect(db_path)
 
@@ -840,8 +762,8 @@ def _select_job(config: DownloadConfig, job_name: str | None) -> DownloadJob:
 
 def _preflight_download_cache(conn: sqlite3.Connection, job: DownloadJob) -> None:
     required_endpoints = {source.endpoint for source in job.sources}
-    if job.revision_filters:
-        required_endpoints.add(DOCUMENT_REVISION_ENDPOINT)
+    required_endpoints.add(DOCUMENT_ENDPOINT)
+    required_endpoints.add(DOCUMENT_REVISION_ENDPOINT)
     required_endpoints.update(_lookup_filter_endpoints(job))
     missing = [
         endpoint
@@ -991,7 +913,7 @@ def _resolve_documents(
             document_id=document_id,
             log_callback=log_callback,
         )
-        if revision_payload is None and job.revision_filters:
+        if revision_payload is None:
             continue
         if revision_payload is not None and not _matches_filters(
             conn,

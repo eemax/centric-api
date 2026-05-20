@@ -55,6 +55,24 @@ def test_download_job_selects_style_documents_and_writes_manifest(tmp_path: Path
             record_id="D3",
             payload={"id": "D3", "node_name": "worksheet.xlsx", "latest_revision": "R3"},
         )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R2",
+            payload={"id": "R2", "file_name": "art.ai"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R3",
+            payload={"id": "R3", "file_name": "worksheet.xlsx"},
+        )
 
     config_path = tmp_path / "download.yml"
     config_path.write_text(
@@ -97,15 +115,12 @@ jobs:
     assert not result.manifest_path.exists()
 
     with sqlite3.connect(db_path) as conn:
-        download_tables = conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table' AND name LIKE 'download_%'
-            ORDER BY name
-            """
-        ).fetchall()
-    assert download_tables == []
+        download_run_count = conn.execute("SELECT COUNT(*) FROM download_runs").fetchone()[0]
+        download_item_count = conn.execute("SELECT COUNT(*) FROM download_items").fetchone()[0]
+        download_current_count = conn.execute("SELECT COUNT(*) FROM download_current").fetchone()[0]
+    assert download_run_count == 0
+    assert download_item_count == 0
+    assert download_current_count == 0
 
 
 def test_download_dry_run_requires_existing_db_without_creating_it(tmp_path: Path) -> None:
@@ -138,6 +153,25 @@ def test_download_requires_cached_source_endpoint(tmp_path: Path) -> None:
         )
 
 
+def test_download_requires_cached_revisions_without_revision_filters(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+
+    with pytest.raises(ConfigError, match="document_revisions"):
+        run_download_job(
+            db_path=db_path,
+            auth_ctx=None,
+            config=_download_config(tmp_path),
+            mode="rebuild",
+        )
+
+
 def test_download_delta_skips_current_revision_present_on_disk(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -146,6 +180,12 @@ def test_download_delta_skips_current_revision_present_on_disk(tmp_path: Path) -
             endpoint="documents",
             record_id="D1",
             payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
         )
 
     config = _download_config(tmp_path)
@@ -193,6 +233,12 @@ def test_download_rebuild_redownloads_and_tombstones_unselected(tmp_path: Path) 
             endpoint="documents",
             record_id="D1",
             payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
         )
 
     config = _download_config(tmp_path)
@@ -256,6 +302,12 @@ def test_download_sync_uses_stored_content_disposition_path(tmp_path: Path) -> N
             endpoint="documents",
             record_id="D1",
             payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
         )
 
     config = _download_config(tmp_path)
@@ -381,6 +433,39 @@ jobs:
     with sqlite3.connect(db_path) as conn:
         current_count = conn.execute("SELECT COUNT(*) FROM download_current").fetchone()[0]
     assert current_count == 0
+
+
+def test_download_skips_documents_missing_cached_latest_revision(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "one.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R0",
+            payload={"id": "R0", "file_name": "other.pdf"},
+        )
+    events: list[dict] = []
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=_download_config(tmp_path),
+        dry_run=True,
+        log_callback=events.append,
+    )
+
+    assert result.matched_count == 0
+    assert result.selected_count == 0
+    assert {
+        (event["event"], event.get("document_id"), event.get("revision_id"))
+        for event in events
+    } >= {("download_revision_record_missing", "D1", "R1")}
 
 
 def test_download_source_filter_lookup_matches_referenced_record(tmp_path: Path) -> None:
@@ -557,6 +642,12 @@ def test_download_lookup_filter_rejects_source_arrays(tmp_path: Path) -> None:
             record_id="D1",
             payload={"id": "D1", "node_name": "one", "latest_revision": "R1"},
         )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "one.pdf"},
+        )
 
     config_path = tmp_path / "download.yml"
     config_path.write_text(
@@ -601,6 +692,12 @@ def test_download_rebuild_failure_preserves_previous_current_revision(
             record_id="D1",
             payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
         )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
+        )
 
     config = _download_config(tmp_path)
     old_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
@@ -622,6 +719,12 @@ def test_download_rebuild_failure_preserves_previous_current_revision(
                 ),
                 "hash-documents-D1-r2",
             ],
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R2",
+            payload={"id": "R2", "file_name": "spec.pdf"},
         )
 
     result = run_download_job(

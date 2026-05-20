@@ -36,6 +36,31 @@ def test_runtime_paths_use_centric_api_home(
     assert runtime_path("raw") == tmp_path / "home" / "raw"
 
 
+def test_connect_installs_dashboard_views(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        views = {
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'view' AND name LIKE 'dashboard_%'
+                """
+            ).fetchall()
+        }
+
+    assert {
+        "dashboard_latest_fetch_runs",
+        "dashboard_endpoint_state",
+        "dashboard_recent_changes",
+        "dashboard_actor_activity",
+        "dashboard_download_jobs",
+        "dashboard_bundle_runs",
+        "dashboard_bundle_file_changes",
+    } <= views
+
+
 def test_load_fetcher_settings_runtime_defaults(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -62,6 +87,33 @@ endpoints:
     assert auth_settings.env_file == tmp_path / "home" / "local.env"
     assert [endpoint.name for endpoint in endpoints] == ["styles"]
     assert endpoints[0].count_spec.path == "count/Style"
+
+
+def test_load_fetcher_settings_expands_user_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    config = home / "fetcher.yml"
+    config.write_text(
+        """
+timeout: 5
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+    count_spec:
+      path: count/Style
+""",
+        encoding="utf-8",
+    )
+
+    fetcher_cfg, _auth_settings, endpoints = load_fetcher_settings("~/fetcher.yml")
+
+    assert fetcher_cfg.timeout == 5
+    assert [endpoint.name for endpoint in endpoints] == ["styles"]
 
 
 def test_load_fetcher_settings_requires_count_spec(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
 
@@ -15,6 +16,7 @@ from centric_api.cli import (
     _try_acquire_fetch_lock,
     main,
 )
+from centric_api.store import connect
 
 
 def test_cli_help_commands(capsys) -> None:
@@ -65,9 +67,18 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
         main(["bundle", "--help"])
     assert bundle_exc.value.code == 0
     bundle_help = capsys.readouterr().out
-    assert "--bundle-config" in bundle_help
-    assert "--job" in bundle_help
-    assert "--no-zip" in bundle_help
+    assert "run" in bundle_help
+    assert "list" in bundle_help
+    assert "show" in bundle_help
+    assert "changelog" in bundle_help
+
+    with pytest.raises(SystemExit) as bundle_run_exc:
+        main(["bundle", "run", "--help"])
+    assert bundle_run_exc.value.code == 0
+    bundle_run_help = capsys.readouterr().out
+    assert "--bundle-config" in bundle_run_help
+    assert "--job" in bundle_run_help
+    assert "--no-zip" in bundle_run_help
 
 
 def test_fetch_log_level_defaults_to_summary() -> None:
@@ -125,6 +136,20 @@ def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     assert "fetch lock exists" in capsys.readouterr().err
 
 
+def test_fetch_delta_dry_run_skips_lock_and_log(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    lock_path = tmp_path / "fetch.lock"
+    lock_path.write_text("locked", encoding="utf-8")
+
+    exit_code = main(["fetch", "--delta-dry-run", "--endpoint", "styles"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert '"status": "delta_dry_run"' in output
+    assert lock_path.exists()
+    assert not (tmp_path / "logs" / "fetch.log").exists()
+
+
 def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
     lock_path = tmp_path / "download.lock"
@@ -169,6 +194,63 @@ def test_bundle_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
     assert exit_code == 1
     assert "SQLite database not found" in capsys.readouterr().err
     assert not (tmp_path / "logs").exists()
+
+
+def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_bundle_run(conn, "2026-01-01T000000Z-style-bundle", "2026-01-01T00:00:00Z")
+        _insert_bundle_run(conn, "2026-01-02T000000Z-style-bundle", "2026-01-02T00:00:00Z")
+        _insert_bundle_item(
+            conn,
+            "2026-01-01T000000Z-style-bundle",
+            "styles\x1fS1\x1fD1",
+            "files/styles/Old/spec.pdf",
+            "R1",
+            "sha1",
+        )
+        _insert_bundle_item(
+            conn,
+            "2026-01-02T000000Z-style-bundle",
+            "styles\x1fS1\x1fD1",
+            "files/styles/New/spec.pdf",
+            "R2",
+            "sha2",
+        )
+
+    assert main(["bundle", "list", "--db", str(db_path), "--json"]) == 0
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rows[0]["run_id"] == "2026-01-02T000000Z-style-bundle"
+
+    assert (
+        main(
+            [
+                "bundle",
+                "show",
+                "2026-01-01T000000Z-style-bundle",
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["run"]["bundle_name"] == "style-bundle"
+
+    assert main(
+        [
+            "bundle",
+            "changelog",
+            "2026-01-01T000000Z-style-bundle",
+            "--db",
+            str(db_path),
+            "--json",
+        ]
+    ) == 0
+    changelog = json.loads(capsys.readouterr().out)
+    assert changelog["summary"]["changed_count"] == 1
+    assert changelog["to_run"]["run_id"] == "2026-01-02T000000Z-style-bundle"
 
 
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
@@ -253,3 +335,137 @@ def test_cron_fetch_skips_when_fetch_lock_exists(tmp_path) -> None:
         }
     ]
     assert lock_path.exists()
+
+
+def test_status_reports_missing_db(tmp_path, capsys) -> None:
+    exit_code = main(["status", "--db", str(tmp_path / "missing.db"), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["db_exists"] is False
+
+
+def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+
+    exit_code = main(["doctor", "--db", str(tmp_path / "missing.db"), "--json"])
+
+    assert exit_code == 1
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert {
+        "status": "FAIL",
+        "name": "db",
+        "message": f"SQLite database not found: {tmp_path / 'missing.db'}",
+    } in checks
+
+
+def test_rebuild_db_requires_yes(tmp_path, capsys) -> None:
+    exit_code = main(["rebuild-db", "--db", str(tmp_path / "centric.db")])
+
+    assert exit_code == 1
+    assert "rerun with --yes" in capsys.readouterr().err
+
+
+def test_rebuild_db_replays_raw_evidence(tmp_path, capsys) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    exit_code = main(
+        ["rebuild-db", "--db", str(db_path), "--raw-dir", str(raw_dir), "--yes", "--json"]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ingest"]["records_read"] == 1
+    with sqlite3.connect(db_path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
+    assert count == 1
+
+
+def _insert_bundle_run(conn, run_id: str, finished_at: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO bundle_runs (
+            run_id, bundle_name, download_job, started_at, finished_at,
+            manifest_path, changelog_json_path, changelog_md_path, zip_path,
+            item_count, added_count, changed_count, renamed_count, removed_count,
+            unchanged_count, missing_count, dry_run
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            run_id,
+            "style-bundle",
+            "style-docs",
+            finished_at,
+            finished_at,
+            "manifest.json",
+            "changelog.json",
+            "changelog.md",
+            f"{run_id}.zip",
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+
+
+def _insert_bundle_item(
+    conn,
+    run_id: str,
+    identity: str,
+    archive_path: str,
+    revision_id: str,
+    sha256: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO bundle_items (
+            run_id, bundle_name, archive_path, identity, source_endpoint,
+            source_record_id, source_label, document_id, revision_id, file_path,
+            sha256, bytes, status, change_type, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            run_id,
+            "style-bundle",
+            archive_path,
+            identity,
+            "styles",
+            "S1",
+            "Style One",
+            "D1",
+            revision_id,
+            "/tmp/spec.pdf",
+            sha256,
+            10,
+            "included",
+            "added",
+            "2026-01-01T00:00:00Z",
+        ],
+    )

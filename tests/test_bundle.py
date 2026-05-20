@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from centric_api.bundle import load_bundle_config, run_bundle_job
+from centric_api.bundle import compare_bundle_runs, load_bundle_config, run_bundle_job
 from centric_api.config import ConfigError
 from centric_api.download import ensure_download_tables
 from centric_api.store import connect
@@ -76,7 +76,30 @@ def test_bundle_duplicates_shared_file_under_each_source_label(tmp_path: Path) -
         rows = conn.execute(
             "SELECT archive_path FROM bundle_current ORDER BY archive_path"
         ).fetchall()
+        history_rows = conn.execute(
+            """
+            SELECT archive_path, identity, source_endpoint, source_record_id, source_label
+            FROM bundle_items
+            ORDER BY archive_path
+            """
+        ).fetchall()
     assert [row[0] for row in rows] == sorted(archive_paths)
+    assert history_rows == [
+        (
+            "files/styles/STY-001 - Linen Shirt/spec.pdf",
+            "styles\x1fS1\x1fD1",
+            "styles",
+            "S1",
+            "STY-001 - Linen Shirt",
+        ),
+        (
+            "files/styles/STY-002 - Linen Shirt Alt/spec.pdf",
+            "styles\x1fS2\x1fD1",
+            "styles",
+            "S2",
+            "STY-002 - Linen Shirt Alt",
+        ),
+    ]
 
 
 def test_bundle_changelog_tracks_changed_and_removed_files(tmp_path: Path) -> None:
@@ -143,6 +166,18 @@ def test_bundle_changelog_tracks_changed_and_removed_files(tmp_path: Path) -> No
         ("changed", "files/styles/STY-001 - Linen Shirt/spec.pdf"),
         ("removed", "files/styles/STY-002 - Linen Shirt Alt/spec.pdf"),
     }
+    comparison = compare_bundle_runs(db_path, from_run_id=first.run_id, to_run_id=second.run_id)
+    assert comparison.summary["changed_count"] == 1
+    assert comparison.summary["removed_count"] == 1
+    assert {
+        (item["change_type"], item["archive_path"]) for item in comparison.items
+        if item["change_type"] != "unchanged"
+    } == {
+        ("changed", "files/styles/STY-001 - Linen Shirt/spec.pdf"),
+        ("removed", "files/styles/STY-002 - Linen Shirt Alt/spec.pdf"),
+    }
+    with pytest.raises(ConfigError, match="older"):
+        compare_bundle_runs(db_path, from_run_id=second.run_id, to_run_id=first.run_id)
 
 
 def test_bundle_changelog_tracks_renamed_paths_by_stable_identity(tmp_path: Path) -> None:
@@ -251,15 +286,12 @@ def test_bundle_dry_run_does_not_write_artifacts_or_state(tmp_path: Path) -> Non
     assert not result.changelog_md_path.exists()
     assert not (tmp_path / "bundles" / "runs").exists()
     with sqlite3.connect(db_path) as conn:
-        bundle_tables = conn.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table' AND name LIKE 'bundle_%'
-            ORDER BY name
-            """
-        ).fetchall()
-    assert bundle_tables == []
+        bundle_run_count = conn.execute("SELECT COUNT(*) FROM bundle_runs").fetchone()[0]
+        bundle_item_count = conn.execute("SELECT COUNT(*) FROM bundle_items").fetchone()[0]
+        bundle_current_count = conn.execute("SELECT COUNT(*) FROM bundle_current").fetchone()[0]
+    assert bundle_run_count == 0
+    assert bundle_item_count == 0
+    assert bundle_current_count == 0
 
 
 def test_bundle_dry_run_requires_existing_db_without_creating_it(tmp_path: Path) -> None:

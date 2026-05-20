@@ -16,6 +16,12 @@ uv run centric-api download --sync
 uv run centric-api download --rebuild
 uv run centric-api bundle
 uv run centric-api bundle --job ss26-style-techpacks
+uv run centric-api bundle list
+uv run centric-api bundle show 2026-05-20T031422Z-style-bundle
+uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
+uv run centric-api status
+uv run centric-api doctor
+uv run centric-api rebuild-db --yes
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
 ```
@@ -69,6 +75,21 @@ changelog compares against the previous successful run of the same bundle and re
 changed, renamed, removed, and unchanged files. Bundle state is tracked in `bundle_current`, and
 runs are serialized with `CENTRIC_API_HOME/bundle.lock`.
 
+Bundle run IDs are timestamp-based and are the precise anchor for distribution support. Use
+`centric-api bundle list` to see past distributions, `centric-api bundle show BUNDLE_RUN_ID` to
+inspect one, and `centric-api bundle changelog FROM_BUNDLE_RUN_ID` to compare a received bundle
+against the latest later run of the same bundle. Pass `--to BUNDLE_RUN_ID` for an exact comparison
+target.
+
+`status` gives a quick read-only overview of runtime home, DB path, locks, latest fetch/changelog,
+download, bundle, and endpoint counts. `doctor` validates local setup, config, credentials presence,
+SQLite state, cached endpoints required by download jobs, bundle/download wiring, stale locks, and
+missing current download files. It exits nonzero when any check fails.
+
+`rebuild-db --yes` is the hard-cutover recovery path. It backs up the current SQLite database files,
+replays raw evidence from `CENTRIC_API_HOME/raw` into a fresh DB, rebuilds changelog, and reinstalls
+dashboard views. Use `--raw-dir` or `--db` to override the defaults.
+
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed
 the file manually, copy `config/delta.example.yml` to `~/.centric-api/delta.yml`. Delta fetches
@@ -106,5 +127,8 @@ tombstones.
 
 For dashboard-style queries, changelog also writes field-level rows and compact rollups:
 `endpoint_change_summary`, `endpoint_field_change_summary`, `endpoint_actor_change_summary`, and
-`endpoint_actor_field_change_summary`. Use `centric-api changelog fields` and
+`endpoint_actor_field_change_summary`. SQLite also exposes stable dashboard views:
+`dashboard_latest_fetch_runs`, `dashboard_endpoint_state`, `dashboard_recent_changes`,
+`dashboard_actor_activity`, `dashboard_download_jobs`, `dashboard_bundle_runs`, and
+`dashboard_bundle_file_changes`. Use `centric-api changelog fields` and
 `centric-api changelog actors` for quick aggregate views.

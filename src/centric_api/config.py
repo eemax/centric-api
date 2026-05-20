@@ -221,7 +221,7 @@ def resolve_optional_private_config_path(
 def load_fetcher_settings(
     path: str | Path,
 ) -> tuple[FetcherConfig, AuthSettings, list[EndpointSpec]]:
-    config_path = Path(path)
+    config_path = Path(path).expanduser()
     payload = _load_payload(config_path)
 
     fetcher_cfg = _build_fetcher_config(payload)
