@@ -6,52 +6,20 @@ import re
 import shutil
 import sqlite3
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from .config import ConfigError, runtime_home, runtime_path
+from .bundle_config import (
+    BundleConfig,
+    BundleJob,
+    BundleLayout,
+    select_bundle_job,
+)
+from .config import ConfigError
 from .db_schema import ensure_bundle_tables, ensure_download_tables
 from .store import connect, connect_readonly, table_exists
-
-DEFAULT_BUNDLE_CONFIG_PATH = Path("config/bundle.yml")
-PRIVATE_BUNDLE_CONFIG_PATH = Path("bundle.yml")
-DEFAULT_BUNDLE_DIR = Path("bundles")
-DEFAULT_SOURCE_LABEL_FIELDS = ("node_name",)
-ROOT_CONFIG_KEYS = {"version", "output_dir", "bundles"}
-BUNDLE_CONFIG_KEYS = {"name", "download_job", "layout"}
-LAYOUT_CONFIG_KEYS = {"source_label"}
-SOURCE_LABEL_CONFIG_KEYS = {"fields", "join"}
-
-
-@dataclass(frozen=True)
-class SourceLabelRule:
-    fields: tuple[str, ...] = DEFAULT_SOURCE_LABEL_FIELDS
-    join: str = " - "
-
-
-@dataclass(frozen=True)
-class BundleLayout:
-    source_label_rules: dict[str, SourceLabelRule] = field(
-        default_factory=lambda: {"default": SourceLabelRule()}
-    )
-
-
-@dataclass(frozen=True)
-class BundleJob:
-    name: str
-    download_job: str
-    layout: BundleLayout = field(default_factory=BundleLayout)
-
-
-@dataclass(frozen=True)
-class BundleConfig:
-    path: Path
-    bundles: tuple[BundleJob, ...]
-    output_dir: Path = field(default_factory=lambda: runtime_path(DEFAULT_BUNDLE_DIR))
 
 
 @dataclass(frozen=True)
@@ -81,31 +49,6 @@ class BundleComparison:
     items: tuple[dict[str, Any], ...]
 
 
-def resolve_bundle_config_path(path: str | Path | None = None) -> Path:
-    if path is not None:
-        return Path(path).expanduser()
-    private_path = runtime_home() / PRIVATE_BUNDLE_CONFIG_PATH
-    if private_path.is_file():
-        return private_path
-    return DEFAULT_BUNDLE_CONFIG_PATH
-
-
-def load_bundle_config(path: str | Path | None = None) -> BundleConfig:
-    config_path = resolve_bundle_config_path(path)
-    payload = _load_payload(config_path)
-    _reject_unknown_keys(payload, ROOT_CONFIG_KEYS, "bundle config")
-    version = payload.get("version", 1)
-    if version != 1:
-        raise ConfigError("bundle config version must be 1.")
-    output_dir = _runtime_output_dir(payload.get("output_dir"))
-    bundles_raw = _list(payload.get("bundles"), "bundles")
-    bundles = tuple(_parse_bundle(raw, index) for index, raw in enumerate(bundles_raw))
-    if not bundles:
-        raise ConfigError("bundle config must contain at least one bundle.")
-    _ensure_unique_bundle_names(bundles)
-    return BundleConfig(path=config_path, bundles=bundles, output_dir=output_dir)
-
-
 def run_bundle_job(
     *,
     db_path: Path,
@@ -114,7 +57,7 @@ def run_bundle_job(
     dry_run: bool = False,
     zip_bundle: bool = True,
 ) -> BundleRunResult:
-    job = _select_bundle(config, job_name)
+    job = select_bundle_job(config, job_name)
     created_at = datetime.now(UTC)
     run_id = _allocate_run_id(config.output_dir, created_at, job.name)
     run_dir = config.output_dir / "runs" / run_id
@@ -124,11 +67,7 @@ def run_bundle_job(
     changelog_json_path = run_dir / "changelog.json"
     changelog_md_path = run_dir / "changelog.md"
     zip_path = config.output_dir / f"{run_id}.zip" if zip_bundle and not dry_run else None
-    temp_zip_path = (
-        config.output_dir / f".{run_id}.zip.tmp"
-        if zip_bundle and not dry_run
-        else None
-    )
+    temp_zip_path = config.output_dir / f".{run_id}.zip.tmp" if zip_bundle and not dry_run else None
 
     with _connect_for_bundle(db_path, dry_run=dry_run) as conn:
         if not dry_run:
@@ -328,9 +267,7 @@ def compare_bundle_runs(
                 f"{from_run['bundle_name']} != {to_run['bundle_name']}."
             )
         if _bundle_run_order_key(to_run) < _bundle_run_order_key(from_run):
-            raise ConfigError(
-                f"Bundle changelog target {to_run_id} is older than {from_run_id}."
-            )
+            raise ConfigError(f"Bundle changelog target {to_run_id} is older than {from_run_id}.")
     from_items = _included_items_by_identity(list_bundle_items(db_path, str(from_run["run_id"])))
     to_items = _included_items_by_identity(list_bundle_items(db_path, str(to_run["run_id"])))
     items = _compare_bundle_items(from_items, to_items)
@@ -374,8 +311,10 @@ def _build_bundle_items(
         source_path = Path(str(row["file_path"] or ""))
         file_exists = source_path.is_file()
         sha256 = str(row["sha256"] or _sha256(source_path)) if file_exists else None
-        size = int(row["bytes"]) if row["bytes"] is not None else (
-            source_path.stat().st_size if file_exists else None
+        size = (
+            int(row["bytes"])
+            if row["bytes"] is not None
+            else (source_path.stat().st_size if file_exists else None)
         )
         filename = source_path.name or str(row["document_name"] or row["document_id"])
         source_refs = _json_list(row["source_refs_json"])
@@ -552,9 +491,13 @@ def _compare_bundle_items(
             change_type = "added"
         elif previous is not None and current is None:
             change_type = "removed"
-        elif previous and current and (
-            previous["revision_id"] != current["revision_id"]
-            or previous["sha256"] != current["sha256"]
+        elif (
+            previous
+            and current
+            and (
+                previous["revision_id"] != current["revision_id"]
+                or previous["sha256"] != current["sha256"]
+            )
         ):
             change_type = "changed"
         elif previous and current and previous["archive_path"] != current["archive_path"]:
@@ -819,9 +762,7 @@ def _render_changelog_md(changelog: dict[str, Any]) -> str:
                 )
                 lines.append(f"  Current revision: {item['revision_id']}")
             elif change_type == "renamed":
-                lines.append(
-                    f"  Previous path: {item.get('previous_archive_path') or 'unknown'}"
-                )
+                lines.append(f"  Previous path: {item.get('previous_archive_path') or 'unknown'}")
     lines.append("")
     return "\n".join(lines)
 
@@ -878,10 +819,7 @@ def _source_label(
     payload: dict[str, Any],
 ) -> str:
     rule = layout.source_label_rules.get(endpoint) or layout.source_label_rules["default"]
-    values = [
-        _string_value(_extract_path(payload, field))
-        for field in rule.fields
-    ]
+    values = [_string_value(_extract_path(payload, field)) for field in rule.fields]
     label = rule.join.join(value for value in values if value)
     return label or record_id
 
@@ -901,109 +839,6 @@ def _unique_archive_path(used_paths: set[str], path: Path) -> str:
             used_paths.add(candidate)
             return candidate
         index += 1
-
-
-def _parse_bundle(raw: Any, index: int) -> BundleJob:
-    if not isinstance(raw, dict):
-        raise ConfigError(f"bundle bundles[{index}] must be an object.")
-    _reject_unknown_keys(raw, BUNDLE_CONFIG_KEYS, f"bundle bundles[{index}]")
-    name = raw.get("name")
-    if not isinstance(name, str) or not name.strip():
-        raise ConfigError(f"bundle bundles[{index}].name must be a non-empty string.")
-    download_job = raw.get("download_job")
-    if not isinstance(download_job, str) or not download_job.strip():
-        raise ConfigError(f"bundle bundles[{index}].download_job must be a non-empty string.")
-    return BundleJob(
-        name=name.strip(),
-        download_job=download_job.strip(),
-        layout=_parse_layout(raw.get("layout", {}), name.strip()),
-    )
-
-
-def _parse_layout(raw: Any, bundle_name: str) -> BundleLayout:
-    if raw is None:
-        raw = {}
-    if not isinstance(raw, dict):
-        raise ConfigError(f"bundle[{bundle_name}].layout must be an object.")
-    _reject_unknown_keys(raw, LAYOUT_CONFIG_KEYS, f"bundle[{bundle_name}].layout")
-    source_label_raw = raw.get("source_label", {})
-    if source_label_raw is None:
-        source_label_raw = {}
-    if not isinstance(source_label_raw, dict):
-        raise ConfigError(f"bundle[{bundle_name}].layout.source_label must be an object.")
-    rules = {"default": SourceLabelRule()}
-    for endpoint, rule_raw in source_label_raw.items():
-        rules[str(endpoint)] = _parse_source_label_rule(
-            rule_raw,
-            f"bundle[{bundle_name}].layout.source_label[{endpoint}]",
-        )
-    if "default" not in rules:
-        rules["default"] = SourceLabelRule()
-    return BundleLayout(source_label_rules=rules)
-
-
-def _parse_source_label_rule(raw: Any, field_name: str) -> SourceLabelRule:
-    if not isinstance(raw, dict):
-        raise ConfigError(f"{field_name} must be an object.")
-    _reject_unknown_keys(raw, SOURCE_LABEL_CONFIG_KEYS, field_name)
-    fields = raw.get("fields", list(DEFAULT_SOURCE_LABEL_FIELDS))
-    field_values = _list(fields, f"{field_name}.fields")
-    parsed_fields = []
-    for field_value in field_values:
-        if not isinstance(field_value, str) or not field_value.strip():
-            raise ConfigError(f"{field_name}.fields must contain non-empty strings.")
-        parsed_fields.append(field_value.strip())
-    join = raw.get("join", " - ")
-    if not isinstance(join, str):
-        raise ConfigError(f"{field_name}.join must be a string.")
-    return SourceLabelRule(fields=tuple(parsed_fields), join=join)
-
-
-def _select_bundle(config: BundleConfig, job_name: str | None) -> BundleJob:
-    if job_name is None:
-        return config.bundles[0]
-    for job in config.bundles:
-        if job.name == job_name:
-            return job
-    raise ConfigError(f"Unknown bundle job: {job_name}")
-
-
-def _ensure_unique_bundle_names(bundles: tuple[BundleJob, ...]) -> None:
-    names: set[str] = set()
-    for bundle in bundles:
-        if bundle.name in names:
-            raise ConfigError(f"Duplicate bundle name: {bundle.name}")
-        names.add(bundle.name)
-
-
-def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"Bundle config not found: {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ConfigError("Bundle config root must be an object.")
-    return payload
-
-
-def _runtime_output_dir(value: Any) -> Path:
-    if value is None:
-        return runtime_path(DEFAULT_BUNDLE_DIR)
-    if not isinstance(value, str) or not value.strip():
-        raise ConfigError("bundle output_dir must be a non-empty string.")
-    path = Path(value).expanduser()
-    return path if path.is_absolute() else runtime_path(path)
-
-
-def _list(value: Any, field_name: str) -> list[Any]:
-    if not isinstance(value, list):
-        raise ConfigError(f"{field_name} must be an array.")
-    return value
-
-
-def _reject_unknown_keys(payload: dict[str, Any], allowed: set[str], field_name: str) -> None:
-    unknown = sorted(set(payload) - allowed)
-    if unknown:
-        raise ConfigError(f"{field_name} has unknown keys: {', '.join(unknown)}")
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

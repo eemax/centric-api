@@ -2,11 +2,36 @@ from __future__ import annotations
 
 import sqlite3
 
+SCHEMA_VERSION = 1
+
 
 def ensure_feature_tables(conn: sqlite3.Connection) -> None:
+    ensure_schema_metadata(conn)
     ensure_changelog_tables(conn)
     ensure_download_tables(conn)
     ensure_bundle_tables(conn)
+
+
+def ensure_schema_metadata(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS local_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO local_metadata (key, value, updated_at)
+        VALUES ('db_schema_version', ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        [str(SCHEMA_VERSION)],
+    )
 
 
 def ensure_changelog_tables(conn: sqlite3.Connection) -> None:

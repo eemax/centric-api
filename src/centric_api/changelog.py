@@ -84,9 +84,13 @@ def record_changelog(
             record_ids_by_endpoint=record_ids_by_endpoint,
             deleted_record_ids_by_endpoint=deleted_record_ids_by_endpoint,
         )
-        full_refresh = full or not has_record_scope or not _index_has_all_endpoints(
-            conn,
-            endpoint_names,
+        full_refresh = (
+            full
+            or not has_record_scope
+            or not _index_has_all_endpoints(
+                conn,
+                endpoint_names,
+            )
         )
 
         if full_refresh:

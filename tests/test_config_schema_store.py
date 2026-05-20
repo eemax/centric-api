@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from centric_api.config import load_fetcher_settings, runtime_home, runtime_path
-from centric_api.fetcher import FetchError, get_expected_count, run_endpoint
+from centric_api.db_schema import SCHEMA_VERSION
+from centric_api.fetch_common import FetchError
+from centric_api.fetch_pagination import get_expected_count
+from centric_api.fetcher import run_endpoint
 from centric_api.models import CountSpec, EndpointSpec, FetcherConfig
 from centric_api.schema import load_endpoint_schemas
 from centric_api.store import connect, ingest_raw_dir
@@ -39,6 +42,9 @@ def test_runtime_paths_use_centric_api_home(
 def test_connect_installs_dashboard_views(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
+        schema_version = conn.execute(
+            "SELECT value FROM local_metadata WHERE key = 'db_schema_version'"
+        ).fetchone()[0]
         views = {
             row[0]
             for row in conn.execute(
@@ -50,6 +56,7 @@ def test_connect_installs_dashboard_views(tmp_path: Path) -> None:
             ).fetchall()
         }
 
+    assert schema_version == str(SCHEMA_VERSION)
     assert {
         "dashboard_latest_fetch_runs",
         "dashboard_endpoint_state",

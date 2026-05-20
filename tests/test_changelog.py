@@ -242,7 +242,8 @@ def test_changelog_records_delete_type_for_removed_records(tmp_path: Path) -> No
     )
 
     removed_event = next(
-        change for change in list_changes(db_path, endpoint="styles", limit=10)
+        change
+        for change in list_changes(db_path, endpoint="styles", limit=10)
         if change["change_type"] == "removed"
     )
     actor_summary = list_actor_summary(db_path, endpoint="styles", limit=10)

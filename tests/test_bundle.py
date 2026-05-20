@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from centric_api.bundle import compare_bundle_runs, load_bundle_config, run_bundle_job
+from centric_api.bundle import compare_bundle_runs, run_bundle_job
+from centric_api.bundle_config import load_bundle_config
 from centric_api.config import ConfigError
-from centric_api.download import ensure_download_tables
+from centric_api.db_schema import ensure_download_tables
 from centric_api.store import connect
 
 
@@ -160,9 +161,7 @@ def test_bundle_changelog_tracks_changed_and_removed_files(tmp_path: Path) -> No
     assert second.changed_count == 1
     assert second.removed_count == 1
     assert changelog["previous_run_id"] == first.run_id
-    assert {
-        (item["change_type"], item["archive_path"]) for item in changelog["items"]
-    } == {
+    assert {(item["change_type"], item["archive_path"]) for item in changelog["items"]} == {
         ("changed", "files/styles/STY-001 - Linen Shirt/spec.pdf"),
         ("removed", "files/styles/STY-002 - Linen Shirt Alt/spec.pdf"),
     }
@@ -170,7 +169,8 @@ def test_bundle_changelog_tracks_changed_and_removed_files(tmp_path: Path) -> No
     assert comparison.summary["changed_count"] == 1
     assert comparison.summary["removed_count"] == 1
     assert {
-        (item["change_type"], item["archive_path"]) for item in comparison.items
+        (item["change_type"], item["archive_path"])
+        for item in comparison.items
         if item["change_type"] != "unchanged"
     } == {
         ("changed", "files/styles/STY-001 - Linen Shirt/spec.pdf"),

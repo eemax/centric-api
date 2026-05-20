@@ -5,17 +5,17 @@ import sqlite3
 
 import pytest
 
-from centric_api.cli import (
-    _append_cron_event,
-    _append_cron_fetch_records,
-    _build_parser,
-    _parse_jsonl,
-    _release_fetch_lock,
-    _render_log_line,
-    _run_cron_fetch_once,
-    _try_acquire_fetch_lock,
-    main,
+from centric_api.cli import main
+from centric_api.cli_output import _render_log_line
+from centric_api.cli_parser import build_parser
+from centric_api.commands.common import (
+    append_cron_log_event,
+    append_cron_log_fetch_records,
+    release_fetch_lock,
+    try_acquire_fetch_lock,
 )
+from centric_api.commands.cron import run_cron_fetch_once
+from centric_api.runtime_io import parse_jsonl
 from centric_api.store import connect
 
 
@@ -82,7 +82,7 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
 
 
 def test_fetch_log_level_defaults_to_summary() -> None:
-    args = _build_parser().parse_args(["fetch"])
+    args = build_parser().parse_args(["fetch"])
 
     assert args.log_level == "summary"
 
@@ -238,16 +238,19 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
     shown = json.loads(capsys.readouterr().out)
     assert shown["run"]["bundle_name"] == "style-bundle"
 
-    assert main(
-        [
-            "bundle",
-            "changelog",
-            "2026-01-01T000000Z-style-bundle",
-            "--db",
-            str(db_path),
-            "--json",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "bundle",
+                "changelog",
+                "2026-01-01T000000Z-style-bundle",
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
     changelog = json.loads(capsys.readouterr().out)
     assert changelog["summary"]["changed_count"] == 1
     assert changelog["to_run"]["run_id"] == "2026-01-02T000000Z-style-bundle"
@@ -256,17 +259,17 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     lock_path = tmp_path / "fetch.lock"
 
-    assert _try_acquire_fetch_lock(lock_path) is None
+    assert try_acquire_fetch_lock(lock_path) is None
     assert lock_path.is_file()
-    assert _try_acquire_fetch_lock(lock_path) is not None
+    assert try_acquire_fetch_lock(lock_path) is not None
 
-    _release_fetch_lock(lock_path)
+    release_fetch_lock(lock_path)
 
     assert not lock_path.exists()
 
 
 def test_parse_jsonl_preserves_non_json_lines() -> None:
-    assert _parse_jsonl('{"status":"ok"}\nnot-json\n') == [
+    assert parse_jsonl('{"status":"ok"}\nnot-json\n') == [
         {"status": "ok"},
         {"record_type": "fetch_stdout", "line": "not-json"},
     ]
@@ -275,8 +278,8 @@ def test_parse_jsonl_preserves_non_json_lines() -> None:
 def test_cron_log_helpers_write_jsonl_only(tmp_path) -> None:
     log_path = tmp_path / "cron.jsonl"
 
-    _append_cron_event(log_path, record_type="cron_start", schedule="0 * * * *")
-    _append_cron_fetch_records(
+    append_cron_log_event(log_path, record_type="cron_start", schedule="0 * * * *")
+    append_cron_log_fetch_records(
         log_path,
         records=[{"endpoint": "styles", "status": "ok", "items_fetched": 2}],
         stderr="",
@@ -300,12 +303,12 @@ def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
     def fail_fetch(_args):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("centric_api.cli.run_fetch", fail_fetch)
-    args = _build_parser().parse_args(["cron"])
+    monkeypatch.setattr("centric_api.commands.cron.run_fetch", fail_fetch)
+    args = build_parser().parse_args(["cron"])
     lock_path = tmp_path / "fetch.lock"
     log_path = tmp_path / "cron.jsonl"
 
-    _run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
+    run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
 
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
 
@@ -317,12 +320,12 @@ def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
 
 
 def test_cron_fetch_skips_when_fetch_lock_exists(tmp_path) -> None:
-    args = _build_parser().parse_args(["cron"])
+    args = build_parser().parse_args(["cron"])
     lock_path = tmp_path / "fetch.lock"
     log_path = tmp_path / "cron.jsonl"
     lock_path.write_text("locked", encoding="utf-8")
 
-    _run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
+    run_cron_fetch_once(args, lock_file=lock_path, log_file=log_path)
 
     rows = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert rows == [

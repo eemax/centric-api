@@ -9,11 +9,9 @@ import httpx
 import pytest
 
 from centric_api.config import ConfigError
-from centric_api.download import (
-    download_revision_file,
-    load_download_config,
-    run_download_job,
-)
+from centric_api.download import run_download_job
+from centric_api.download_config import load_download_config
+from centric_api.download_http import download_revision_file
 from centric_api.store import connect
 
 
@@ -151,6 +149,23 @@ def test_download_requires_cached_source_endpoint(tmp_path: Path) -> None:
             config=config,
             mode="rebuild",
         )
+
+
+def test_download_preflight_accepts_fetched_empty_endpoints(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_applied_raw_file(conn, endpoint="documents", record_count=0)
+        _insert_applied_raw_file(conn, endpoint="document_revisions", record_count=0)
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=_download_config(tmp_path),
+        dry_run=True,
+    )
+
+    assert result.matched_count == 0
+    assert result.selected_count == 0
 
 
 def test_download_requires_cached_revisions_without_revision_filters(tmp_path: Path) -> None:
@@ -463,8 +478,7 @@ def test_download_skips_documents_missing_cached_latest_revision(tmp_path: Path)
     assert result.matched_count == 0
     assert result.selected_count == 0
     assert {
-        (event["event"], event.get("document_id"), event.get("revision_id"))
-        for event in events
+        (event["event"], event.get("document_id"), event.get("revision_id")) for event in events
     } >= {("download_revision_record_missing", "D1", "R1")}
 
 
@@ -840,6 +854,37 @@ def _insert_record(
             None,
             "raw.jsonl",
             "run-1",
+            "2026-01-01T00:00:00Z",
+        ],
+    )
+
+
+def _insert_applied_raw_file(
+    conn: sqlite3.Connection,
+    *,
+    endpoint: str,
+    record_count: int,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO applied_raw_files (
+            file_path, endpoint, source_run_id, is_delta, record_count,
+            invalid_record_count, content_sha256, manifest_path, manifest_sha256,
+            run_mode, ingested_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            f"/tmp/{endpoint}.jsonl",
+            endpoint,
+            "run-1",
+            0,
+            record_count,
+            0,
+            f"hash-{endpoint}",
+            None,
+            None,
+            "full",
             "2026-01-01T00:00:00Z",
         ],
     )
