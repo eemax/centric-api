@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from .config import runtime_path
 from .models import AuthSettings
 
 
@@ -15,6 +18,7 @@ class AuthError(RuntimeError):
 
 
 RequestParams = dict[str, Any] | list[tuple[str, Any]]
+TOKEN_CACHE_PATH = Path("auth/token.json")
 
 
 def _normalize_base_url(value: str) -> str:
@@ -81,6 +85,50 @@ def _extract_token(token_value: str) -> str:
     return token
 
 
+def _read_cached_token(path: Path, *, base_url: str, username: str | None) -> str | None:
+    if username is None or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("base_url") != base_url or payload.get("username") != username:
+        return None
+    token = payload.get("token")
+    return token if isinstance(token, str) and token.strip() else None
+
+
+def _write_cached_token(
+    path: Path,
+    *,
+    base_url: str,
+    username: str | None,
+    token: str,
+) -> None:
+    if username is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "base_url": base_url,
+        "username": username,
+        "token": token,
+        "created_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+    }
+    temp_path = path.with_name(f".{path.name}.tmp")
+    fd = os.open(temp_path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, sort_keys=True)
+        fh.write("\n")
+    temp_path.replace(path)
+    path.chmod(0o600)
+
+
+def _delete_cached_token(path: Path) -> None:
+    path.unlink(missing_ok=True)
+
+
 class AuthContext:
     def __init__(
         self,
@@ -90,6 +138,7 @@ class AuthContext:
         password: str | None,
         timeout: float,
         client: httpx.Client | None = None,
+        token_cache_path: Path | None = None,
     ) -> None:
         self.base_url = _normalize_base_url(base_url)
         self.username = username
@@ -98,6 +147,7 @@ class AuthContext:
         self.client = client or httpx.Client(timeout=timeout)
         self._owns_client = client is None
         self.token: str | None = None
+        self.token_cache_path = token_cache_path or runtime_path(TOKEN_CACHE_PATH)
 
     def close(self) -> None:
         if self._owns_client:
@@ -112,6 +162,14 @@ class AuthContext:
     def ensure_token(self) -> str:
         if self.token:
             return self.token
+        cached_token = _read_cached_token(
+            self.token_cache_path,
+            base_url=self.base_url,
+            username=self.username,
+        )
+        if cached_token:
+            self.token = cached_token
+            return cached_token
         if not self.username or not self.password:
             raise AuthError("CENTRIC_USERNAME/CENTRIC_PASSWORD are required to create a session.")
         self.token = self.get_token()
@@ -131,10 +189,18 @@ class AuthContext:
         payload = response.json()
         if not isinstance(payload, dict) or "token" not in payload:
             raise AuthError("Session auth response missing token field.")
-        return _extract_token(str(payload["token"]))
+        token = _extract_token(str(payload["token"]))
+        _write_cached_token(
+            self.token_cache_path,
+            base_url=self.base_url,
+            username=self.username,
+            token=token,
+        )
+        return token
 
     def refresh_token(self) -> str:
         self.token = None
+        _delete_cached_token(self.token_cache_path)
         return self.ensure_token()
 
     def request(
@@ -163,6 +229,7 @@ class AuthContext:
         )
 
         if response.status_code == 401:
+            _delete_cached_token(self.token_cache_path)
             token = self.refresh_token()
             merged_headers["Authorization"] = f"Bearer {token}"
             response = self.client.request(

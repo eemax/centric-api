@@ -4,14 +4,14 @@ import argparse
 import json
 import sys
 
-from ..bundle import (
+from ..bundle import run_bundle_job
+from ..bundle_config import load_bundle_config
+from ..bundle_state import (
     compare_bundle_runs,
     get_bundle_run,
     list_bundle_items,
     list_bundle_runs,
-    run_bundle_job,
 )
-from ..bundle_config import load_bundle_config
 from ..cli_output import (
     _bundle_comparison_record,
     _bundle_record,

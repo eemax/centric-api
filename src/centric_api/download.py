@@ -92,27 +92,26 @@ def run_download_job(
     job = select_download_job(config, job_name)
     started = time.time()
     created_at = datetime.now(UTC)
-    run_id = _allocate_run_id(config.output_dir, created_at, job.name)
-    run_dir = config.output_dir / "runs" / run_id
     files_dir = config.output_dir / "files"
-
-    _emit(
-        log_callback,
-        {
-            "level": "summary",
-            "event": "download_start",
-            "run_id": run_id,
-            "job": job.name,
-            "mode": mode,
-            "config": str(config.path),
-            "db": str(db_path),
-            "dry_run": dry_run,
-        },
-    )
 
     with _connect_for_download(db_path, dry_run=dry_run) as conn:
         if not dry_run:
             ensure_download_tables(conn)
+        run_id = _allocate_run_id(config.output_dir, conn, created_at, job.name)
+        run_dir = config.output_dir / "runs" / run_id
+        _emit(
+            log_callback,
+            {
+                "level": "summary",
+                "event": "download_start",
+                "run_id": run_id,
+                "job": job.name,
+                "mode": mode,
+                "config": str(config.path),
+                "db": str(db_path),
+                "dry_run": dry_run,
+            },
+        )
         preflight_download_cache(conn, job)
         candidates = collect_candidate_documents(conn, job, log_callback=log_callback)
         documents = resolve_documents(conn, job, candidates, log_callback=log_callback)
@@ -523,15 +522,30 @@ def _safe_filename(value: str) -> str:
     return safe or "download.bin"
 
 
-def _allocate_run_id(output_dir: Path, created_at: datetime, job_name: str) -> str:
+def _allocate_run_id(
+    output_dir: Path,
+    conn: sqlite3.Connection,
+    created_at: datetime,
+    job_name: str,
+) -> str:
     safe_job = _safe_path_part(job_name)
     base = f"{created_at:%Y-%m-%dT%H%M%SZ}-{safe_job}"
     for index in range(100):
         suffix = "" if index == 0 else f"-{index + 1}"
         run_id = f"{base}{suffix}"
-        if not (output_dir / "runs" / run_id).exists():
-            return run_id
+        if (output_dir / "runs" / run_id).exists():
+            continue
+        if _download_run_exists(conn, run_id):
+            continue
+        return run_id
     raise RuntimeError("Could not allocate download run id.")
+
+
+def _download_run_exists(conn: sqlite3.Connection, run_id: str) -> bool:
+    if not table_exists(conn, "download_runs"):
+        return False
+    row = conn.execute("SELECT 1 FROM download_runs WHERE run_id = ?", [run_id]).fetchone()
+    return row is not None
 
 
 def _datetime_to_db(value: datetime) -> str:

@@ -9,7 +9,7 @@ from typing import Any
 from ..auth import resolve_credentials
 from ..bundle_config import load_bundle_config
 from ..config import load_fetcher_settings, runtime_home, runtime_path
-from ..db_schema import SCHEMA_VERSION
+from ..db_schema import REBUILD_DB_MESSAGE, SCHEMA_VERSION, validate_schema_shape
 from ..defaults import (
     DEFAULT_BUNDLE_LOCK_PATH,
     DEFAULT_CRON_LOG_PATH,
@@ -21,7 +21,7 @@ from ..defaults import (
 )
 from ..download_config import load_download_config
 from ..schema import load_endpoint_schemas
-from ..store import IngestResult, connect_readonly, table_exists
+from ..store import IngestResult, connect_readonly, endpoint_has_cache_evidence, table_exists
 
 
 def _status_payload(target_db_path: Path) -> dict[str, Any]:
@@ -207,6 +207,21 @@ def _doctor_db_checks(conn: sqlite3.Connection, checks: list[dict[str, Any]]) ->
             checks.append(_check("OK", table, "table exists"))
         else:
             checks.append(_check("FAIL", table, "table missing"))
+    schema_failures = validate_schema_shape(conn)
+    if schema_failures:
+        preview = "; ".join(schema_failures[:3])
+        if len(schema_failures) > 3:
+            preview += f"; {len(schema_failures) - 3} more"
+        checks.append(
+            _check(
+                "FAIL",
+                "db_schema_shape",
+                f"{REBUILD_DB_MESSAGE}: {preview}",
+                repair="centric-api rebuild-db --yes",
+            )
+        )
+    else:
+        checks.append(_check("OK", "db_schema_shape", "current"))
     if table_exists(conn, "endpoint_records"):
         count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
         checks.append(_check("OK" if count else "WARN", "endpoint_records_count", f"{count} rows"))
@@ -224,9 +239,12 @@ def _doctor_download_checks(
 ) -> None:
     if config is None:
         return
-    cached_endpoints = _cached_endpoint_names(conn)
     for job in config.jobs:
-        missing = sorted(_download_required_endpoints(job) - cached_endpoints)
+        missing = [
+            endpoint
+            for endpoint in sorted(_download_required_endpoints(job))
+            if not endpoint_has_cache_evidence(conn, endpoint)
+        ]
         if missing:
             checks.append(
                 _check(
@@ -311,15 +329,17 @@ def _lookup_endpoints_from_filters_for_doctor(filters: Any) -> set[str]:
     return {item.lookup.endpoint for item in filters if getattr(item, "lookup", None) is not None}
 
 
-def _cached_endpoint_names(conn: sqlite3.Connection) -> set[str]:
-    if not table_exists(conn, "endpoint_records"):
-        return set()
-    rows = conn.execute("SELECT DISTINCT endpoint FROM endpoint_records").fetchall()
-    return {str(row["endpoint"]) for row in rows}
-
-
-def _check(status: str, name: str, message: str) -> dict[str, Any]:
-    return {"status": status, "name": name, "message": message}
+def _check(
+    status: str,
+    name: str,
+    message: str,
+    *,
+    repair: str | None = None,
+) -> dict[str, Any]:
+    payload = {"status": status, "name": name, "message": message}
+    if repair is not None:
+        payload["repair"] = repair
+    return payload
 
 
 def _first_row(conn: sqlite3.Connection, table: str, query: str) -> dict[str, Any] | None:

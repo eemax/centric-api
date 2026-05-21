@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from centric_api.bundle import compare_bundle_runs, run_bundle_job
+from centric_api.bundle import run_bundle_job
 from centric_api.bundle_config import BundleConfig, BundleJob
+from centric_api.bundle_state import compare_bundle_runs
 from centric_api.changelog import record_changelog
 from centric_api.db_schema import ensure_download_tables
 from centric_api.download import run_download_job

@@ -4,12 +4,15 @@ import json
 import sqlite3
 import zipfile
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from centric_api.bundle import compare_bundle_runs, run_bundle_job
+import centric_api.bundle as bundle_module
+from centric_api.bundle import run_bundle_job
 from centric_api.bundle_config import load_bundle_config
+from centric_api.bundle_state import compare_bundle_runs
 from centric_api.config import ConfigError
 from centric_api.db_schema import ensure_download_tables
 from centric_api.store import connect
@@ -294,6 +297,49 @@ def test_bundle_dry_run_does_not_write_artifacts_or_state(tmp_path: Path) -> Non
     assert bundle_current_count == 0
 
 
+def test_bundle_run_id_checks_database_history(tmp_path: Path, monkeypatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 1, 1, tzinfo=UTC)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(bundle_module, "datetime", FixedDateTime)
+    db_path = tmp_path / "centric.db"
+    source_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_bytes(b"dry")
+
+    with connect(db_path) as conn:
+        ensure_download_tables(conn)
+        _insert_bundle_run(conn, run_id="2026-01-01T000000Z-style-bundle")
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "style_code": "STY-001", "node_name": "Linen Shirt"},
+        )
+        _insert_download_current(
+            conn,
+            job_name="style-docs",
+            document_id="D1",
+            revision_id="R1",
+            file_path=source_file,
+            source_refs=[
+                {"endpoint": "styles", "record_id": "S1", "document_path": "documents"},
+            ],
+        )
+
+    result = run_bundle_job(
+        db_path=db_path,
+        config=_bundle_config(tmp_path),
+        job_name="style-bundle",
+        dry_run=True,
+    )
+
+    assert result.run_id == "2026-01-01T000000Z-style-bundle-2"
+
+
 def test_bundle_dry_run_requires_existing_db_without_creating_it(tmp_path: Path) -> None:
     db_path = tmp_path / "missing.db"
 
@@ -422,6 +468,39 @@ def _insert_download_current(
             "download-run-1",
             "2026-01-01T00:00:00Z",
             json.dumps(source_refs, sort_keys=True),
+        ],
+    )
+
+
+def _insert_bundle_run(conn: sqlite3.Connection, *, run_id: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO bundle_runs (
+            run_id, bundle_name, download_job, started_at, finished_at,
+            manifest_path, changelog_json_path, changelog_md_path, zip_path,
+            item_count, added_count, changed_count, renamed_count, removed_count,
+            unchanged_count, missing_count, dry_run
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            run_id,
+            "style-bundle",
+            "style-docs",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+            "manifest.json",
+            "changelog.json",
+            "changelog.md",
+            f"{run_id}.zip",
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         ],
     )
 

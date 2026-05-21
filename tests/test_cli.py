@@ -33,10 +33,12 @@ def test_cli_help_commands(capsys) -> None:
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
-    exit_code = main(["changelog", "--db", str(tmp_path / "centric.db")])
+    db_path = tmp_path / "centric.db"
+    exit_code = main(["changelog", "--db", str(db_path)])
 
     assert exit_code == 0
     assert "No changelog events found." in capsys.readouterr().out
+    assert not db_path.exists()
 
 
 def test_fetch_and_cron_help_are_lean(capsys) -> None:
@@ -364,6 +366,66 @@ def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
     } in checks
 
 
+def test_doctor_uses_fetch_evidence_for_empty_download_endpoints(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_applied_raw_file(conn, endpoint="documents")
+        _insert_applied_raw_file(conn, endpoint="document_revisions")
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+jobs:
+  - name: docs
+    sources:
+      - endpoint: documents
+""",
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        ["doctor", "--db", str(db_path), "--download-config", str(config_path), "--json"]
+    )
+
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert exit_code == 0
+    assert {
+        "status": "OK",
+        "name": "download_job:docs",
+        "message": "required endpoints cached",
+    } in checks
+
+
+def test_doctor_reports_stale_schema_shape(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+    db_path = tmp_path / "centric.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE local_metadata (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO local_metadata (key, value, updated_at) VALUES (?, ?, ?)",
+            ["db_schema_version", "1", "2026-01-01T00:00:00Z"],
+        )
+        conn.execute("CREATE TABLE endpoint_records (endpoint TEXT, record_id TEXT)")
+
+    exit_code = main(["doctor", "--db", str(db_path), "--json"])
+
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    schema_check = next(check for check in checks if check["name"] == "db_schema_shape")
+    assert exit_code == 1
+    assert schema_check["status"] == "FAIL"
+    assert "run centric-api rebuild-db --yes" in schema_check["message"]
+    assert schema_check["repair"] == "centric-api rebuild-db --yes"
+
+
 def test_rebuild_db_requires_yes(tmp_path, capsys) -> None:
     exit_code = main(["rebuild-db", "--db", str(tmp_path / "centric.db")])
 
@@ -469,6 +531,32 @@ def _insert_bundle_item(
             10,
             "included",
             "added",
+            "2026-01-01T00:00:00Z",
+        ],
+    )
+
+
+def _insert_applied_raw_file(conn, *, endpoint: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO applied_raw_files (
+            file_path, endpoint, source_run_id, is_delta, record_count,
+            invalid_record_count, content_sha256, manifest_path, manifest_sha256,
+            run_mode, ingested_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            f"/tmp/{endpoint}.jsonl",
+            endpoint,
+            "run-1",
+            0,
+            0,
+            0,
+            f"hash-{endpoint}",
+            None,
+            None,
+            "full",
             "2026-01-01T00:00:00Z",
         ],
     )

@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import pytest
 
+import centric_api.download as download_module
 from centric_api.config import ConfigError
 from centric_api.download import run_download_job
 from centric_api.download_config import load_download_config
@@ -166,6 +168,40 @@ def test_download_preflight_accepts_fetched_empty_endpoints(tmp_path: Path) -> N
 
     assert result.matched_count == 0
     assert result.selected_count == 0
+
+
+def test_download_run_id_checks_database_history(tmp_path: Path, monkeypatch) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 1, 1, tzinfo=UTC)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(download_module, "datetime", FixedDateTime)
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
+        )
+        _insert_download_run(conn, run_id="2026-01-01T000000Z-docs")
+
+    result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=_download_config(tmp_path),
+        dry_run=True,
+    )
+
+    assert result.run_id == "2026-01-01T000000Z-docs-2"
 
 
 def test_download_requires_cached_revisions_without_revision_filters(tmp_path: Path) -> None:
@@ -886,6 +922,39 @@ def _insert_applied_raw_file(
             None,
             "full",
             "2026-01-01T00:00:00Z",
+        ],
+    )
+
+
+def _insert_download_run(conn: sqlite3.Connection, *, run_id: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO download_runs (
+            run_id, job_name, mode, started_at, finished_at, manifest_path,
+            matched_count, selected_count, downloaded_count, already_present_count,
+            failed_count, skipped_count, skipped_current_count, dry_run_count,
+            superseded_count, tombstoned_count, dry_run
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            run_id,
+            "docs",
+            "delta",
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T00:00:00Z",
+            "manifest.json",
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
         ],
     )
 

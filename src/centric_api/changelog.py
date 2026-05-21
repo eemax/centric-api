@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .db_schema import ensure_changelog_tables
-from .store import connect
+from .store import connect, connect_readonly, table_exists
 
 CHANGELOG_SOURCE = "full-payload"
 CHANGELOG_SOURCE_SHA = hashlib.sha256(CHANGELOG_SOURCE.encode("utf-8")).hexdigest()
@@ -173,8 +173,9 @@ def list_changelog_runs(
     if not db_path.is_file():
         return []
     clause, params = _since_filter(since, "created_at")
-    with connect(db_path) as conn:
-        ensure_changelog_tables(conn)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_changelog_runs"):
+            return []
         rows = conn.execute(
             f"""
             SELECT run_id, created_at, endpoint_count, record_count, event_count,
@@ -198,8 +199,9 @@ def list_change_summary(
     if not db_path.is_file():
         return []
     clause, params = _since_filter(since, "changed_at")
-    with connect(db_path) as conn:
-        ensure_changelog_tables(conn)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_summary"):
+            return []
         rows = conn.execute(
             f"""
             SELECT endpoint, change_type, delete_type, SUM(count) AS count
@@ -232,8 +234,9 @@ def list_field_summary(
         clauses.append("changed_at >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
-    with connect(db_path) as conn:
-        ensure_changelog_tables(conn)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_field_change_summary"):
+            return []
         rows = conn.execute(
             f"""
             SELECT endpoint, field, field_change_type, event_change_type, SUM(count) AS count
@@ -266,8 +269,9 @@ def list_actor_summary(
         clauses.append("changed_at >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
-    with connect(db_path) as conn:
-        ensure_changelog_tables(conn)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_actor_change_summary"):
+            return []
         rows = conn.execute(
             f"""
             SELECT endpoint, modified_by_id, modified_by_name, change_type,
@@ -301,8 +305,9 @@ def list_changes(
         clauses.append("changed_at >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
-    with connect(db_path) as conn:
-        ensure_changelog_tables(conn)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events"):
+            return []
         rows = conn.execute(
             f"""
             SELECT run_id, endpoint, record_id, changed_at, change_type,

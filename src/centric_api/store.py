@@ -92,6 +92,36 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return row is not None
 
 
+def endpoint_has_cache_evidence(conn: sqlite3.Connection, endpoint: str) -> bool:
+    if table_exists(conn, "applied_raw_files"):
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM applied_raw_files
+            WHERE endpoint = ?
+            LIMIT 1
+            """,
+            [endpoint],
+        ).fetchone()
+        if row is not None:
+            return True
+    for table in ("endpoint_records", "endpoint_tombstones"):
+        if not table_exists(conn, table):
+            continue
+        row = conn.execute(
+            f"""
+            SELECT 1
+            FROM {table}
+            WHERE endpoint = ?
+            LIMIT 1
+            """,
+            [endpoint],
+        ).fetchone()
+        if row is not None:
+            return True
+    return False
+
+
 def initialize_store(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """

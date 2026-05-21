@@ -9,6 +9,7 @@ from typing import Any
 
 from .config import ConfigError
 from .download_config import DownloadFilter, DownloadJob, DownloadLookupFilter
+from .store import endpoint_has_cache_evidence
 
 DOCUMENT_ENDPOINT = "documents"
 DOCUMENT_REVISION_ENDPOINT = "document_revisions"
@@ -46,7 +47,7 @@ def preflight_download_cache(conn: sqlite3.Connection, job: DownloadJob) -> None
     missing = [
         endpoint
         for endpoint in sorted(required_endpoints)
-        if not _endpoint_has_cache_evidence(conn, endpoint)
+        if not endpoint_has_cache_evidence(conn, endpoint)
     ]
     if missing:
         raise ConfigError(
@@ -222,51 +223,6 @@ def _lookup_filter_endpoints(job: DownloadJob) -> set[str]:
 
 def _lookup_endpoints_from_filters(filters: tuple[DownloadFilter, ...]) -> set[str]:
     return {item.lookup.endpoint for item in filters if item.lookup is not None}
-
-
-def _endpoint_has_cache_evidence(conn: sqlite3.Connection, endpoint: str) -> bool:
-    if _table_exists(conn, "applied_raw_files"):
-        row = conn.execute(
-            """
-            SELECT 1
-            FROM applied_raw_files
-            WHERE endpoint = ?
-            LIMIT 1
-            """,
-            [endpoint],
-        ).fetchone()
-        if row is not None:
-            return True
-    if _table_exists(conn, "endpoint_tombstones"):
-        row = conn.execute(
-            """
-            SELECT 1
-            FROM endpoint_tombstones
-            WHERE endpoint = ?
-            LIMIT 1
-            """,
-            [endpoint],
-        ).fetchone()
-        if row is not None:
-            return True
-    row = conn.execute(
-        """
-        SELECT 1
-        FROM endpoint_records
-        WHERE endpoint = ?
-        LIMIT 1
-        """,
-        [endpoint],
-    ).fetchone()
-    return row is not None
-
-
-def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        [table_name],
-    ).fetchone()
-    return row is not None
 
 
 def _load_revision_payload(

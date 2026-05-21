@@ -7,11 +7,35 @@ from pathlib import Path
 
 from centric_api.changelog import (
     list_actor_summary,
+    list_change_summary,
+    list_changelog_runs,
     list_changes,
     list_field_summary,
     record_changelog,
 )
 from centric_api.store import connect
+
+
+def test_changelog_reads_do_not_create_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with sqlite3.connect(db_path):
+        pass
+
+    assert list_changelog_runs(db_path) == []
+    assert list_change_summary(db_path) == []
+    assert list_field_summary(db_path) == []
+    assert list_actor_summary(db_path) == []
+    assert list_changes(db_path) == []
+
+    with sqlite3.connect(db_path) as conn:
+        tables = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'endpoint_change%'
+            """
+        ).fetchall()
+    assert tables == []
 
 
 def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:

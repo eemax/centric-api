@@ -6,7 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, TextIO
 
-from .bundle import BundleComparison, BundleRunResult
+from .bundle import BundleRunResult
+from .bundle_state import BundleComparison
 from .changelog import ChangelogRun
 from .download import DownloadRunResult
 from .models import EndpointSpec, FetchProgressEvent, FetchRunResult
