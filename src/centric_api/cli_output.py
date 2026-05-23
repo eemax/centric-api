@@ -311,6 +311,74 @@ def _print_human_bundle_changelog(comparison: BundleComparison) -> None:
             print(f"... {len(changed_items) - 50} more")
 
 
+def _print_human_changelog_summary(
+    rows: list[dict[str, Any]],
+    actor_rows: list[dict[str, Any]],
+    *,
+    since: str | None,
+    endpoint: str | None,
+    limit: int,
+) -> None:
+    endpoint_rows = _changelog_endpoint_rows(rows)
+    displayed_rows = endpoint_rows[:limit]
+    totals = _changelog_totals(endpoint_rows)
+
+    print("Centric API Changelog")
+    print()
+    print(f"Since:    {_changelog_since_label(since)}")
+    if endpoint:
+        print(f"Endpoint: {endpoint}")
+    print(
+        f"Events:   {_format_count(totals['total'])} across "
+        f"{len(endpoint_rows)} endpoint{'' if len(endpoint_rows) == 1 else 's'}"
+    )
+    print()
+    print("Totals")
+    print(f"  Added:        {_format_count(totals['added'])}")
+    print(f"  Changed:      {_format_count(totals['changed'])}")
+    if totals["removed"]:
+        removed_parts = [f"{_format_count(totals['removed'])} total"]
+        if totals["tombstone"]:
+            removed_parts.append(f"{_format_count(totals['tombstone'])} tombstoned")
+        if totals["hard_delete"]:
+            removed_parts.append(f"{_format_count(totals['hard_delete'])} hard-deleted")
+        if totals["unknown_delete"]:
+            removed_parts.append(f"{_format_count(totals['unknown_delete'])} unknown")
+        print(f"  Removed:      {', '.join(removed_parts)}")
+    else:
+        print("  Removed:      0")
+
+    print()
+    print("Endpoints")
+    name_width = max(len("Endpoint"), *(len(row["endpoint"]) for row in displayed_rows))
+    header = (
+        f"  {'Endpoint':<{name_width}}  {'Added':>8}  {'Changed':>8}  {'Removed':>9}  {'Total':>8}"
+    )
+    print(header)
+    print(f"  {'-' * (len(header) - 2)}")
+    for row in displayed_rows:
+        print(
+            f"  {row['endpoint']:<{name_width}}  "
+            f"{_signed_count('+', row['added']):>8}  "
+            f"{_signed_count('~', row['changed']):>8}  "
+            f"{_removed_label(row):>9}  "
+            f"{_format_count(row['total']):>8}"
+        )
+    hidden_count = len(endpoint_rows) - len(displayed_rows)
+    if hidden_count > 0:
+        print(f"  ... {hidden_count} more endpoint{'' if hidden_count == 1 else 's'}")
+
+    if actor_rows:
+        print()
+        print("Modified By")
+        name_width = max(len("Actor"), *(_actor_label_width(row) for row in actor_rows))
+        for row in actor_rows:
+            print(
+                f"  {_actor_label(row):<{name_width}}  "
+                f"{_format_count(int(row['count'] or 0)):>8} changes"
+            )
+
+
 def _build_log_callback(
     log_file: TextIO,
     *,
@@ -669,6 +737,88 @@ def _bundle_comparison_record(comparison: BundleComparison) -> dict[str, Any]:
         "summary": comparison.summary,
         "items": list(comparison.items),
     }
+
+
+def _changelog_endpoint_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    endpoints: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        endpoint = str(row["endpoint"])
+        endpoint_row = endpoints.setdefault(
+            endpoint,
+            {
+                "endpoint": endpoint,
+                "added": 0,
+                "changed": 0,
+                "removed": 0,
+                "tombstone": 0,
+                "hard_delete": 0,
+                "unknown_delete": 0,
+                "total": 0,
+            },
+        )
+        count = int(row["count"] or 0)
+        change_type = row["change_type"]
+        delete_type = row.get("delete_type")
+        if change_type == "added":
+            endpoint_row["added"] += count
+        elif change_type == "changed":
+            endpoint_row["changed"] += count
+        elif change_type == "removed":
+            endpoint_row["removed"] += count
+            if delete_type == "tombstone":
+                endpoint_row["tombstone"] += count
+            elif delete_type == "hard_delete":
+                endpoint_row["hard_delete"] += count
+            else:
+                endpoint_row["unknown_delete"] += count
+        endpoint_row["total"] += count
+    return sorted(endpoints.values(), key=lambda row: (-int(row["total"]), row["endpoint"]))
+
+
+def _changelog_totals(rows: list[dict[str, Any]]) -> dict[str, int]:
+    keys = [
+        "added",
+        "changed",
+        "removed",
+        "tombstone",
+        "hard_delete",
+        "unknown_delete",
+        "total",
+    ]
+    return {key: sum(int(row[key]) for row in rows) for key in keys}
+
+
+def _removed_label(row: dict[str, Any]) -> str:
+    removed = int(row["removed"])
+    if not removed:
+        return ""
+    if row["hard_delete"] and not row["tombstone"] and not row["unknown_delete"]:
+        return _signed_count("-", removed, suffix=" hard")
+    return _signed_count("-", removed)
+
+
+def _signed_count(prefix: str, value: int, *, suffix: str = "") -> str:
+    if not value:
+        return ""
+    return f"{prefix}{_format_count(value)}{suffix}"
+
+
+def _format_count(value: int) -> str:
+    return f"{value:,}"
+
+
+def _actor_label(row: dict[str, Any]) -> str:
+    return str(row.get("modified_by_name") or row.get("modified_by_id") or "Unknown")
+
+
+def _actor_label_width(row: dict[str, Any]) -> int:
+    return len(_actor_label(row))
+
+
+def _changelog_since_label(value: str | None) -> str:
+    if value is None or not value.strip():
+        return "all time"
+    return value.strip()
 
 
 def _format_seconds(value: float | None) -> str:

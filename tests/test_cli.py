@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from centric_api.changelog import record_changelog
 from centric_api.cli import main
 from centric_api.cli_output import _render_log_line
 from centric_api.cli_parser import build_parser
@@ -39,6 +40,109 @@ def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert "No changelog events found." in capsys.readouterr().out
     assert not db_path.exists()
+
+
+def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="users",
+            record_id="U1",
+            payload={"id": "U1", "node_name": "Ava Admin"},
+            payload_hash="user-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "code": "STY-001",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="style-before",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={
+                "id": "B1",
+                "code": "BOM-001",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="bom-before",
+        )
+    record_changelog(db_path, endpoints={"styles", "boms"}, full=True)
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "code": "STY-001-UPDATED",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-02T00:00:00Z",
+            },
+            payload_hash="style-after",
+        )
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["boms", "B1"],
+        )
+    record_changelog(
+        db_path,
+        record_ids_by_endpoint={"styles": {"S1"}},
+        deleted_record_ids_by_endpoint={"boms": {"B1"}},
+        deleted_record_delete_types_by_endpoint={"boms": {"B1": "tombstone"}},
+    )
+
+    exit_code = main(["changelog", "--db", str(db_path), "--since", "1d"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Centric API Changelog" in output
+    assert "Since:    1d" in output
+    assert "Totals" in output
+    assert "Endpoints" in output
+    assert "Modified By" in output
+    assert "styles" in output
+    assert "boms" in output
+    assert "Ava Admin" in output
+    assert "endpoint=" not in output
+    assert "delete_type=" not in output
+
+
+def test_changelog_summary_human_digest_honors_endpoint_filter(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="style-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={"id": "B1", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="bom-1",
+        )
+    record_changelog(db_path, endpoints={"styles", "boms"}, full=True)
+
+    exit_code = main(["changelog", "--db", str(db_path), "--endpoint", "styles"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Endpoint: styles" in output
+    assert "styles" in output
+    assert "boms" not in output
 
 
 def test_fetch_and_cron_help_are_lean(capsys) -> None:
@@ -495,6 +599,35 @@ def _insert_bundle_run(conn, run_id: str, finished_at: str) -> None:
             0,
             0,
             0,
+        ],
+    )
+
+
+def _insert_endpoint_record(
+    conn,
+    *,
+    endpoint: str,
+    record_id: str,
+    payload: dict[str, object],
+    payload_hash: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO endpoint_records (
+            endpoint, record_id, payload_json, payload_sha256, modified_at,
+            source_file, source_run_id, ingested_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            endpoint,
+            record_id,
+            json.dumps(payload, sort_keys=True),
+            payload_hash,
+            payload.get("_modified_at"),
+            f"{endpoint}.jsonl",
+            "run-1",
+            "2026-01-01T00:00:00Z",
         ],
     )
 

@@ -193,12 +193,21 @@ def list_changelog_runs(
 def list_change_summary(
     db_path: Path,
     *,
+    endpoint: str | None = None,
     since: datetime | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
-    clause, params = _since_filter(since, "changed_at")
+    clauses: list[str] = []
+    params: list[Any] = []
+    if endpoint:
+        clauses.append("endpoint = ?")
+        params.append(endpoint)
+    if since is not None:
+        clauses.append("changed_at >= ?")
+        params.append(_datetime_to_db(since))
+    clause = "WHERE " + " AND ".join(clauses) if clauses else ""
     with connect_readonly(db_path) as conn:
         if not table_exists(conn, "endpoint_change_summary"):
             return []
@@ -209,6 +218,41 @@ def list_change_summary(
             {clause}
             GROUP BY endpoint, change_type, delete_type
             ORDER BY endpoint, change_type, delete_type
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_actor_totals(
+    db_path: Path,
+    *,
+    endpoint: str | None = None,
+    since: datetime | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    clauses: list[str] = []
+    params: list[Any] = []
+    if endpoint:
+        clauses.append("endpoint = ?")
+        params.append(endpoint)
+    if since is not None:
+        clauses.append("changed_at >= ?")
+        params.append(_datetime_to_db(since))
+    clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_actor_change_summary"):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT modified_by_id, modified_by_name, SUM(count) AS count
+            FROM endpoint_actor_change_summary
+            {clause}
+            GROUP BY modified_by_id, modified_by_name
+            ORDER BY count DESC, modified_by_name, modified_by_id
             LIMIT ?
             """,
             [*params, limit],

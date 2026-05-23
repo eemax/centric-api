@@ -4,6 +4,7 @@ import argparse
 
 from ..changelog import (
     list_actor_summary,
+    list_actor_totals,
     list_change_summary,
     list_changelog_runs,
     list_changes,
@@ -11,7 +12,7 @@ from ..changelog import (
     parse_since,
     record_changelog,
 )
-from ..cli_output import _print_or_json, _print_rows
+from ..cli_output import _print_human_changelog_summary, _print_or_json, _print_rows
 from ..defaults import db_path as resolve_db_path
 
 
@@ -67,5 +68,29 @@ def run_changelog(args: argparse.Namespace) -> int:
             limit=args.limit,
         )
         return _print_rows(rows, args.json, empty_message="No changelog actor changes found.")
-    rows = list_change_summary(db_path, since=since, limit=args.limit)
-    return _print_rows(rows, args.json, empty_message="No changelog events found.")
+    endpoint = args.endpoint[0] if args.endpoint else None
+    rows = list_change_summary(
+        db_path,
+        endpoint=endpoint,
+        since=since,
+        limit=args.limit if args.json else 10000,
+    )
+    if args.json:
+        return _print_rows(rows, True, empty_message="No changelog events found.")
+    if not rows:
+        print("No changelog events found.")
+        return 0
+    actors = list_actor_totals(
+        db_path,
+        endpoint=endpoint,
+        since=since,
+        limit=10,
+    )
+    _print_human_changelog_summary(
+        rows,
+        actors,
+        since=args.since,
+        endpoint=endpoint,
+        limit=args.limit,
+    )
+    return 0
