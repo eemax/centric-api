@@ -375,26 +375,86 @@ def _print_human_status(payload: dict[str, Any]) -> None:
     print("Centric API Status")
     print()
     print(f"Home: {payload['runtime_home']}")
-    print(f"DB:   {payload['db']} ({'exists' if payload['db_exists'] else 'missing'})")
+    print(f"DB:   {payload['db']}{'' if payload['db_exists'] else ' (missing)'}")
     print()
-    print("Locks")
-    for name, lock in payload["locks"].items():
-        print(f"- {name}: {'present' if lock['exists'] else 'clear'} ({lock['path']})")
+    print("Health")
+    print(f"  Fetch lock:     {_lock_status(payload['locks']['fetch'])}")
+    print(f"  Download lock:  {_lock_status(payload['locks']['download'])}")
+    print(f"  Bundle lock:    {_lock_status(payload['locks']['bundle'])}")
     print()
-    print("Latest")
-    _print_status_row("Fetch", payload["latest_fetch"], "run_id")
-    _print_status_row("Changelog", payload["latest_changelog"], "run_id")
-    _print_status_row("Download", payload["latest_download"], "run_id")
-    _print_status_row("Bundle", payload["latest_bundle"], "run_id")
-    if payload["endpoint_state"]:
+    print("Latest Runs")
+    print(f"  Fetch:      {_latest_fetch_status(payload['latest_fetch'])}")
+    print(f"  Changelog:  {_latest_changelog_status(payload['latest_changelog'])}")
+    print(f"  Download:   {_latest_download_status(payload['latest_download'])}")
+    print(f"  Bundle:     {_latest_bundle_status(payload['latest_bundle'])}")
+    endpoint_rows = payload["endpoint_state"]
+    if endpoint_rows:
+        total_records = sum(int(row["current_count"] or 0) for row in endpoint_rows)
+        latest_modified = max(
+            (str(row["latest_modified_at"]) for row in endpoint_rows if row["latest_modified_at"]),
+            default="none",
+        )
+        print()
+        print("Data")
+        print(f"  Endpoints:        {_format_status_count(len(endpoint_rows))}")
+        print(f"  Records:          {_format_status_count(total_records)} current")
+        print(f"  Latest modified:  {latest_modified}")
         print()
         print("Endpoints")
-        for row in payload["endpoint_state"]:
-            print(f"- {row['endpoint']}: {row['current_count']} current")
+        endpoint_width = max(len("Endpoint"), *(len(row["endpoint"]) for row in endpoint_rows))
+        for row in endpoint_rows:
+            latest = row["latest_modified_at"] or "none"
+            print(
+                f"  {row['endpoint']:<{endpoint_width}}  "
+                f"{_format_status_count(int(row['current_count'] or 0)):>10}  "
+                f"latest {latest}"
+            )
 
 
-def _print_status_row(label: str, row: dict[str, Any] | None, key: str) -> None:
-    print(f"{label}: {row[key] if row else 'none'}")
+def _lock_status(lock: dict[str, Any]) -> str:
+    return "present" if lock["exists"] else "clear"
+
+
+def _latest_fetch_status(row: dict[str, Any] | None) -> str:
+    if row is None:
+        return "none"
+    return (
+        f"{row['ingested_at']}  {row['run_mode'] or 'unknown'}  "
+        f"{_format_status_count(int(row['file_count'] or 0))} endpoints  "
+        f"{_format_status_count(int(row['record_count'] or 0))} records"
+    )
+
+
+def _latest_changelog_status(row: dict[str, Any] | None) -> str:
+    if row is None:
+        return "none"
+    return (
+        f"{row['created_at']}  {_format_status_count(int(row['event_count'] or 0))} events  "
+        f"{_format_status_count(int(row['endpoint_count'] or 0))} endpoints"
+    )
+
+
+def _latest_download_status(row: dict[str, Any] | None) -> str:
+    if row is None:
+        return "none"
+    return (
+        f"{row['finished_at']}  {row['job_name']}  "
+        f"{_format_status_count(int(row['downloaded_count'] or 0))} downloaded, "
+        f"{_format_status_count(int(row['failed_count'] or 0))} failed"
+    )
+
+
+def _latest_bundle_status(row: dict[str, Any] | None) -> str:
+    if row is None:
+        return "none"
+    return (
+        f"{row['finished_at']}  {row['bundle_name']}  "
+        f"{_format_status_count(int(row['item_count'] or 0))} files"
+    )
+
+
+def _format_status_count(value: int) -> str:
+    return f"{value:,}"
 
 
 def _print_human_doctor(checks: list[dict[str, Any]]) -> None:

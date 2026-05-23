@@ -454,6 +454,60 @@ def test_status_reports_missing_db(tmp_path, capsys) -> None:
     assert payload["db_exists"] is False
 
 
+def test_status_human_output_is_operational_snapshot(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={"id": "B1", "_modified_at": "2026-01-02T00:00:00Z"},
+            payload_hash="bom-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="style-1",
+        )
+        _insert_applied_raw_file(conn, endpoint="boms", record_count=1)
+        _insert_applied_raw_file(conn, endpoint="styles", record_count=1)
+        conn.execute(
+            """
+            INSERT INTO endpoint_changelog_runs (
+                run_id, created_at, changelog_source, changelog_source_sha256,
+                endpoint_count, record_count, event_count, full_refresh,
+                scoped_record_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ["change-1", "2026-01-02T00:00:00Z", "test", "sha", 2, 2, 3, 1, 0],
+        )
+        _insert_download_run(conn)
+        _insert_bundle_run(conn, "bundle-1", "2026-01-02T00:00:00Z")
+
+    exit_code = main(["status", "--db", str(db_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Centric API Status" in output
+    assert "Health" in output
+    assert "Fetch lock:     clear" in output
+    assert "Latest Runs" in output
+    assert "Fetch:      2026-01-01T00:00:00Z  full  2 endpoints  2 records" in output
+    assert "Changelog:  2026-01-02T00:00:00Z  3 events  2 endpoints" in output
+    assert "Download:   2026-01-02T00:00:00Z  docs  4 downloaded, 0 failed" in output
+    assert "Bundle:     2026-01-02T00:00:00Z  style-bundle  1 files" in output
+    assert "Data" in output
+    assert "Records:          2 current" in output
+    assert "Latest modified:  2026-01-02T00:00:00Z" in output
+    assert "Endpoints" in output
+    assert "boms" in output
+    assert "styles" in output
+    assert "- styles:" not in output
+
+
 def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
     monkeypatch.setenv("CENTRIC_USERNAME", "user")
@@ -603,6 +657,39 @@ def _insert_bundle_run(conn, run_id: str, finished_at: str) -> None:
     )
 
 
+def _insert_download_run(conn) -> None:
+    conn.execute(
+        """
+        INSERT INTO download_runs (
+            run_id, job_name, mode, started_at, finished_at, manifest_path,
+            matched_count, selected_count, downloaded_count, already_present_count,
+            failed_count, skipped_count, skipped_current_count, dry_run_count,
+            superseded_count, tombstoned_count, dry_run
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            "download-1",
+            "docs",
+            "delta",
+            "2026-01-02T00:00:00Z",
+            "2026-01-02T00:00:00Z",
+            "manifest.json",
+            4,
+            4,
+            4,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+
+
 def _insert_endpoint_record(
     conn,
     *,
@@ -669,7 +756,7 @@ def _insert_bundle_item(
     )
 
 
-def _insert_applied_raw_file(conn, *, endpoint: str) -> None:
+def _insert_applied_raw_file(conn, *, endpoint: str, record_count: int = 0) -> None:
     conn.execute(
         """
         INSERT INTO applied_raw_files (
@@ -684,7 +771,7 @@ def _insert_applied_raw_file(conn, *, endpoint: str) -> None:
             endpoint,
             "run-1",
             0,
-            0,
+            record_count,
             0,
             f"hash-{endpoint}",
             None,
