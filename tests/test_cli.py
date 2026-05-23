@@ -584,6 +584,35 @@ def test_doctor_reports_stale_schema_shape(tmp_path, monkeypatch, capsys) -> Non
     assert schema_check["repair"] == "centric-api rebuild-db --yes"
 
 
+def test_doctor_human_output_is_grouped_with_repair(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+    db_path = tmp_path / "centric.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE local_metadata (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO local_metadata (key, value, updated_at) VALUES (?, ?, ?)",
+            ["db_schema_version", "1", "2026-01-01T00:00:00Z"],
+        )
+        conn.execute("CREATE TABLE endpoint_records (endpoint TEXT, record_id TEXT)")
+
+    exit_code = main(["doctor", "--db", str(db_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "Centric API Doctor" in output
+    assert "Result: FAIL" in output
+    assert "Setup" in output
+    assert "Database" in output
+    assert "Runtime" in output
+    assert "schema shape" in output
+    assert "repair: centric-api rebuild-db --yes" in output
+    assert "db_schema_shape" not in output
+
+
 def test_rebuild_db_requires_yes(tmp_path, capsys) -> None:
     exit_code = main(["rebuild-db", "--db", str(tmp_path / "centric.db")])
 

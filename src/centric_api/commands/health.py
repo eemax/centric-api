@@ -460,8 +460,102 @@ def _format_status_count(value: int) -> str:
 def _print_human_doctor(checks: list[dict[str, Any]]) -> None:
     print("Centric API Doctor")
     print()
+    counts = _doctor_status_counts(checks)
+    print(
+        f"Result: {_doctor_result(counts)}  "
+        f"{counts['OK']} ok, {counts['WARN']} warn, {counts['FAIL']} fail"
+    )
+    grouped = _group_doctor_checks(checks)
+    for group in ("Setup", "Database", "Downloads", "Bundles", "Runtime", "Other"):
+        group_checks = grouped.get(group, [])
+        if not group_checks:
+            continue
+        print()
+        print(group)
+        label_width = max(len(_doctor_check_label(check)) for check in group_checks)
+        for check in group_checks:
+            print(
+                f"  {check['status']:<4}  "
+                f"{_doctor_check_label(check):<{label_width}}  "
+                f"{check['message']}"
+            )
+            if check.get("repair"):
+                print(f"        repair: {check['repair']}")
+
+
+def _doctor_status_counts(checks: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "OK": sum(1 for check in checks if check["status"] == "OK"),
+        "WARN": sum(1 for check in checks if check["status"] == "WARN"),
+        "FAIL": sum(1 for check in checks if check["status"] == "FAIL"),
+    }
+
+
+def _doctor_result(counts: dict[str, int]) -> str:
+    if counts["FAIL"]:
+        return "FAIL"
+    if counts["WARN"]:
+        return "WARN"
+    return "OK"
+
+
+def _group_doctor_checks(checks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for check in checks:
-        print(f"{check['status']:<4} {check['name']}: {check['message']}")
+        grouped.setdefault(_doctor_check_group(str(check["name"])), []).append(check)
+    return grouped
+
+
+def _doctor_check_group(name: str) -> str:
+    if name in {
+        "fetch_config",
+        "schema",
+        "download_config",
+        "bundle_config",
+        "credentials",
+    }:
+        return "Setup"
+    if name in {
+        "db",
+        "db_schema_version",
+        "endpoint_records",
+        "applied_raw_files",
+        "db_schema_shape",
+        "endpoint_records_count",
+        "changelog_runs",
+    }:
+        return "Database"
+    if name.startswith("download_job:") or name == "download_current_files":
+        return "Downloads"
+    if name.startswith("bundle_job:"):
+        return "Bundles"
+    if name in {"fetch_lock", "download_lock", "bundle_lock"}:
+        return "Runtime"
+    return "Other"
+
+
+def _doctor_check_label(check: dict[str, Any]) -> str:
+    name = str(check["name"])
+    labels = {
+        "fetch_config": "fetch config",
+        "download_config": "download config",
+        "bundle_config": "bundle config",
+        "db_schema_version": "schema version",
+        "db_schema_shape": "schema shape",
+        "endpoint_records": "endpoint records",
+        "applied_raw_files": "raw files",
+        "endpoint_records_count": "endpoint records",
+        "changelog_runs": "changelog runs",
+        "download_current_files": "current files",
+        "fetch_lock": "fetch lock",
+        "download_lock": "download lock",
+        "bundle_lock": "bundle lock",
+    }
+    if name.startswith("download_job:"):
+        return f"download job {name.split(':', 1)[1]}"
+    if name.startswith("bundle_job:"):
+        return f"bundle job {name.split(':', 1)[1]}"
+    return labels.get(name, name.replace("_", " "))
 
 
 def _ingest_record(result: IngestResult | None) -> dict[str, Any] | None:
