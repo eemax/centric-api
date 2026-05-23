@@ -9,9 +9,9 @@ from pathlib import Path
 
 from croniter import croniter
 
-from ..cli_output import _format_duration
 from ..config import ConfigError, runtime_path
 from ..defaults import DEFAULT_CRON_LOG_PATH, DEFAULT_LOCK_PATH
+from ..rendering.logs import format_duration
 from ..runtime_io import parse_jsonl, safe_int
 from .common import (
     append_cron_log_event,
@@ -104,7 +104,7 @@ def run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file: 
         ok_count = sum(1 for record in fetch_records if record.get("status") == "ok")
         failed_count = sum(1 for record in fetch_records if record.get("status") == "failed")
         total_items = sum(safe_int(record.get("items_fetched")) for record in fetch_records)
-        print(f"Fetch finished: exit={exit_code} duration={_format_duration(duration)}")
+        print(f"Fetch finished: exit={exit_code} duration={format_duration(duration)}")
         print(f"Fetch records: {ok_count} ok, {failed_count} failed, {total_items} items fetched")
     finally:
         release_fetch_lock(lock_file)

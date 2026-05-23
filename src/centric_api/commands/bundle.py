@@ -12,17 +12,18 @@ from ..bundle_state import (
     list_bundle_items,
     list_bundle_runs,
 )
-from ..cli_output import (
-    _bundle_comparison_record,
-    _bundle_record,
-    _print_human_bundle_changelog,
-    _print_human_bundle_show,
-    _print_human_bundle_summary,
-    _print_rows,
-)
 from ..config import ConfigError, runtime_path
 from ..defaults import DEFAULT_BUNDLE_LOCK_PATH
 from ..defaults import db_path as resolve_db_path
+from ..rendering.bundle import (
+    bundle_comparison_record,
+    bundle_record,
+    print_human_bundle_changelog,
+    print_human_bundle_list,
+    print_human_bundle_show,
+    print_human_bundle_summary,
+)
+from ..rendering.common import print_rows
 from .common import release_bundle_lock, try_acquire_bundle_lock
 
 
@@ -51,9 +52,9 @@ def _run_bundle_unlocked(args: argparse.Namespace) -> int:
         zip_bundle=not args.no_zip,
     )
     if args.json:
-        print(json.dumps(_bundle_record(result), default=str))
+        print(json.dumps(bundle_record(result), default=str))
     elif not args.quiet:
-        _print_human_bundle_summary(result)
+        print_human_bundle_summary(result)
     return 1 if result.missing_count else 0
 
 
@@ -61,7 +62,13 @@ def _run_bundle_history(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args.db)
     if args.action == "list":
         rows = list_bundle_runs(db_path, bundle_name=args.job, limit=args.limit)
-        return _print_rows(rows, args.json, empty_message="No bundle runs found.")
+        if args.json:
+            return print_rows(rows, True, empty_message="No bundle runs found.")
+        if not rows:
+            print("No bundle runs found.")
+            return 0
+        print_human_bundle_list(rows)
+        return 0
     if args.bundle_run_id is None:
         raise ConfigError(f"bundle {args.action} requires a bundle run id.")
     if args.action == "show":
@@ -75,7 +82,7 @@ def _run_bundle_history(args: argparse.Namespace) -> int:
         if args.json:
             print(json.dumps(payload, default=str))
         else:
-            _print_human_bundle_show(run, items)
+            print_human_bundle_show(run, items)
         return 0
     comparison = compare_bundle_runs(
         db_path,
@@ -83,7 +90,7 @@ def _run_bundle_history(args: argparse.Namespace) -> int:
         to_run_id=args.to,
     )
     if args.json:
-        print(json.dumps(_bundle_comparison_record(comparison), default=str))
+        print(json.dumps(bundle_comparison_record(comparison), default=str))
     else:
-        _print_human_bundle_changelog(comparison)
+        print_human_bundle_changelog(comparison)
     return 0

@@ -7,7 +7,6 @@ import pytest
 
 from centric_api.changelog import record_changelog
 from centric_api.cli import main
-from centric_api.cli_output import _render_log_line
 from centric_api.cli_parser import build_parser
 from centric_api.commands.common import (
     append_cron_log_event,
@@ -16,6 +15,8 @@ from centric_api.commands.common import (
     try_acquire_fetch_lock,
 )
 from centric_api.commands.cron import run_cron_fetch_once
+from centric_api.rendering.changelog import print_human_changelog_changes
+from centric_api.rendering.logs import render_log_line
 from centric_api.runtime_io import parse_jsonl
 from centric_api.store import connect
 
@@ -145,6 +146,99 @@ def test_changelog_summary_human_digest_honors_endpoint_filter(tmp_path, capsys)
     assert "boms" not in output
 
 
+def test_changelog_detail_actions_use_human_tables(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="users",
+            record_id="U1",
+            payload={"id": "U1", "node_name": "Ava Admin"},
+            payload_hash="user-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "code": "STY-001",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="style-before",
+        )
+    record_changelog(db_path, endpoints={"styles"}, full=True)
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "code": "STY-001-UPDATED",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-02T00:00:00Z",
+            },
+            payload_hash="style-after",
+        )
+    record_changelog(db_path, record_ids_by_endpoint={"styles": {"S1"}})
+
+    assert main(["changelog", "fields", "--db", str(db_path)]) == 0
+    fields_output = capsys.readouterr().out
+    assert "Changelog Fields" in fields_output
+    assert "Top changed fields" in fields_output
+    assert "code" in fields_output
+    assert "field_change_type=" not in fields_output
+
+    assert main(["changelog", "actors", "--db", str(db_path)]) == 0
+    actors_output = capsys.readouterr().out
+    assert "Changelog Actors" in actors_output
+    assert "Ava Admin" in actors_output
+    assert "modified_by_id=" not in actors_output
+
+    assert main(["changelog", "changes", "--db", str(db_path)]) == 0
+    changes_output = capsys.readouterr().out
+    assert "Changelog Changes" in changes_output
+    assert "Modified" in changes_output
+    assert "styles" in changes_output
+    assert "changed_fields_json=" not in changes_output
+
+
+def test_changelog_changes_summarizes_added_payload_fields(capsys) -> None:
+    print_human_changelog_changes(
+        [
+            {
+                "endpoint": "document_revisions",
+                "record_id": "R1",
+                "change_type": "added",
+                "delete_type": None,
+                "modified_at": "2026-01-01T00:00:00Z",
+                "changed_at": "2026-01-01T00:00:00Z",
+                "modified_by_name": None,
+                "modified_by_id": None,
+                "changed_fields": [
+                    "_modified_at",
+                    "modified_by",
+                    "field_1",
+                    "field_2",
+                    "field_3",
+                    "field_4",
+                    "field_5",
+                    "field_6",
+                    "field_7",
+                ],
+            }
+        ],
+        since=None,
+        endpoint=None,
+    )
+
+    output = capsys.readouterr().out
+    assert "9 fields added" in output
+    assert "field_1" not in output
+
+
 def test_fetch_and_cron_help_are_lean(capsys) -> None:
     with pytest.raises(SystemExit) as fetch_exc:
         main(["fetch", "--help"])
@@ -194,7 +288,7 @@ def test_fetch_log_level_defaults_to_summary() -> None:
 
 
 def test_fetch_log_renderer_uses_human_run_and_endpoint_lines() -> None:
-    run_line = _render_log_line(
+    run_line = render_log_line(
         {
             "timestamp": "2026-01-01T00:00:00Z",
             "level": "summary",
@@ -206,7 +300,7 @@ def test_fetch_log_renderer_uses_human_run_and_endpoint_lines() -> None:
             "output_dir": "/tmp/raw",
         }
     )
-    endpoint_line = _render_log_line(
+    endpoint_line = render_log_line(
         {
             "timestamp": "2026-01-01T00:00:01Z",
             "level": "summary",
@@ -362,6 +456,35 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
     assert changelog["to_run"]["run_id"] == "2026-01-02T000000Z-style-bundle"
 
 
+def test_bundle_list_and_show_use_human_tables(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_bundle_run(conn, "2026-01-01T000000Z-style-bundle", "2026-01-01T00:00:00Z")
+        _insert_bundle_item(
+            conn,
+            "2026-01-01T000000Z-style-bundle",
+            "styles\x1fS1\x1fD1",
+            "files/styles/Style One/spec.pdf",
+            "R1",
+            "sha1",
+        )
+
+    assert main(["bundle", "list", "--db", str(db_path)]) == 0
+    list_output = capsys.readouterr().out
+    assert "Bundle Runs" in list_output
+    assert "Run" in list_output
+    assert "Delta" in list_output
+    assert "run_id=" not in list_output
+
+    assert main(["bundle", "show", "2026-01-01T000000Z-style-bundle", "--db", str(db_path)]) == 0
+    show_output = capsys.readouterr().out
+    assert "Bundle Run" in show_output
+    assert "Files" in show_output
+    assert "Change" in show_output
+    assert "files/styles/Style One/spec.pdf" in show_output
+    assert "- added:" not in show_output
+
+
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     lock_path = tmp_path / "fetch.lock"
 
@@ -495,13 +618,18 @@ def test_status_human_output_is_operational_snapshot(tmp_path, capsys) -> None:
     assert "Health" in output
     assert "Fetch lock:     clear" in output
     assert "Latest Runs" in output
-    assert "Fetch:      2026-01-01T00:00:00Z  full  2 endpoints  2 records" in output
-    assert "Changelog:  2026-01-02T00:00:00Z  3 events  2 endpoints" in output
-    assert "Download:   2026-01-02T00:00:00Z  docs  4 downloaded, 0 failed" in output
-    assert "Bundle:     2026-01-02T00:00:00Z  style-bundle  1 files" in output
+    assert "Fetch:" in output
+    assert "full  2 endpoints  2 records" in output
+    assert "Changelog:" in output
+    assert "3 events  2 endpoints" in output
+    assert "Download:" in output
+    assert "docs  4 downloaded, 0 failed" in output
+    assert "Bundle:" in output
+    assert "style-bundle  1 files" in output
     assert "Data" in output
     assert "Records:          2 current" in output
-    assert "Latest modified:  2026-01-02T00:00:00Z" in output
+    assert "Latest modified:" in output
+    assert "ago" in output
     assert "Endpoints" in output
     assert "boms" in output
     assert "styles" in output

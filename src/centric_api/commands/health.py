@@ -22,6 +22,7 @@ from ..defaults import (
 from ..download_config import load_download_config
 from ..schema import load_endpoint_schemas
 from ..store import IngestResult, connect_readonly, endpoint_has_cache_evidence, table_exists
+from ..time_display import format_time_ago
 
 
 def _status_payload(target_db_path: Path) -> dict[str, Any]:
@@ -398,12 +399,12 @@ def _print_human_status(payload: dict[str, Any]) -> None:
         print("Data")
         print(f"  Endpoints:        {_format_status_count(len(endpoint_rows))}")
         print(f"  Records:          {_format_status_count(total_records)} current")
-        print(f"  Latest modified:  {latest_modified}")
+        print(f"  Latest modified:  {format_time_ago(latest_modified)}")
         print()
         print("Endpoints")
         endpoint_width = max(len("Endpoint"), *(len(row["endpoint"]) for row in endpoint_rows))
         for row in endpoint_rows:
-            latest = row["latest_modified_at"] or "none"
+            latest = format_time_ago(row["latest_modified_at"])
             print(
                 f"  {row['endpoint']:<{endpoint_width}}  "
                 f"{_format_status_count(int(row['current_count'] or 0)):>10}  "
@@ -419,7 +420,7 @@ def _latest_fetch_status(row: dict[str, Any] | None) -> str:
     if row is None:
         return "none"
     return (
-        f"{row['ingested_at']}  {row['run_mode'] or 'unknown'}  "
+        f"{format_time_ago(row['ingested_at'])}  {row['run_mode'] or 'unknown'}  "
         f"{_format_status_count(int(row['file_count'] or 0))} endpoints  "
         f"{_format_status_count(int(row['record_count'] or 0))} records"
     )
@@ -429,7 +430,8 @@ def _latest_changelog_status(row: dict[str, Any] | None) -> str:
     if row is None:
         return "none"
     return (
-        f"{row['created_at']}  {_format_status_count(int(row['event_count'] or 0))} events  "
+        f"{format_time_ago(row['created_at'])}  "
+        f"{_format_status_count(int(row['event_count'] or 0))} events  "
         f"{_format_status_count(int(row['endpoint_count'] or 0))} endpoints"
     )
 
@@ -438,7 +440,7 @@ def _latest_download_status(row: dict[str, Any] | None) -> str:
     if row is None:
         return "none"
     return (
-        f"{row['finished_at']}  {row['job_name']}  "
+        f"{format_time_ago(row['finished_at'])}  {row['job_name']}  "
         f"{_format_status_count(int(row['downloaded_count'] or 0))} downloaded, "
         f"{_format_status_count(int(row['failed_count'] or 0))} failed"
     )
@@ -448,7 +450,7 @@ def _latest_bundle_status(row: dict[str, Any] | None) -> str:
     if row is None:
         return "none"
     return (
-        f"{row['finished_at']}  {row['bundle_name']}  "
+        f"{format_time_ago(row['finished_at'])}  {row['bundle_name']}  "
         f"{_format_status_count(int(row['item_count'] or 0))} files"
     )
 

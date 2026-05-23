@@ -11,14 +11,6 @@ from typing import Any, TextIO
 
 from ..auth import AuthError, init_auth_context
 from ..changelog import ChangelogRun, record_changelog
-from ..cli_output import (
-    LogCallback,
-    _build_log_callback,
-    _print_delta_dry_run,
-    _print_human_fetch_summary,
-    _print_json_fetch_records,
-    _write_progress_line,
-)
 from ..config import ConfigError, load_fetcher_settings, resolve_private_config_path, runtime_path
 from ..defaults import (
     DEFAULT_DELTA_STATE_PATH,
@@ -39,6 +31,13 @@ from ..fetch_delta_state import (
 from ..fetch_manifest import endpoint_manifest_record, write_run_manifest
 from ..fetcher import FetchError, run_endpoint
 from ..models import EndpointSpec, FetchRunResult
+from ..rendering.fetch import (
+    print_delta_dry_run,
+    print_human_fetch_summary,
+    print_json_fetch_records,
+    write_progress_line,
+)
+from ..rendering.logs import LogCallback, build_log_callback
 from ..schema import load_endpoint_schemas
 from ..store import IngestResult, ingest_raw_dir
 from .common import release_fetch_lock, try_acquire_fetch_lock, utc_iso, utc_now
@@ -91,7 +90,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                 delta_floor=delta_floor,
                 modified_since=modified_since,
             )
-            _print_delta_dry_run(
+            print_delta_dry_run(
                 runtime_spec,
                 delta_floor=delta_floor,
                 overlap_days=overlap_days,
@@ -105,7 +104,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
         log_path = runtime_path(DEFAULT_FETCH_LOG_PATH)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         fetch_log_file = log_path.open("a", encoding="utf-8")
-        log_callback = _build_log_callback(
+        log_callback = build_log_callback(
             fetch_log_file,
             log_level=args.log_level,
             utc_iso=utc_iso,
@@ -175,7 +174,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         output_file_suffix=".delta" if mode == "delta" else "",
                         create_empty_output=mode == "full",
                         delta_floor=delta_floor if mode == "delta" else None,
-                        progress_callback=None if args.quiet else _write_progress_line,
+                        progress_callback=None if args.quiet else write_progress_line,
                         api_log_callback=log_callback,
                     )
                     results.append(result)
@@ -371,7 +370,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     if fetch_log_file is not None:
         fetch_log_file.close()
     if args.json:
-        _print_json_fetch_records(
+        print_json_fetch_records(
             results,
             failures,
             manifest_path=manifest_path,
@@ -381,7 +380,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             pipeline_error=pipeline_error,
         )
     elif not args.quiet:
-        _print_human_fetch_summary(
+        print_human_fetch_summary(
             mode=mode,
             run_id=run_id,
             raw_dir=fetcher_cfg.output_dir,

@@ -359,7 +359,7 @@ def list_changes(
                    changed_fields_json, previous_payload_json, current_payload_json
             FROM endpoint_change_events
             {clause}
-            ORDER BY changed_at DESC, endpoint, record_id
+            ORDER BY COALESCE(modified_at, changed_at) DESC, changed_at DESC, endpoint, record_id
             LIMIT ?
             """,
             [*params, limit],

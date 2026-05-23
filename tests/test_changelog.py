@@ -333,3 +333,69 @@ def test_changelog_allows_missing_modified_by(tmp_path: Path) -> None:
             "count": 1,
         }
     ]
+
+
+def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_change_events (
+                run_id, endpoint, record_id, changed_at, change_type, delete_type,
+                modified_at, modified_by_id, modified_by_name, previous_hash,
+                current_hash, changed_fields_json, previous_payload_json,
+                current_payload_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "run-1",
+                "styles",
+                "older-detection-newer-modified",
+                "2026-01-01T00:00:00Z",
+                "changed",
+                None,
+                "2026-01-03T00:00:00Z",
+                None,
+                None,
+                "before-1",
+                "after-1",
+                json.dumps(["code"]),
+                json.dumps({"id": "older-detection-newer-modified"}),
+                json.dumps({"id": "older-detection-newer-modified"}),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_change_events (
+                run_id, endpoint, record_id, changed_at, change_type, delete_type,
+                modified_at, modified_by_id, modified_by_name, previous_hash,
+                current_hash, changed_fields_json, previous_payload_json,
+                current_payload_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "run-1",
+                "styles",
+                "newer-detection-older-modified",
+                "2026-01-02T00:00:00Z",
+                "changed",
+                None,
+                "2026-01-01T00:00:00Z",
+                None,
+                None,
+                "before-2",
+                "after-2",
+                json.dumps(["code"]),
+                json.dumps({"id": "newer-detection-older-modified"}),
+                json.dumps({"id": "newer-detection-older-modified"}),
+            ],
+        )
+
+    rows = list_changes(db_path, endpoint="styles", limit=10)
+
+    assert [row["record_id"] for row in rows] == [
+        "older-detection-newer-modified",
+        "newer-detection-older-modified",
+    ]

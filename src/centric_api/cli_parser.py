@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .cli_output import LOG_LEVEL_RANKS
 from .defaults import (
     DEFAULT_CONFIG_PATH,
     MAX_DAYS_BACK,
@@ -11,6 +10,7 @@ from .defaults import (
     MIN_DAYS_BACK,
     MIN_MONTHS_BACK,
 )
+from .rendering.logs import LOG_LEVEL_RANKS
 
 
 def normalize_argv(argv: list[str] | None) -> list[str] | None:

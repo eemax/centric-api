@@ -7,19 +7,18 @@ from pathlib import Path
 from typing import TextIO
 
 from ..auth import init_auth_context
-from ..cli_output import (
-    LogCallback,
-    _build_log_callback,
-    _download_record,
-    _print_human_download_summary,
-    _write_download_progress_line,
-    _write_json_download_progress,
-)
 from ..config import load_fetcher_settings, runtime_path
 from ..defaults import DEFAULT_DOWNLOAD_LOCK_PATH, DEFAULT_DOWNLOAD_LOG_PATH
 from ..defaults import db_path as resolve_db_path
 from ..download import run_download_job
 from ..download_config import load_download_config
+from ..rendering.download import (
+    download_record,
+    print_human_download_summary,
+    write_download_progress_line,
+    write_json_download_progress,
+)
+from ..rendering.logs import LogCallback, build_log_callback
 from .common import release_download_lock, try_acquire_download_lock, utc_iso
 
 
@@ -43,16 +42,16 @@ def _run_download_unlocked(args: argparse.Namespace) -> int:
     mode = "rebuild" if args.rebuild else ("sync" if args.sync else "delta")
     progress_callback = None
     if args.json:
-        progress_callback = _write_json_download_progress
+        progress_callback = write_json_download_progress
     elif not args.quiet:
-        progress_callback = _write_download_progress_line
+        progress_callback = write_download_progress_line
     download_log_file: TextIO | None = None
     log_callback: LogCallback | None = None
     if not args.dry_run and args.log_level != "off":
         log_path = runtime_path(DEFAULT_DOWNLOAD_LOG_PATH)
         log_path.parent.mkdir(parents=True, exist_ok=True)
         download_log_file = log_path.open("a", encoding="utf-8")
-        log_callback = _build_log_callback(
+        log_callback = build_log_callback(
             download_log_file,
             log_level=args.log_level,
             utc_iso=utc_iso,
@@ -89,7 +88,7 @@ def _run_download_unlocked(args: argparse.Namespace) -> int:
         if download_log_file is not None:
             download_log_file.close()
     if args.json:
-        print(json.dumps(_download_record(result), default=str))
+        print(json.dumps(download_record(result), default=str))
     elif not args.quiet:
-        _print_human_download_summary(result)
+        print_human_download_summary(result)
     return 1 if result.failed_count else 0

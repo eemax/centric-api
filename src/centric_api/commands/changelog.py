@@ -12,8 +12,15 @@ from ..changelog import (
     parse_since,
     record_changelog,
 )
-from ..cli_output import _print_human_changelog_summary, _print_or_json, _print_rows
 from ..defaults import db_path as resolve_db_path
+from ..rendering.changelog import (
+    print_human_changelog_actor_summary,
+    print_human_changelog_changes,
+    print_human_changelog_field_summary,
+    print_human_changelog_runs,
+    print_human_changelog_summary,
+)
+from ..rendering.common import print_or_json, print_rows
 
 
 def run_changelog(args: argparse.Namespace) -> int:
@@ -25,7 +32,7 @@ def run_changelog(args: argparse.Namespace) -> int:
             endpoints=set(args.endpoint) if args.endpoint else None,
             full=True,
         )
-        _print_or_json(
+        print_or_json(
             args.json,
             {
                 "run_id": run.run_id,
@@ -43,7 +50,13 @@ def run_changelog(args: argparse.Namespace) -> int:
         return 0
     if args.action == "runs":
         rows = list_changelog_runs(db_path, since=since, limit=args.limit)
-        return _print_rows(rows, args.json, empty_message="No changelog runs found.")
+        if args.json:
+            return print_rows(rows, True, empty_message="No changelog runs found.")
+        if not rows:
+            print("No changelog runs found.")
+            return 0
+        print_human_changelog_runs(rows, since=args.since)
+        return 0
     if args.action == "changes":
         rows = list_changes(
             db_path,
@@ -51,15 +64,42 @@ def run_changelog(args: argparse.Namespace) -> int:
             since=since,
             limit=args.limit,
         )
-        return _print_rows(rows, args.json, empty_message="No changelog changes found.")
+        if args.json:
+            return print_rows(rows, True, empty_message="No changelog changes found.")
+        if not rows:
+            print("No changelog changes found.")
+            return 0
+        print_human_changelog_changes(
+            rows,
+            since=args.since,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+        )
+        return 0
     if args.action == "fields":
         rows = list_field_summary(
             db_path,
             endpoint=args.endpoint[0] if args.endpoint else None,
             since=since,
-            limit=args.limit,
+            limit=args.limit if args.json or args.endpoint else 10000,
         )
-        return _print_rows(rows, args.json, empty_message="No changelog field changes found.")
+        if args.json:
+            return print_rows(rows, True, empty_message="No changelog field changes found.")
+        if not rows:
+            print("No changelog field changes found.")
+            return 0
+        change_rows = list_change_summary(
+            db_path,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+            since=since,
+            limit=10000,
+        )
+        print_human_changelog_field_summary(
+            rows,
+            change_rows,
+            since=args.since,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+        )
+        return 0
     if args.action == "actors":
         rows = list_actor_summary(
             db_path,
@@ -67,7 +107,17 @@ def run_changelog(args: argparse.Namespace) -> int:
             since=since,
             limit=args.limit,
         )
-        return _print_rows(rows, args.json, empty_message="No changelog actor changes found.")
+        if args.json:
+            return print_rows(rows, True, empty_message="No changelog actor changes found.")
+        if not rows:
+            print("No changelog actor changes found.")
+            return 0
+        print_human_changelog_actor_summary(
+            rows,
+            since=args.since,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+        )
+        return 0
     endpoint = args.endpoint[0] if args.endpoint else None
     rows = list_change_summary(
         db_path,
@@ -76,7 +126,7 @@ def run_changelog(args: argparse.Namespace) -> int:
         limit=args.limit if args.json else 10000,
     )
     if args.json:
-        return _print_rows(rows, True, empty_message="No changelog events found.")
+        return print_rows(rows, True, empty_message="No changelog events found.")
     if not rows:
         print("No changelog events found.")
         return 0
@@ -86,7 +136,7 @@ def run_changelog(args: argparse.Namespace) -> int:
         since=since,
         limit=10,
     )
-    _print_human_changelog_summary(
+    print_human_changelog_summary(
         rows,
         actors,
         since=args.since,
