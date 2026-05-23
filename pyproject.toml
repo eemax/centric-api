@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "centric-api"
 version = "0.1.0"
-description = "Centric API fetcher, local cache, and changelog."
+description = "Centric API local data toolkit for Centric records and documents."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

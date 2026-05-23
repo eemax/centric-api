@@ -1,9 +1,16 @@
 # centric-api
 
-Centric API fetcher, local SQLite cache, and endpoint changelog.
+Centric API local data toolkit: fetch, cache, changelog, download, and bundle Centric records and
+documents.
 
 Runtime state is stored in `~/.centric-api` by default. Set `CENTRIC_API_HOME` to use a different
 directory.
+
+Docs:
+
+- [CLI reference](docs/cli.md)
+- [Configuration](docs/configuration.md)
+- [Operations](docs/operations.md)
 
 ```bash
 uv run centric-api fetch
@@ -55,24 +62,25 @@ delta: documents already marked current in SQLite and present on disk are
 skipped. `--sync` verifies all selected latest revisions exist without overwriting existing files.
 `--rebuild` redownloads selected latest revisions and tombstones current download rows that are no
 longer selected, while preserving the last known good current revision if a replacement download
-fails. Download runs are serialized with
+fails. Non-dry-run download runs are serialized with
 `CENTRIC_API_HOME/download.lock`, and binary downloads retry transient HTTP/server hiccups with a
 simple 15s/30s backoff. The default config is `config/download.yml`, with a fuller multi-job example
 in `config/download.example.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or
 pass `--download-config`. Files are stored under
-`CENTRIC_API_HOME/downloads/files`, each run writes a manifest under
+`CENTRIC_API_HOME/downloads/files`, non-dry-run runs write manifests under
 `CENTRIC_API_HOME/downloads/runs`, current download state is tracked in the `download_current` SQLite
-table, and human-readable download logs append to `CENTRIC_API_HOME/logs/download.log`.
+table, and human-readable download logs append to `CENTRIC_API_HOME/logs/download.log` for
+non-dry-run runs.
 
 `bundle` packages already-downloaded current files for distribution. Bundle jobs live in
 `config/bundle.yml` or private `CENTRIC_API_HOME/bundle.yml`, point at a `download_job`, and use a
 human-friendly archive layout of `files/{source_endpoint}/{source_label}/{filename}`. Source labels
 default to `node_name` and can be configured per endpoint by concatenating fields such as
 `style_code` and `node_name`. If the same document is referenced by multiple selected source
-objects, the bundle includes one copy under each source object folder. Each run writes
-`manifest.json`, `changelog.json`, and `changelog.md`, then creates a zip by default. Bundle
+objects, the bundle includes one copy under each source object folder. Non-dry-run runs write
+`manifest.json`, `changelog.json`, and `changelog.md`, then create a zip by default. Bundle
 changelog compares against the previous successful run of the same bundle and reports added,
-changed, renamed, removed, and unchanged files. Bundle state is tracked in `bundle_current`, and
+changed, renamed, removed, and unchanged files. Bundle state is tracked in SQLite, and non-dry-run
 runs are serialized with `CENTRIC_API_HOME/bundle.lock`.
 
 Bundle run IDs are timestamp-based and are the precise anchor for distribution support. Use
@@ -86,7 +94,7 @@ download, bundle, and endpoint counts. `doctor` validates local setup, config, c
 SQLite state, cached endpoints required by download jobs, bundle/download wiring, stale locks, and
 missing current download files. It exits nonzero when any check fails.
 
-`rebuild-db --yes` is the hard-cutover recovery path. It backs up the current SQLite database files,
+`rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays raw evidence from `CENTRIC_API_HOME/raw` into a fresh DB, rebuilds changelog, and reinstalls
 dashboard views. Use `--raw-dir` or `--db` to override the defaults.
 
