@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     changelog_parser.add_argument(
         "action",
         nargs="?",
-        choices=["summary", "fields", "actors", "runs", "changes", "update"],
+        choices=["summary", "fields", "actors", "leaderboard", "runs", "changes", "update"],
         default="summary",
     )
     changelog_parser.add_argument("--db", default=None)

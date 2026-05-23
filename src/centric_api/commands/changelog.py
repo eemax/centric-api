@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from ..changelog import (
+    list_actor_leaderboard,
     list_actor_summary,
     list_actor_totals,
     list_change_summary,
@@ -17,6 +18,7 @@ from ..rendering.changelog import (
     print_human_changelog_actor_summary,
     print_human_changelog_changes,
     print_human_changelog_field_summary,
+    print_human_changelog_leaderboard,
     print_human_changelog_runs,
     print_human_changelog_summary,
 )
@@ -116,6 +118,29 @@ def run_changelog(args: argparse.Namespace) -> int:
             rows,
             since=args.since,
             endpoint=args.endpoint[0] if args.endpoint else None,
+        )
+        return 0
+    if args.action == "leaderboard":
+        rows = list_actor_leaderboard(
+            db_path,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+            since=since,
+        )
+        displayed_rows = rows[: max(args.limit, 0)]
+        if args.json:
+            return print_rows(
+                displayed_rows,
+                True,
+                empty_message="No changelog leaderboard entries found.",
+            )
+        if not rows:
+            print("No changelog leaderboard entries found.")
+            return 0
+        print_human_changelog_leaderboard(
+            rows,
+            since=args.since,
+            endpoint=args.endpoint[0] if args.endpoint else None,
+            limit=args.limit,
         )
         return 0
     endpoint = args.endpoint[0] if args.endpoint else None

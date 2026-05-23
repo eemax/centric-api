@@ -172,6 +172,37 @@ def print_human_changelog_actor_summary(
         )
 
 
+def print_human_changelog_leaderboard(
+    rows: list[dict[str, Any]],
+    *,
+    since: str | None,
+    endpoint: str | None,
+    limit: int,
+) -> None:
+    displayed_rows = rows[: max(limit, 0)]
+    records_touched = sum(int(row["total"]) for row in rows)
+    print("Centric API Leaderboard")
+    print()
+    print(f"Since:           {_changelog_since_label(since)}")
+    if endpoint:
+        print(f"Endpoint:        {endpoint}")
+    print(f"Actors:          {format_count(len(rows))}")
+    print(f"Records touched: {format_count(records_touched)}")
+    print()
+    _print_leaderboard_actor_table(displayed_rows)
+    hidden_count = len(rows) - len(displayed_rows)
+    if hidden_count > 0:
+        print(f"... {hidden_count} more actor{'' if hidden_count == 1 else 's'}")
+    print()
+    print("Endpoint Breakdown")
+    print()
+    for index, row in enumerate(displayed_rows, start=1):
+        if index > 1:
+            print()
+        print(f"{index}. {_actor_label(row)}")
+        _print_leaderboard_endpoint_table(row["endpoints"])
+
+
 def print_human_changelog_changes(
     rows: list[dict[str, Any]],
     *,
@@ -449,6 +480,106 @@ def _actor_label(row: dict[str, Any]) -> str:
 
 def _actor_label_width(row: dict[str, Any]) -> int:
     return len(_actor_label(row))
+
+
+def _print_leaderboard_actor_table(rows: list[dict[str, Any]]) -> None:
+    actor_width = max(len("Actor"), *(_actor_label_width(row) for row in rows))
+    rank_width = max(len("Rank"), len(str(len(rows))))
+    delete_columns = _leaderboard_delete_columns(rows)
+    header = _leaderboard_header("Rank", "Actor", rank_width, actor_width, delete_columns)
+    print(header)
+    print("-" * len(header))
+    for index, row in enumerate(rows, start=1):
+        _print_leaderboard_row(
+            str(index),
+            _actor_label(row),
+            row,
+            rank_width,
+            actor_width,
+            delete_columns,
+        )
+
+
+def _print_leaderboard_endpoint_table(rows: list[dict[str, Any]]) -> None:
+    endpoint_width = max(len("Endpoint"), *(len(str(row["endpoint"])) for row in rows))
+    delete_columns = _leaderboard_delete_columns(rows)
+    indent = "   "
+    header = _leaderboard_header("", "Endpoint", 0, endpoint_width, delete_columns)
+    print(f"{indent}{header}")
+    print(f"{indent}{'-' * len(header)}")
+    for row in rows:
+        print(indent, end="")
+        _print_leaderboard_row(
+            "",
+            str(row["endpoint"]),
+            row,
+            0,
+            endpoint_width,
+            delete_columns,
+        )
+
+
+def _leaderboard_header(
+    rank_label: str,
+    name_label: str,
+    rank_width: int,
+    name_width: int,
+    delete_columns: list[tuple[str, str, int]],
+) -> str:
+    prefix = f"{rank_label:>{rank_width}}  " if rank_width else ""
+    return (
+        f"{prefix}{name_label:<{name_width}}  "
+        f"{'Total':>8}  {'Added':>8}  {'Changed':>8}  "
+        f"{'Removed':>8}{_leaderboard_delete_header(delete_columns)}"
+    )
+
+
+def _print_leaderboard_row(
+    rank: str,
+    label: str,
+    row: dict[str, Any],
+    rank_width: int,
+    actor_width: int,
+    delete_columns: list[tuple[str, str, int]],
+) -> None:
+    prefix = f"{rank:>{rank_width}}  " if rank_width else ""
+    print(
+        f"{prefix}"
+        f"{label:<{actor_width}}  "
+        f"{format_count(row['total']):>8}  "
+        f"{format_count(row['added']):>8}  "
+        f"{format_count(row['changed']):>8}  "
+        f"{format_count(row['removed']):>8}"
+        f"{_leaderboard_delete_values(row, delete_columns)}"
+    )
+
+
+def _leaderboard_delete_columns(rows: list[dict[str, Any]]) -> list[tuple[str, str, int]]:
+    all_rows: list[dict[str, Any]] = []
+    for row in rows:
+        all_rows.append(row)
+        all_rows.extend(row.get("endpoints", []))
+    if not any(int(row["hard_delete"]) or int(row["unknown_delete"]) for row in all_rows):
+        return []
+    columns = []
+    if any(int(row["tombstone"]) for row in all_rows):
+        columns.append(("tombstone", "Tomb", 6))
+    if any(int(row["hard_delete"]) for row in all_rows):
+        columns.append(("hard_delete", "Hard", 6))
+    if any(int(row["unknown_delete"]) for row in all_rows):
+        columns.append(("unknown_delete", "Unknown", 8))
+    return columns
+
+
+def _leaderboard_delete_header(columns: list[tuple[str, str, int]]) -> str:
+    return "".join(f"  {label:>{width}}" for _, label, width in columns)
+
+
+def _leaderboard_delete_values(
+    row: dict[str, Any],
+    columns: list[tuple[str, str, int]],
+) -> str:
+    return "".join(f"  {format_count(int(row[key])):>{width}}" for key, _, width in columns)
 
 
 def _changelog_since_label(value: str | None) -> str:

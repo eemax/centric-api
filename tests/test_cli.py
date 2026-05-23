@@ -205,6 +205,111 @@ def test_changelog_detail_actions_use_human_tables(tmp_path, capsys) -> None:
     assert "changed_fields_json=" not in changes_output
 
 
+def test_changelog_leaderboard_limits_actors_not_endpoints(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="users",
+            record_id="U1",
+            payload={"id": "U1", "node_name": "Ava Admin"},
+            payload_hash="user-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="users",
+            record_id="U2",
+            payload={"id": "U2", "node_name": "Ben Buyer"},
+            payload_hash="user-2",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={
+                "id": "S1",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="style-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={
+                "id": "B1",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="bom-1",
+        )
+        _insert_endpoint_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={
+                "id": "D1",
+                "modified_by": "U2",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="document-1",
+        )
+    record_changelog(db_path, endpoints={"styles", "boms", "documents"}, full=True)
+    with connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["boms", "B1"],
+        )
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["documents", "D1"],
+        )
+    record_changelog(
+        db_path,
+        deleted_record_ids_by_endpoint={"boms": {"B1"}, "documents": {"D1"}},
+        deleted_record_delete_types_by_endpoint={
+            "boms": {"B1": "tombstone"},
+            "documents": {"D1": "hard_delete"},
+        },
+    )
+
+    assert main(["changelog", "leaderboard", "--db", str(db_path), "--limit", "1"]) == 0
+    output = capsys.readouterr().out
+    assert "Centric API Leaderboard" in output
+    assert "Records touched: 5" in output
+    assert "Actors:          2" in output
+    assert "Endpoint Breakdown" in output
+    assert "Tomb" not in output
+    assert "Hard" not in output
+    assert "Unknown" not in output
+    assert "Ava Admin" in output
+    assert "styles" in output
+    assert "boms" in output
+    assert "Ben Buyer" not in output
+
+    assert main(["changelog", "leaderboard", "--db", str(db_path), "--limit", "2"]) == 0
+    output = capsys.readouterr().out
+    assert "Tomb" in output
+    assert "Hard" in output
+    assert "Unknown" not in output
+    assert "Ben Buyer" in output
+    assert "1. Ava Admin" in output
+    assert "2. Ben Buyer" in output
+
+    assert main(["changelog", "leaderboard", "--db", str(db_path), "--limit", "1", "--json"]) == 0
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(payloads) == 1
+    assert payloads[0]["modified_by_name"] == "Ava Admin"
+    assert payloads[0]["tombstone"] == 1
+    assert payloads[0]["hard_delete"] == 0
+    assert payloads[0]["unknown_delete"] == 0
+    assert {endpoint["endpoint"] for endpoint in payloads[0]["endpoints"]} == {"styles", "boms"}
+    boms = next(endpoint for endpoint in payloads[0]["endpoints"] if endpoint["endpoint"] == "boms")
+    assert boms["removed"] == 1
+    assert boms["tombstone"] == 1
+
+
 def test_changelog_changes_summarizes_added_payload_fields(capsys) -> None:
     print_human_changelog_changes(
         [

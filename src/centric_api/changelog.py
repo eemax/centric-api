@@ -331,6 +331,39 @@ def list_actor_summary(
     return [dict(row) for row in rows]
 
 
+def list_actor_leaderboard(
+    db_path: Path,
+    *,
+    endpoint: str | None = None,
+    since: datetime | None = None,
+) -> list[dict[str, Any]]:
+    if not db_path.is_file():
+        return []
+    clauses: list[str] = []
+    params: list[Any] = []
+    if endpoint:
+        clauses.append("endpoint = ?")
+        params.append(endpoint)
+    if since is not None:
+        clauses.append("changed_at >= ?")
+        params.append(_datetime_to_db(since))
+    clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_actor_change_summary"):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, modified_by_id, modified_by_name, change_type, delete_type,
+                   SUM(count) AS count
+            FROM endpoint_actor_change_summary
+            {clause}
+            GROUP BY endpoint, modified_by_id, modified_by_name, change_type, delete_type
+            """,
+            params,
+        ).fetchall()
+    return _actor_leaderboard_rows([dict(row) for row in rows])
+
+
 def list_changes(
     db_path: Path,
     *,
@@ -373,6 +406,85 @@ def list_changes(
         }
         for row in rows
     ]
+
+
+def _actor_leaderboard_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actors: dict[tuple[str | None, str | None], dict[str, Any]] = {}
+    for row in rows:
+        actor_key = (row.get("modified_by_id"), row.get("modified_by_name"))
+        actor_row = actors.setdefault(
+            actor_key,
+            {
+                "modified_by_id": actor_key[0],
+                "modified_by_name": actor_key[1],
+                "total": 0,
+                "added": 0,
+                "changed": 0,
+                "removed": 0,
+                "tombstone": 0,
+                "hard_delete": 0,
+                "unknown_delete": 0,
+                "endpoints": {},
+            },
+        )
+        endpoint = str(row["endpoint"])
+        endpoint_rows = actor_row["endpoints"]
+        endpoint_row = endpoint_rows.setdefault(
+            endpoint,
+            {
+                "endpoint": endpoint,
+                "total": 0,
+                "added": 0,
+                "changed": 0,
+                "removed": 0,
+                "tombstone": 0,
+                "hard_delete": 0,
+                "unknown_delete": 0,
+            },
+        )
+        count = int(row["count"] or 0)
+        change_type = row["change_type"]
+        if change_type == "added":
+            actor_row["added"] += count
+            endpoint_row["added"] += count
+        elif change_type == "changed":
+            actor_row["changed"] += count
+            endpoint_row["changed"] += count
+        elif change_type == "removed":
+            actor_row["removed"] += count
+            endpoint_row["removed"] += count
+            delete_type = row.get("delete_type")
+            if delete_type == DELETE_TYPE_TOMBSTONE:
+                actor_row["tombstone"] += count
+                endpoint_row["tombstone"] += count
+            elif delete_type == DELETE_TYPE_HARD_DELETE:
+                actor_row["hard_delete"] += count
+                endpoint_row["hard_delete"] += count
+            else:
+                actor_row["unknown_delete"] += count
+                endpoint_row["unknown_delete"] += count
+        actor_row["total"] += count
+        endpoint_row["total"] += count
+
+    leaderboard_rows: list[dict[str, Any]] = []
+    for row in actors.values():
+        endpoints = sorted(
+            row["endpoints"].values(),
+            key=lambda endpoint_row: (-int(endpoint_row["total"]), endpoint_row["endpoint"]),
+        )
+        leaderboard_rows.append({**row, "endpoints": endpoints})
+    return sorted(
+        leaderboard_rows,
+        key=lambda row: (
+            -int(row["total"]),
+            _actor_sort_label(row),
+            row.get("modified_by_id") or "",
+        ),
+    )
+
+
+def _actor_sort_label(row: dict[str, Any]) -> str:
+    return str(row.get("modified_by_name") or row.get("modified_by_id") or "Unknown")
 
 
 def parse_since(value: str | None) -> datetime | None:

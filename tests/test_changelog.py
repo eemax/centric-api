@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from centric_api.changelog import (
+    list_actor_leaderboard,
     list_actor_summary,
     list_change_summary,
     list_changelog_runs,
@@ -25,6 +26,7 @@ def test_changelog_reads_do_not_create_tables(tmp_path: Path) -> None:
     assert list_change_summary(db_path) == []
     assert list_field_summary(db_path) == []
     assert list_actor_summary(db_path) == []
+    assert list_actor_leaderboard(db_path) == []
     assert list_changes(db_path) == []
 
     with sqlite3.connect(db_path) as conn:
@@ -199,6 +201,166 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     assert sorted(field_summary, key=lambda row: (row["field"], row["field_change_type"])) == (
         expected_field_summary
     )
+
+
+def test_changelog_actor_leaderboard_rolls_up_endpoint_footprint(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "users",
+                "U1",
+                json.dumps({"id": "U1", "node_name": "Ava Admin"}, sort_keys=True),
+                "hash-user-1",
+                "2026-01-01T00:00:00Z",
+                "users.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "users",
+                "U2",
+                json.dumps({"id": "U2", "node_name": "Ben Buyer"}, sort_keys=True),
+                "hash-user-2",
+                "2026-01-01T00:00:00Z",
+                "users.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+        for endpoint, record_id, actor_id, payload_hash in [
+            ("styles", "S1", "U1", "style-1"),
+            ("styles", "S2", "U1", "style-2"),
+            ("boms", "B1", "U1", "bom-1"),
+            ("documents", "D1", "U2", "document-1"),
+        ]:
+            conn.execute(
+                """
+                INSERT INTO endpoint_records (
+                    endpoint, record_id, payload_json, payload_sha256, modified_at,
+                    source_file, source_run_id, ingested_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    endpoint,
+                    record_id,
+                    json.dumps(
+                        {
+                            "id": record_id,
+                            "name": record_id,
+                            "modified_by": actor_id,
+                            "_modified_at": "2026-01-01T00:00:00Z",
+                        },
+                        sort_keys=True,
+                    ),
+                    payload_hash,
+                    "2026-01-01T00:00:00Z",
+                    f"{endpoint}.jsonl",
+                    "run-1",
+                    "2026-01-01T00:00:00Z",
+                ],
+            )
+
+    record_changelog(db_path, endpoints={"styles", "boms", "documents"}, full=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE endpoint_records
+            SET payload_json = ?, payload_sha256 = ?, modified_at = ?
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            [
+                json.dumps(
+                    {
+                        "id": "S1",
+                        "name": "S1 updated",
+                        "modified_by": "U1",
+                        "_modified_at": "2026-01-02T00:00:00Z",
+                    },
+                    sort_keys=True,
+                ),
+                "style-1-updated",
+                "2026-01-02T00:00:00Z",
+                "styles",
+                "S1",
+            ],
+        )
+    record_changelog(db_path, record_ids_by_endpoint={"styles": {"S1"}})
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["boms", "B1"],
+        )
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["documents", "D1"],
+        )
+    record_changelog(
+        db_path,
+        deleted_record_ids_by_endpoint={"boms": {"B1"}, "documents": {"D1"}},
+        deleted_record_delete_types_by_endpoint={
+            "boms": {"B1": "tombstone"},
+            "documents": {"D1": "hard_delete"},
+        },
+    )
+
+    leaderboard = list_actor_leaderboard(db_path)
+
+    assert [
+        (
+            row["modified_by_name"],
+            row["total"],
+            row["added"],
+            row["changed"],
+            row["removed"],
+            row["tombstone"],
+            row["hard_delete"],
+            row["unknown_delete"],
+        )
+        for row in leaderboard
+    ] == [
+        ("Ava Admin", 5, 3, 1, 1, 1, 0, 0),
+        ("Ben Buyer", 2, 1, 0, 1, 0, 1, 0),
+    ]
+    assert leaderboard[0]["endpoints"] == [
+        {
+            "endpoint": "styles",
+            "total": 3,
+            "added": 2,
+            "changed": 1,
+            "removed": 0,
+            "tombstone": 0,
+            "hard_delete": 0,
+            "unknown_delete": 0,
+        },
+        {
+            "endpoint": "boms",
+            "total": 2,
+            "added": 1,
+            "changed": 0,
+            "removed": 1,
+            "tombstone": 1,
+            "hard_delete": 0,
+            "unknown_delete": 0,
+        },
+    ]
 
 
 def test_changelog_records_delete_type_for_removed_records(tmp_path: Path) -> None:

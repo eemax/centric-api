@@ -130,5 +130,5 @@ For dashboard-style queries, changelog also writes field-level rows and compact 
 `endpoint_actor_field_change_summary`. SQLite also exposes stable dashboard views:
 `dashboard_latest_fetch_runs`, `dashboard_endpoint_state`, `dashboard_recent_changes`,
 `dashboard_actor_activity`, `dashboard_download_jobs`, `dashboard_bundle_runs`, and
-`dashboard_bundle_file_changes`. Use `centric-api changelog fields` and
-`centric-api changelog actors` for quick aggregate views.
+`dashboard_bundle_file_changes`. Use `centric-api changelog fields`,
+`centric-api changelog actors`, and `centric-api changelog leaderboard` for quick aggregate views.
