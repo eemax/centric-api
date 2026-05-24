@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Centric API fetch hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5m
+Unit=centric-api-fetch.service
+
+[Install]
+WantedBy=timers.target

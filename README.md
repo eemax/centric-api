@@ -10,6 +10,7 @@ Docs:
 
 - [CLI reference](docs/cli.md)
 - [Configuration](docs/configuration.md)
+- [Deployment](docs/deployment.md)
 - [Operations](docs/operations.md)
 - [View exports](docs/views.md)
 
@@ -51,7 +52,8 @@ checkpoint/resume internals, or `--log-level off` to disable the log.
 `cron` runs in the foreground until stopped and defaults to hourly (`0 * * * *`). It prints
 scheduler lifecycle messages and concise fetch summaries to the terminal, runs fetch in quiet JSON
 mode, and writes JSONL-only records to `~/.centric-api/logs/cron.jsonl`. Fetch runs are serialized
-with `~/.centric-api/fetch.lock`.
+with `~/.centric-api/fetch.lock`. For unattended Linux servers, prefer the systemd timer examples in
+[Deployment](docs/deployment.md).
 
 `download` selects document records from the local SQLite cache and downloads each selected
 document's `latest_revision` through `document_revisions/{revision_id}/download`. Source endpoint

@@ -1,0 +1,13 @@
+[Unit]
+Description=Centric API fetch
+Documentation=file:/opt/centric-api/docs/deployment.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=centric-api
+Group=centric-api
+EnvironmentFile=/etc/centric-api/centric-api.env
+WorkingDirectory=/opt/centric-api
+ExecStart=/opt/centric-api/.venv/bin/centric-api fetch

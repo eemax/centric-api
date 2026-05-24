@@ -57,6 +57,10 @@ Important behavior:
 
 Fetch exits nonzero when any selected endpoint fails or when the ingest/changelog pipeline fails.
 
+For unattended Linux fetches, use the systemd timer examples in [Deployment](deployment.md). The
+built-in `cron` command is useful for foreground scheduling, but systemd is the recommended
+background scheduler on Linux.
+
 ## Changelog
 
 Changelog stores record-level events and field-level details:
