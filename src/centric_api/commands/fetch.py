@@ -4,6 +4,7 @@ import argparse
 import calendar
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -41,6 +42,8 @@ from ..rendering.logs import LogCallback, build_log_callback
 from ..schema import load_endpoint_schemas
 from ..store import IngestResult, ingest_raw_dir
 from .common import release_fetch_lock, try_acquire_fetch_lock, utc_iso, utc_now
+
+PipelineProgressCallback = Callable[[str], None]
 
 
 def run_fetch(args: argparse.Namespace) -> int:
@@ -127,6 +130,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     results: list[FetchRunResult] = []
     failures: list[tuple[str, str]] = []
     endpoint_records: list[dict[str, Any]] = []
+    pipeline_progress = None if args.quiet or args.json else _write_pipeline_progress
     try:
         with init_auth_context(
             auth_settings,
@@ -267,6 +271,8 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             fetch_log_file.close()
         raise
 
+    _emit_pipeline_progress(pipeline_progress, "Pipeline...")
+    _emit_pipeline_progress(pipeline_progress, "Writing run manifest...")
     manifest_path = write_run_manifest(
         output_dir=fetcher_cfg.output_dir,
         run_id=run_id,
@@ -286,6 +292,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     pipeline_error: str | None = None
     if results:
         db_path = resolve_db_path(args.db)
+        _emit_pipeline_progress(pipeline_progress, "Ingesting fetched records...")
         schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
         ingest_result = ingest_raw_dir(fetcher_cfg.output_dir, db_path, schemas=schemas)
         if log_callback:
@@ -303,7 +310,12 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                 }
             )
         try:
-            changelog_run, changelog_skipped = _run_changelog_after_ingest(db_path, ingest_result)
+            _emit_pipeline_progress(pipeline_progress, "Updating changelog...")
+            changelog_run, changelog_skipped = _run_changelog_after_ingest(
+                db_path,
+                ingest_result,
+                progress=_indented_pipeline_progress(pipeline_progress),
+            )
         except Exception as exc:
             pipeline_error = f"changelog failed after ingest: {exc}"
             if log_callback:
@@ -315,6 +327,11 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     }
                 )
         else:
+            if changelog_skipped:
+                _emit_pipeline_progress(
+                    pipeline_progress,
+                    f"Changelog skipped: {changelog_skipped}.",
+                )
             if log_callback:
                 if changelog_run is not None:
                     log_callback(
@@ -439,6 +456,8 @@ def _apply_modified_since_filter(spec: EndpointSpec, modified_since: str) -> End
 def _run_changelog_after_ingest(
     db_path: Path,
     ingest_result: IngestResult,
+    *,
+    progress: PipelineProgressCallback | None = None,
 ) -> tuple[ChangelogRun | None, str | None]:
     changed_endpoints = set(ingest_result.changed_record_ids_by_endpoint)
     if not changed_endpoints:
@@ -456,6 +475,7 @@ def _run_changelog_after_ingest(
                 for endpoint, record_ids in ingest_result.deleted_record_ids_by_endpoint.items()
             },
             deleted_record_delete_types_by_endpoint=ingest_result.deleted_record_delete_types_by_endpoint,
+            progress=progress,
         ),
         None,
     )
@@ -485,3 +505,27 @@ def _run_id(value: datetime, mode: str, amount: int | None) -> str:
     if mode in {"days", "months"} and amount is not None:
         return f"{base}-{mode}{amount}"
     return f"{base}-{mode}"
+
+
+def _write_pipeline_progress(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def _emit_pipeline_progress(
+    progress: PipelineProgressCallback | None,
+    message: str,
+) -> None:
+    if progress is not None:
+        progress(message)
+
+
+def _indented_pipeline_progress(
+    progress: PipelineProgressCallback | None,
+) -> PipelineProgressCallback | None:
+    if progress is None:
+        return None
+
+    def emit(message: str) -> None:
+        progress(f"  {message}")
+
+    return emit

@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from centric_api.changelog import record_changelog
+from centric_api.changelog import ChangelogRun, record_changelog
 from centric_api.cli import main
 from centric_api.cli_parser import build_parser
 from centric_api.commands.common import (
@@ -15,10 +15,11 @@ from centric_api.commands.common import (
     try_acquire_fetch_lock,
 )
 from centric_api.commands.cron import run_cron_fetch_once
+from centric_api.models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
 from centric_api.rendering.changelog import print_human_changelog_changes
 from centric_api.rendering.logs import render_log_line
 from centric_api.runtime_io import parse_jsonl
-from centric_api.store import connect
+from centric_api.store import IngestResult, connect
 
 
 def test_cli_help_commands(capsys) -> None:
@@ -502,6 +503,39 @@ def test_fetch_delta_dry_run_skips_lock_and_log(tmp_path, monkeypatch, capsys) -
     assert '"status": "delta_dry_run"' in output
     assert lock_path.exists()
     assert not (tmp_path / "logs" / "fetch.log").exists()
+
+
+def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsys) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db")])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Fetch Complete" in captured.out
+    assert "Pipeline..." in captured.err
+    assert "Writing run manifest..." in captured.err
+    assert "Ingesting fetched records..." in captured.err
+    assert "Updating changelog..." in captured.err
+    assert "  Mode: scoped refresh" in captured.err
+    assert "  Writing changelog tables..." in captured.err
+
+
+def test_fetch_json_suppresses_post_fetch_pipeline_progress(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db"), "--json"])
+
+    captured = capsys.readouterr()
+    records = parse_jsonl(captured.out)
+    assert exit_code == 0
+    assert any(record.get("record_type") == "pipeline_summary" for record in records)
+    assert "Pipeline..." not in captured.err
+    assert "Updating changelog..." not in captured.err
 
 
 def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
@@ -1068,6 +1102,88 @@ def _insert_endpoint_record(
             "2026-01-01T00:00:00Z",
         ],
     )
+
+
+def _patch_fetch_pipeline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    endpoint = EndpointSpec(
+        name="styles",
+        api_version="v2",
+        path="styles",
+        count_spec=CountSpec(path="count/Style"),
+    )
+    fetcher_cfg = FetcherConfig(
+        base_url="https://centric.example.com",
+        output_dir=tmp_path / "raw",
+        checkpoint_dir=tmp_path / "checkpoints",
+    )
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.load_fetcher_settings",
+        lambda _path: (fetcher_cfg, AuthSettings(timeout=1), [endpoint]),
+    )
+
+    class Auth:
+        base_url = "https://centric.example.com"
+        timeout = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.init_auth_context",
+        lambda *_args, **_kwargs: Auth(),
+    )
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.run_endpoint",
+        lambda *_args, **_kwargs: FetchRunResult(
+            endpoint="styles",
+            pages_fetched=1,
+            items_fetched=1,
+            expected_count=1,
+            retries_used=0,
+            start_skip=0,
+            next_skip=50,
+            duration_seconds=0.1,
+            output_file=tmp_path / "raw" / "styles.jsonl",
+            checkpoint_file=tmp_path / "checkpoints" / "styles.json",
+            id_validation_checked_items=1,
+            id_validation_unique_ids=1,
+        ),
+    )
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.ingest_raw_dir",
+        lambda *_args, **_kwargs: IngestResult(
+            applied_files=1,
+            skipped_files=0,
+            records_read=1,
+            records_upserted=1,
+            records_deleted=0,
+            records_hard_deleted=0,
+            invalid_records=0,
+            endpoints={"styles": 1},
+            upserted_record_ids_by_endpoint={"styles": ("S1",)},
+            deleted_record_ids_by_endpoint={},
+            deleted_record_delete_types_by_endpoint={},
+        ),
+    )
+
+    def fake_record_changelog(*_args, progress=None, **_kwargs):
+        if progress is not None:
+            progress("Mode: scoped refresh")
+            progress("Writing changelog tables...")
+        return ChangelogRun(
+            run_id="changelog-1",
+            endpoint_count=1,
+            record_count=1,
+            event_count=1,
+            full_refresh=False,
+            scoped_record_count=1,
+        )
+
+    monkeypatch.setattr("centric_api.commands.fetch.record_changelog", fake_record_changelog)
 
 
 def _insert_bundle_item(
