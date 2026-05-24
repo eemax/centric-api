@@ -28,6 +28,7 @@ uv run centric-api bundle list
 uv run centric-api bundle show 2026-05-20T031422Z-style-bundle
 uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
 uv run centric-api view list
+uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
 uv run centric-api status
 uv run centric-api doctor

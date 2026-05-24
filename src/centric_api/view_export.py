@@ -16,14 +16,32 @@ from .view_config import ViewColumn, ViewConfig, ViewDefinition, ViewFilter, Vie
 ExportFormat = Literal["xlsx", "csv"]
 SUPPORTED_EXPORT_FORMATS = {"xlsx", "csv"}
 HEADER_ROW_HEIGHT = 18
+MISSING_JOIN_SAMPLE_LIMIT = 10
+
+
+@dataclass(frozen=True)
+class MissingJoinDetail:
+    alias: str
+    endpoint: str
+    from_path: str
+    to_path: str
+    missing_count: int
+    missing_source_count: int
+    missing_ref_count: int
+    filtered_out_count: int
+    missing_endpoint: bool
+    filters_applied: bool
+    sample_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class ViewMaterialized:
+    root_row_count: int
     headers: tuple[str, ...]
     columns: tuple[ViewColumn, ...]
     rows: tuple[tuple[Any, ...], ...]
     missing_join_count: int
+    missing_join_details: tuple[MissingJoinDetail, ...]
     warnings: tuple[str, ...]
 
 
@@ -36,6 +54,19 @@ class ViewExportResult:
     row_count: int
     column_count: int
     missing_join_count: int
+    missing_join_details: tuple[MissingJoinDetail, ...]
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ViewCheckResult:
+    view_name: str
+    title: str
+    root_row_count: int
+    row_count: int
+    column_count: int
+    missing_join_count: int
+    missing_join_details: tuple[MissingJoinDetail, ...]
     warnings: tuple[str, ...]
 
 
@@ -45,9 +76,8 @@ def materialize_view(db_path: Path, view: ViewDefinition) -> ViewMaterialized:
             raise ConfigError("View export requires endpoint_records. Run centric-api fetch first.")
         records_by_endpoint = _load_records_by_endpoint(conn, _view_endpoints(view))
     indexes = _build_join_indexes(view, records_by_endpoint)
-    contexts: list[dict[str, Any]] = [
-        {view.root.alias: record} for record in records_by_endpoint.get(view.root.endpoint, [])
-    ]
+    root_records = records_by_endpoint.get(view.root.endpoint, [])
+    contexts: list[dict[str, Any]] = [{view.root.alias: record} for record in root_records]
     available_aliases = {view.root.alias}
     pending_filters = list(view.filters)
     contexts, pending_filters = _apply_available_filters(
@@ -56,16 +86,20 @@ def materialize_view(db_path: Path, view: ViewDefinition) -> ViewMaterialized:
         available_aliases,
     )
     missing_join_count = 0
+    missing_join_details: list[MissingJoinDetail] = []
     warnings: list[str] = []
     for join in view.joins:
-        contexts, missing_count = _apply_join(
+        contexts, detail = _apply_join(
             contexts,
             join,
             indexes[(join.alias, join.to_path)],
+            endpoint_record_count=len(records_by_endpoint.get(join.endpoint, [])),
             view=view,
             warnings=warnings,
         )
-        missing_join_count += missing_count
+        missing_join_count += detail.missing_count
+        if detail.missing_count:
+            missing_join_details.append(detail)
         available_aliases.add(join.alias)
         contexts, pending_filters = _apply_available_filters(
             contexts,
@@ -78,11 +112,27 @@ def materialize_view(db_path: Path, view: ViewDefinition) -> ViewMaterialized:
         ]
     rows = tuple(_materialized_row(context, view) for context in contexts)
     return ViewMaterialized(
+        root_row_count=len(root_records),
         headers=tuple(column.header for column in view.columns),
         columns=view.columns,
         rows=rows,
         missing_join_count=missing_join_count,
+        missing_join_details=tuple(missing_join_details),
         warnings=tuple(warnings),
+    )
+
+
+def check_view(db_path: Path, view: ViewDefinition) -> ViewCheckResult:
+    materialized = materialize_view(db_path, view)
+    return ViewCheckResult(
+        view_name=view.name,
+        title=view.title,
+        root_row_count=materialized.root_row_count,
+        row_count=len(materialized.rows),
+        column_count=len(materialized.headers),
+        missing_join_count=materialized.missing_join_count,
+        missing_join_details=materialized.missing_join_details,
+        warnings=materialized.warnings,
     )
 
 
@@ -114,6 +164,7 @@ def export_view(
         row_count=len(materialized.rows),
         column_count=len(materialized.headers),
         missing_join_count=materialized.missing_join_count,
+        missing_join_details=materialized.missing_join_details,
         warnings=materialized.warnings,
     )
 
@@ -183,15 +234,21 @@ def _apply_join(
     join: ViewJoin,
     index: dict[str, list[dict[str, Any]]],
     *,
+    endpoint_record_count: int,
     view: ViewDefinition,
     warnings: list[str],
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], MissingJoinDetail]:
     output: list[dict[str, Any]] = []
     missing_count = 0
+    missing_source_count = 0
+    missing_ref_count = 0
+    filtered_out_count = 0
+    sample_keys: list[str] = []
     policy = join.missing or view.options.missing
     for context in contexts:
         keys = _join_keys(_context_value(context, join.from_path))
-        matches = _unique_records(record for key in keys for record in index.get(key, []))
+        raw_matches = _unique_records(record for key in keys for record in index.get(key, []))
+        matches = raw_matches
         if join.filters:
             matches = [
                 match
@@ -200,6 +257,13 @@ def _apply_join(
             ]
         if not matches:
             missing_count += 1
+            if not keys:
+                missing_source_count += 1
+            elif raw_matches:
+                filtered_out_count += 1
+            else:
+                missing_ref_count += 1
+            _append_sample_keys(sample_keys, keys)
             if policy == "error":
                 raise ConfigError(
                     f"view {view.name!r} missing join {join.alias!r} from {join.from_path!r}."
@@ -220,7 +284,19 @@ def _apply_join(
             output.append({**context, join.alias: matches})
         else:
             output.extend({**context, join.alias: match} for match in matches)
-    return output, missing_count
+    return output, MissingJoinDetail(
+        alias=join.alias,
+        endpoint=join.endpoint,
+        from_path=join.from_path,
+        to_path=join.to_path,
+        missing_count=missing_count,
+        missing_source_count=missing_source_count,
+        missing_ref_count=missing_ref_count,
+        filtered_out_count=filtered_out_count,
+        missing_endpoint=endpoint_record_count == 0,
+        filters_applied=bool(join.filters),
+        sample_keys=tuple(sample_keys),
+    )
 
 
 def _apply_available_filters(
@@ -380,6 +456,17 @@ def _join_keys(value: Any) -> list[str]:
         if text and text != "centric:":
             keys.append(text)
     return sorted(set(keys))
+
+
+def _append_sample_keys(samples: list[str], keys: list[str]) -> None:
+    if len(samples) >= MISSING_JOIN_SAMPLE_LIMIT:
+        return
+    for key in keys:
+        if key in samples:
+            continue
+        samples.append(key)
+        if len(samples) >= MISSING_JOIN_SAMPLE_LIMIT:
+            return
 
 
 def _flatten_values(value: Any) -> list[Any]:

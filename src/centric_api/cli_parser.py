@@ -117,6 +117,12 @@ def build_parser() -> argparse.ArgumentParser:
     view_show_parser.add_argument("--view-config", default=None)
     view_show_parser.add_argument("--json", action="store_true")
 
+    view_check_parser = view_actions.add_parser("check", help="Check a configured view")
+    view_check_parser.add_argument("name")
+    view_check_parser.add_argument("--view-config", default=None)
+    view_check_parser.add_argument("--db", default=None)
+    view_check_parser.add_argument("--json", action="store_true")
+
     view_export_parser = view_actions.add_parser("export", help="Export a configured view")
     view_export_parser.add_argument("name")
     view_export_parser.add_argument("--view-config", default=None)

@@ -4,7 +4,7 @@ import json
 from typing import Any
 
 from ..view_config import ViewDefinition
-from ..view_export import ViewExportResult
+from ..view_export import ViewCheckResult, ViewExportResult
 from .common import format_count
 
 
@@ -57,6 +57,25 @@ def export_record(result: ViewExportResult) -> dict[str, Any]:
         "rows": result.row_count,
         "columns": result.column_count,
         "missing_joins": result.missing_join_count,
+        "missing_join_details": [
+            _missing_join_detail_record(item) for item in result.missing_join_details
+        ],
+        "warnings": list(result.warnings),
+    }
+
+
+def check_record(result: ViewCheckResult) -> dict[str, Any]:
+    return {
+        "view": result.view_name,
+        "title": result.title,
+        "ok": result.missing_join_count == 0 and not result.warnings,
+        "rows_scanned": result.root_row_count,
+        "rows_projected": result.row_count,
+        "columns": result.column_count,
+        "missing_joins": result.missing_join_count,
+        "missing_join_details": [
+            _missing_join_detail_record(item) for item in result.missing_join_details
+        ],
         "warnings": list(result.warnings),
     }
 
@@ -135,17 +154,89 @@ def print_human_view_export(result: ViewExportResult) -> None:
     print()
     print(f"Rows:          {format_count(result.row_count)}")
     print(f"Columns:       {format_count(result.column_count)}")
-    print(f"Missing joins: {format_count(result.missing_join_count)}")
     print(f"Format:        {result.format}")
     print(f"File:          {result.output_path}")
+    _print_missing_join_details(result.missing_join_details, result.missing_join_count)
     if result.warnings:
+        _print_warnings(result.warnings)
+
+
+def print_human_view_check(result: ViewCheckResult) -> None:
+    print(f"View check: {result.view_name}")
+    print()
+    print(f"Rows scanned:   {format_count(result.root_row_count)}")
+    print(f"Rows projected: {format_count(result.row_count)}")
+    print(f"Columns:        {format_count(result.column_count)}")
+    status = "ok" if result.missing_join_count == 0 and not result.warnings else "attention needed"
+    print(f"Status:         {status}")
+    _print_missing_join_details(result.missing_join_details, result.missing_join_count)
+    if result.warnings:
+        _print_warnings(result.warnings)
+
+
+def _print_missing_join_details(details: tuple[Any, ...], missing_count: int) -> None:
+    if not details:
+        return
+    print()
+    print(f"Missing refs: {format_count(missing_count)}")
+    for item in details:
         print()
-        print("Warnings")
-        for warning in result.warnings[:10]:
-            print(f"  {warning}")
-        hidden_count = len(result.warnings) - 10
-        if hidden_count > 0:
-            print(f"  ... {hidden_count} more warning{'' if hidden_count == 1 else 's'}")
+        print(f"  {item.alias} -> {item.endpoint}")
+        print(f"    join:    {_missing_join_path(item)}")
+        print(f"    missing: {_missing_join_summary(item)}")
+        for category in _missing_join_extra_categories(item):
+            print(f"    {category}")
+        if item.missing_endpoint:
+            print(f"    endpoint cache empty: fetch {item.endpoint}")
+        if item.sample_keys and item.missing_ref_count:
+            print(f"    samples: {', '.join(item.sample_keys[:3])}")
+        if item.filters_applied and item.filtered_out_count:
+            print("    join filters excluded some matching records")
+
+
+def _print_warnings(warnings: tuple[str, ...]) -> None:
+    print()
+    print("Warnings")
+    for warning in warnings[:10]:
+        print(f"  {warning}")
+    hidden_count = len(warnings) - 10
+    if hidden_count > 0:
+        print(f"  ... {hidden_count} more warning{'' if hidden_count == 1 else 's'}")
+
+
+def _missing_join_path(item: Any) -> str:
+    return f"{item.from_path} -> {item.to_path}"
+
+
+def _missing_join_summary(item: Any) -> str:
+    if item.missing_ref_count == item.missing_count:
+        return f"{format_count(item.missing_ref_count)} refs"
+    if item.missing_source_count == item.missing_count:
+        return f"{format_count(item.missing_source_count)} blank source values"
+    if item.filtered_out_count == item.missing_count:
+        return f"{format_count(item.filtered_out_count)} filtered out"
+    return f"{format_count(item.missing_count)} joins"
+
+
+def _missing_join_extra_categories(item: Any) -> list[str]:
+    populated_categories = sum(
+        bool(value)
+        for value in (
+            item.missing_ref_count,
+            item.missing_source_count,
+            item.filtered_out_count,
+        )
+    )
+    if populated_categories <= 1:
+        return []
+    categories = []
+    if item.missing_ref_count:
+        categories.append(f"refs:    {format_count(item.missing_ref_count)}")
+    if item.missing_source_count:
+        categories.append(f"blanks:  {format_count(item.missing_source_count)} source values")
+    if item.filtered_out_count:
+        categories.append(f"filters: {format_count(item.filtered_out_count)} excluded")
+    return categories
 
 
 def _filter_record(item: Any) -> dict[str, Any]:
@@ -163,6 +254,22 @@ def _filter_record(item: Any) -> dict[str, Any]:
     elif item.operator in {"gt", "gte", "lt", "lte"}:
         payload[item.operator] = getattr(item, item.operator)
     return payload
+
+
+def _missing_join_detail_record(item: Any) -> dict[str, Any]:
+    return {
+        "alias": item.alias,
+        "endpoint": item.endpoint,
+        "from": item.from_path,
+        "to": item.to_path,
+        "missing": item.missing_count,
+        "missing_source_values": item.missing_source_count,
+        "missing_refs": item.missing_ref_count,
+        "filtered_out": item.filtered_out_count,
+        "missing_endpoint": item.missing_endpoint,
+        "filters_applied": item.filters_applied,
+        "sample_keys": list(item.sample_keys),
+    }
 
 
 def _filter_label(item: Any) -> str:

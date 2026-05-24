@@ -7,14 +7,16 @@ from pathlib import Path
 from ..defaults import db_path as resolve_db_path
 from ..rendering.common import print_rows
 from ..rendering.view import (
+    check_record,
     export_record,
+    print_human_view_check,
     print_human_view_export,
     print_human_view_list,
     print_human_view_show,
     view_record,
 )
 from ..view_config import load_view_config, select_view
-from ..view_export import export_view, infer_export_format
+from ..view_export import check_view, export_view, infer_export_format
 
 
 def run_view(args: argparse.Namespace) -> int:
@@ -33,6 +35,14 @@ def run_view(args: argparse.Namespace) -> int:
             print(json.dumps(payload, default=str))
         else:
             print_human_view_show(view)
+        return 0
+
+    if args.action == "check":
+        result = check_view(resolve_db_path(args.db), view)
+        if args.json:
+            print(json.dumps(check_record(result), default=str))
+        else:
+            print_human_view_check(result)
         return 0
 
     output_path = Path(args.output).expanduser() if args.output else None

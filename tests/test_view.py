@@ -273,6 +273,28 @@ def test_view_cli_list_show_and_export_json(tmp_path: Path, capsys) -> None:
         main(
             [
                 "view",
+                "check",
+                "bom-lines",
+                "--view-config",
+                str(config_path),
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+    check_payload = json.loads(capsys.readouterr().out)
+    assert check_payload["view"] == "bom-lines"
+    assert check_payload["ok"] is True
+    assert check_payload["rows_scanned"] == 2
+    assert check_payload["rows_projected"] == 2
+    assert check_payload["missing_join_details"] == []
+
+    assert (
+        main(
+            [
+                "view",
                 "export",
                 "bom-lines",
                 "--view-config",
@@ -290,24 +312,41 @@ def test_view_cli_list_show_and_export_json(tmp_path: Path, capsys) -> None:
     assert payload["view"] == "bom-lines"
     assert payload["format"] == "csv"
     assert payload["rows"] == 2
+    assert payload["missing_join_details"] == []
     assert output_path.is_file()
 
 
 def test_view_missing_join_defaults_to_blank(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
-        _insert_record(
-            conn,
-            endpoint="bom_lines",
-            record_id="BL1",
-            payload={"id": "BL1", "style": "MISSING"},
-        )
+        for index in range(12):
+            _insert_record(
+                conn,
+                endpoint="bom_lines",
+                record_id=f"BL{index:02d}",
+                payload={"id": f"BL{index:02d}", "style": f"MISSING{index:02d}"},
+            )
     config = load_view_config(_view_config(tmp_path))
     view = select_view(config, "bom-lines")
 
     materialized = materialize_view(db_path, view)
 
-    assert materialized.missing_join_count == 4
+    assert materialized.missing_join_count == 48
+    assert [
+        (item.alias, item.endpoint, item.missing_count)
+        for item in materialized.missing_join_details
+    ] == [
+        ("style", "styles", 12),
+        ("colorway", "colorways", 12),
+        ("season", "seasons", 12),
+        ("supplier", "suppliers", 12),
+    ]
+    assert materialized.missing_join_details[0].missing_ref_count == 12
+    assert materialized.missing_join_details[0].missing_endpoint is True
+    assert materialized.missing_join_details[0].sample_keys == tuple(
+        f"MISSING{index:02d}" for index in range(10)
+    )
+    assert materialized.missing_join_details[1].missing_source_count == 12
     assert materialized.rows[0][1:5] == (None, None, None, None)
 
 

@@ -13,8 +13,8 @@ command:
   `bundle list --json`, and `view list --json` emit JSON Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `bundle run --json`, `bundle show --json`, `bundle changelog --json`, `status --json`,
-  `doctor --json`, `rebuild-db --json`, `view show --json`, and `view export --json` emit one JSON
-  object.
+  `doctor --json`, `rebuild-db --json`, `view show --json`, `view check --json`, and
+  `view export --json` emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used.
 
@@ -165,6 +165,7 @@ Non-dry-run bundle runs use `CENTRIC_API_HOME/bundle.lock`, write run artifacts 
 ```bash
 uv run centric-api view list
 uv run centric-api view show style-colorways-demo
+uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
 uv run centric-api view export style-colorways-demo --format csv
 uv run centric-api view export style-colorways-demo --output ~/Desktop/style-colorways.xlsx
@@ -173,6 +174,10 @@ uv run centric-api view export style-colorways-demo --output ~/Desktop/style-col
 `view export` writes flat XLSX or CSV tables from local cached endpoint records. It does not call the
 Centric API. The root endpoint plus any `many_expand` joins define row grain; supplementary arrays
 should use `many_concat`. Filters live in the view schema and can reference root or joined aliases.
+When joins cannot resolve, the export summary includes a per-join breakdown with the joined
+endpoint, join paths, missing counts, and sample reference keys.
+Use `view check NAME` to run the same materialization and reference diagnostics without writing a
+file.
 
 Options:
 

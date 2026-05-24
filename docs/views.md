@@ -12,6 +12,7 @@ worksheets, and QA extracts. Use `bundle` when you need to package downloaded do
 ```bash
 uv run centric-api view list
 uv run centric-api view show style-colorways-demo
+uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
 uv run centric-api view export style-colorways-demo --format csv
 uv run centric-api view export style-colorways-demo --output ~/Desktop/style-colorways.xlsx
@@ -227,6 +228,15 @@ Missing behavior:
 - `error`: fail the export.
 
 Default missing behavior is `blank`.
+
+Exports report missing joins in both human and JSON output. The summary includes the join alias,
+target endpoint, `from -> to` paths, counts for unresolved references, blank source values, records
+excluded by join filters, whether the target endpoint cache is empty, and a capped list of sample
+keys.
+
+Use `view check NAME` before exporting to run the same row materialization and missing-reference
+diagnostics without writing a file. `view check --json` includes an `ok` boolean plus scanned and
+projected row counts for automation.
 
 ## Filters
 
