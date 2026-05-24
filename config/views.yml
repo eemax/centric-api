@@ -1,0 +1,72 @@
+version: 1
+output_dir: exports
+
+options:
+  missing: blank
+  many_separator: ", "
+  freeze_header: true
+  autofilter: true
+  autosize: true
+
+views:
+  - name: style-colorways-demo
+    title: Style Colorways Demo
+    root:
+      endpoint: styles
+      as: style
+    joins:
+      - as: colorway
+        endpoint: colorways
+        from: style.id
+        to: style
+        relationship: many_expand
+        missing: drop
+        filters:
+          - path: colorway.active
+            equals: true
+      - as: season
+        endpoint: seasons
+        from: style.parent_season
+        to: id
+        relationship: one
+      - as: collection
+        endpoint: collections
+        from: style.collection
+        to: id
+        relationship: one
+    filters:
+      - path: style.active
+        equals: true
+    columns:
+      - header: Style ID
+        path: style.id
+        type: text
+        width: 24
+      - header: Style Code
+        path: style.code
+        type: text
+      - header: Style
+        path: style.node_name
+        type: text
+        width: 36
+      - header: Season
+        path: season.node_name
+        type: text
+      - header: Collection
+        path: collection.node_name
+        type: text
+      - header: Colorway ID
+        path: colorway.id
+        type: text
+        width: 24
+      - header: Colorway Code
+        path: colorway.code
+        type: text
+      - header: Colorway
+        path: colorway.node_name
+        type: text
+        width: 28
+      - header: Modified
+        path: style._modified_at
+        type: datetime
+        width: 22

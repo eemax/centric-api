@@ -10,10 +10,11 @@ command:
 
 - `fetch --json`, `changelog --json`, `changelog fields --json`, `changelog actors --json`,
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
-  `bundle list --json` emit JSON Lines.
+  `bundle list --json`, and `view list --json` emit JSON Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `bundle run --json`, `bundle show --json`, `bundle changelog --json`, `status --json`,
-  `doctor --json`, and `rebuild-db --json` emit one JSON object.
+  `doctor --json`, `rebuild-db --json`, `view show --json`, and `view export --json` emit one JSON
+  object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used.
 
@@ -158,6 +159,31 @@ History commands:
 
 Non-dry-run bundle runs use `CENTRIC_API_HOME/bundle.lock`, write run artifacts under
 `bundles/runs`, create zips under `bundles/` by default, and track state in `bundle_*` SQLite tables.
+
+## View Exports
+
+```bash
+uv run centric-api view list
+uv run centric-api view show style-colorways-demo
+uv run centric-api view export style-colorways-demo
+uv run centric-api view export style-colorways-demo --format csv
+uv run centric-api view export style-colorways-demo --output ~/Desktop/style-colorways.xlsx
+```
+
+`view export` writes flat XLSX or CSV tables from local cached endpoint records. It does not call the
+Centric API. The root endpoint plus any `many_expand` joins define row grain; supplementary arrays
+should use `many_concat`. Filters live in the view schema and can reference root or joined aliases.
+
+Options:
+
+- `--view-config PATH`: default resolution is private `CENTRIC_API_HOME/views.yml`, then
+  `config/views.yml`.
+- `--db PATH`: SQLite cache to read.
+- `--format xlsx|csv`: output format. Defaults to `xlsx`, or is inferred from `--output`.
+- `--output PATH`: output file path. Defaults to `CENTRIC_API_HOME/exports/{view}-{timestamp}.xlsx`.
+- `--json`: machine-readable output.
+
+See [View exports](views.md) for the schema contract and authoring rules.
 
 ## Status And Doctor
 

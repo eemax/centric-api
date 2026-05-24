@@ -105,6 +105,26 @@ def build_parser() -> argparse.ArgumentParser:
     bundle_changelog_parser.add_argument("--db", default=None)
     bundle_changelog_parser.add_argument("--json", action="store_true")
 
+    view_parser = subparsers.add_parser("view", help="Export configured tabular cache views")
+    view_actions = view_parser.add_subparsers(dest="action", required=True)
+
+    view_list_parser = view_actions.add_parser("list", help="List configured views")
+    view_list_parser.add_argument("--view-config", default=None)
+    view_list_parser.add_argument("--json", action="store_true")
+
+    view_show_parser = view_actions.add_parser("show", help="Show one configured view")
+    view_show_parser.add_argument("name")
+    view_show_parser.add_argument("--view-config", default=None)
+    view_show_parser.add_argument("--json", action="store_true")
+
+    view_export_parser = view_actions.add_parser("export", help="Export a configured view")
+    view_export_parser.add_argument("name")
+    view_export_parser.add_argument("--view-config", default=None)
+    view_export_parser.add_argument("--db", default=None)
+    view_export_parser.add_argument("--format", choices=["xlsx", "csv"], default=None)
+    view_export_parser.add_argument("--output", default=None)
+    view_export_parser.add_argument("--json", action="store_true")
+
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
     cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
     cron_parser.add_argument("--run-now", action="store_true")

@@ -15,6 +15,7 @@ locks, raw evidence, downloads, bundles, and the default SQLite database.
 | Endpoint schema | `config/endpoint-schema.yml` plus private overlay when present | `CENTRIC_API_HOME/endpoint-schema.yml` | `--schema` |
 | Download config | `config/download.yml` | `CENTRIC_API_HOME/download.yml` | `--download-config` |
 | Bundle config | `config/bundle.yml` | `CENTRIC_API_HOME/bundle.yml` | `--bundle-config` |
+| View config | `config/views.yml` | `CENTRIC_API_HOME/views.yml` | `--view-config` |
 
 Relative runtime paths inside configs resolve under `CENTRIC_API_HOME`. Absolute paths and `~` are
 respected.
@@ -213,3 +214,40 @@ Layout options:
 Archive paths use the shape `files/{source_endpoint}/{source_label}/{filename}`. If the same
 document is referenced by multiple source objects, the bundle includes one copy under each source
 object folder.
+
+## View Config
+
+View configs use version `1` and reject unknown keys. They define flat spreadsheet views over cached
+endpoint records:
+
+```yaml
+version: 1
+output_dir: exports
+
+views:
+  - name: bom-lines
+    title: BOM Lines
+    root:
+      endpoint: bom_lines
+      as: bom_line
+    joins:
+      - as: style
+        endpoint: styles
+        from: bom_line.style
+        to: id
+        relationship: one
+    filters:
+      - path: style.active
+        equals: true
+    columns:
+      - header: BOM Line ID
+        path: bom_line.id
+        type: text
+      - header: Style
+        path: style.node_name
+        type: text
+```
+
+Use `docs/views.md` as the full schema reference. The core rule is that the root plus one linear
+`many_expand` chain define row grain; other arrays should be `many_concat`. Filters can live on joins
+or on the final view and can reference joined aliases.

@@ -21,6 +21,7 @@ Common paths:
 | `downloads/runs/` | download run manifests |
 | `bundles/runs/` | bundle manifests and changelogs |
 | `bundles/*.zip` | bundle zip archives |
+| `exports/` | view export XLSX and CSV files |
 | `logs/fetch.log` | human-readable fetch log |
 | `logs/download.log` | human-readable download log |
 | `logs/cron.jsonl` | cron JSONL log |
@@ -120,6 +121,15 @@ Bundle state is tracked in:
 Bundle changelog compares bundle runs from the same bundle and reports added, changed, renamed,
 removed, and unchanged files. Renames are detected by stable bundle item identity, not just archive
 path.
+
+## View Exports
+
+View exports read `endpoint_records` and write XLSX or CSV files. They are local and read-only: no
+API calls, locks, or SQLite writes are performed.
+
+The schema root plus any `many_expand` joins define row grain. `many_concat` joins preserve row grain
+by joining multiple values into one cell. Schema filters can trim joined records or final rows.
+Exports default to `exports/{view}-{timestamp}.xlsx` under `CENTRIC_API_HOME`.
 
 ## Status And Doctor
 

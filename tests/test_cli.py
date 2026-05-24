@@ -32,6 +32,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "cron" in output
     assert "download" in output
     assert "bundle" in output
+    assert "view" in output
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:

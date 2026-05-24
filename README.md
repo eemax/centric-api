@@ -1,7 +1,7 @@
 # centric-api
 
-Centric API local data toolkit: fetch, cache, changelog, download, and bundle Centric records and
-documents.
+Centric API local data toolkit: fetch, cache, changelog, download, bundle, and export Centric
+records and documents.
 
 Runtime state is stored in `~/.centric-api` by default. Set `CENTRIC_API_HOME` to use a different
 directory.
@@ -11,6 +11,7 @@ Docs:
 - [CLI reference](docs/cli.md)
 - [Configuration](docs/configuration.md)
 - [Operations](docs/operations.md)
+- [View exports](docs/views.md)
 
 ```bash
 uv run centric-api fetch
@@ -26,6 +27,8 @@ uv run centric-api bundle --job ss26-style-techpacks
 uv run centric-api bundle list
 uv run centric-api bundle show 2026-05-20T031422Z-style-bundle
 uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
+uv run centric-api view list
+uv run centric-api view export style-colorways-demo
 uv run centric-api status
 uv run centric-api doctor
 uv run centric-api rebuild-db --yes
@@ -88,6 +91,11 @@ Bundle run IDs are timestamp-based and are the precise anchor for distribution s
 inspect one, and `centric-api bundle changelog FROM_BUNDLE_RUN_ID` to compare a received bundle
 against the latest later run of the same bundle. Pass `--to BUNDLE_RUN_ID` for an exact comparison
 target.
+
+`view export` turns cached endpoint records into flat XLSX or CSV tables using configured view
+schemas. The repo includes `config/views.yml` as a demo; production schemas normally live in private
+`CENTRIC_API_HOME/views.yml` or are passed with `--view-config`. Views are read-only and local: they
+do not call the Centric API.
 
 `status` gives a quick read-only overview of runtime home, DB path, locks, latest fetch/changelog,
 download, bundle, and endpoint counts. `doctor` validates local setup, config, credentials presence,
