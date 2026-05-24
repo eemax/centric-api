@@ -34,6 +34,42 @@ def test_cli_help_commands(capsys) -> None:
     assert "download" in output
     assert "bundle" in output
     assert "view" in output
+    assert "units" in output
+
+
+def test_units_cli_convert_and_normalize(capsys) -> None:
+    assert main(["units", "convert", "1500", "g", "kg"]) == 0
+    output = capsys.readouterr().out
+    assert "1500 g = 1.5 kg (mass)" in output
+
+    assert main(["units", "normalize", "sq m", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"input": "sq m", "unit": "m2", "dimension": "area"}
+
+
+def test_units_cli_uses_explicit_config(tmp_path, capsys) -> None:
+    config = tmp_path / "units.yml"
+    config.write_text(
+        """
+version: 1
+dimensions:
+  volume:
+    base: l
+    units:
+      ml:
+        factor: 0.001
+        aliases: [milliliter]
+      l:
+        factor: 1
+        aliases: [liter]
+""",
+        encoding="utf-8",
+    )
+
+    assert main(["units", "--units-config", str(config), "convert", "500", "ml", "l"]) == 0
+
+    output = capsys.readouterr().out
+    assert "500 ml = 0.5 l (volume)" in output
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:

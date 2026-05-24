@@ -131,6 +131,30 @@ def build_parser() -> argparse.ArgumentParser:
     view_export_parser.add_argument("--output", default=None)
     view_export_parser.add_argument("--json", action="store_true")
 
+    units_parser = subparsers.add_parser("units", help="Inspect and convert configured units")
+    units_parser.add_argument("--units-config", default=None)
+    units_actions = units_parser.add_subparsers(dest="action", required=True)
+
+    units_list_parser = units_actions.add_parser("list", help="List unit dimensions")
+    units_list_parser.add_argument("--json", action="store_true")
+
+    units_show_parser = units_actions.add_parser("show", help="Show one unit dimension")
+    units_show_parser.add_argument("dimension")
+    units_show_parser.add_argument("--json", action="store_true")
+
+    units_normalize_parser = units_actions.add_parser("normalize", help="Normalize a unit label")
+    units_normalize_parser.add_argument("unit")
+    units_normalize_parser.add_argument("--json", action="store_true")
+
+    units_convert_parser = units_actions.add_parser("convert", help="Convert a value between units")
+    units_convert_parser.add_argument("value")
+    units_convert_parser.add_argument("from_unit")
+    units_convert_parser.add_argument("to_unit")
+    units_convert_parser.add_argument("--json", action="store_true")
+
+    units_check_parser = units_actions.add_parser("check", help="Validate unit registry")
+    units_check_parser.add_argument("--json", action="store_true")
+
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
     cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
     cron_parser.add_argument("--run-now", action="store_true")

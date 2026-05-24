@@ -16,6 +16,7 @@ locks, raw evidence, downloads, bundles, and the default SQLite database.
 | Download config | `config/download.yml` | `CENTRIC_API_HOME/download.yml` | `--download-config` |
 | Bundle config | `config/bundle.yml` | `CENTRIC_API_HOME/bundle.yml` | `--bundle-config` |
 | View config | `config/views.yml` | `CENTRIC_API_HOME/views.yml` | `--view-config` |
+| Units config | `config/units.yml` plus private overlay when present | `CENTRIC_API_HOME/units.yml` | `--units-config` |
 
 Relative runtime paths inside configs resolve under `CENTRIC_API_HOME`. Absolute paths and `~` are
 respected.

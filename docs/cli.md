@@ -14,7 +14,8 @@ command:
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `changelog update --json`, `bundle run --json`, `bundle show --json`,
   `bundle changelog --json`, `status --json`, `doctor --json`, `rebuild-db --json`,
-  `view show --json`, `view check --json`, and `view export --json` emit one JSON object.
+  `view show --json`, `view check --json`, `view export --json`, and units commands emit one JSON
+  object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used.
 
@@ -191,6 +192,22 @@ Options:
 - `--json`: machine-readable output.
 
 See [View exports](views.md) for the schema contract and authoring rules.
+
+## Units
+
+```bash
+uv run centric-api units list
+uv run centric-api units show mass
+uv run centric-api units normalize "sq m"
+uv run centric-api units convert 1500 g kg
+uv run centric-api units check
+```
+
+`units` validates and uses the local unit registry. The default registry is `config/units.yml`;
+private `CENTRIC_API_HOME/units.yml` extends the defaults when present. Pass `--units-config PATH`
+before the units action to use an explicit registry.
+
+See [Units](units.md) for registry authoring rules.
 
 ## Status And Doctor
 

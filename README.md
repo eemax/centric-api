@@ -11,7 +11,9 @@ Docs:
 - [CLI reference](docs/cli.md)
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
+- [Modeling spec](docs/modeling.md)
 - [Operations](docs/operations.md)
+- [Units](docs/units.md)
 - [View exports](docs/views.md)
 
 ```bash
@@ -31,6 +33,7 @@ uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
 uv run centric-api view list
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
+uv run centric-api units convert 1500 g kg
 uv run centric-api status
 uv run centric-api doctor
 uv run centric-api rebuild-db --yes

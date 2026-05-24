@@ -12,6 +12,7 @@ from .commands.download import run_download
 from .commands.fetch import run_fetch
 from .commands.rebuild_db import run_rebuild_db
 from .commands.status import run_status
+from .commands.units import run_units
 from .commands.view import run_view
 from .config import ConfigError
 from .fetcher import FetchError
@@ -33,6 +34,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_bundle(args)
         if args.command == "view":
             return run_view(args)
+        if args.command == "units":
+            return run_units(args)
         if args.command == "status":
             return run_status(args)
         if args.command == "doctor":

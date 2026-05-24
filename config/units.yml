@@ -1,0 +1,106 @@
+version: 1
+
+dimensions:
+  mass:
+    base: kg
+    units:
+      mg:
+        factor: 0.000001
+        aliases: [milligram, milligrams]
+      g:
+        factor: 0.001
+        aliases: [gram, grams]
+      kg:
+        factor: 1
+        aliases: [kilogram, kilograms]
+      oz:
+        factor: 0.028349523125
+        aliases: [ounce, ounces]
+      lb:
+        factor: 0.45359237
+        aliases: [lbs, pound, pounds]
+      short_ton:
+        factor: 907.18474
+        aliases: [short ton, short tons, us ton, us tons]
+      t:
+        factor: 1000
+        aliases: [tonne, tonnes, metric ton, metric tons, metric tonne, metric tonnes]
+
+  area:
+    base: m2
+    units:
+      mm2:
+        factor: 0.000001
+        aliases: [sq mm, square millimeter, square millimeters]
+      cm2:
+        factor: 0.0001
+        aliases: [sq cm, square centimeter, square centimeters]
+      m2:
+        factor: 1
+        aliases: [sqm, sq m, sq. m, square meter, square meters, "m²"]
+      in2:
+        factor: 0.00064516
+        aliases: [sq in, sq. in, square inch, square inches, "in^2"]
+      ft2:
+        factor: 0.09290304
+        aliases: [sq ft, sq. ft, sqft, sf, square foot, square feet, "ft^2"]
+      yd2:
+        factor: 0.83612736
+        aliases: [sq yd, sq. yd, sqyd, sy, square yard, square yards, "yd^2"]
+
+  length:
+    base: m
+    units:
+      mm:
+        factor: 0.001
+        aliases: [millimeter, millimeters]
+      cm:
+        factor: 0.01
+        aliases: [centimeter, centimeters]
+      m:
+        factor: 1
+        aliases: [meter, meters]
+      in:
+        factor: 0.0254
+        aliases: [inch, inches]
+      ft:
+        factor: 0.3048
+        aliases: [foot, feet]
+      yd:
+        factor: 0.9144
+        aliases: [yard, yards]
+
+  count:
+    base: pcs
+    units:
+      pcs:
+        factor: 1
+        aliases: [pc, piece, pieces, ea, each]
+      dozen:
+        factor: 12
+        aliases: [doz, dozens]
+
+  volume:
+    base: l
+    units:
+      ml:
+        factor: 0.001
+        aliases: [milliliter, milliliters]
+      l:
+        factor: 1
+        aliases: [liter, liters, litre, litres]
+      m3:
+        factor: 1000
+        aliases: [cbm, cubic meter, cubic meters, "m^3"]
+      in3:
+        factor: 0.016387064
+        aliases: [cu in, cubic inch, cubic inches, "in^3"]
+      ft3:
+        factor: 28.316846592
+        aliases: [cu ft, cubic foot, cubic feet, "ft^3"]
+      gal_us:
+        factor: 3.785411784
+        aliases: [gal, gallon, gallons, us gallon, us gallons]
+      fl_oz_us:
+        factor: 0.0295735295625
+        aliases: [fl oz, fluid ounce, fluid ounces, us fluid ounce, us fluid ounces]
