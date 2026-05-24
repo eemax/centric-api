@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,7 @@ USER_NAME_FIELD = "node_name"
 DELETE_TYPE_TOMBSTONE = "tombstone"
 DELETE_TYPE_HARD_DELETE = "hard_delete"
 DELETE_TYPE_UNKNOWN = "unknown"
+ProgressCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -66,9 +68,11 @@ def record_changelog(
     deleted_record_ids_by_endpoint: dict[str, set[str]] | None = None,
     deleted_record_delete_types_by_endpoint: dict[str, dict[str, str]] | None = None,
     full: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> ChangelogRun:
     created_at = datetime.now(UTC)
     with connect(db_path) as conn:
+        _emit_progress(progress, "Preparing changelog tables...")
         ensure_changelog_tables(conn)
         run_id = _allocate_run_id(conn, created_at)
         has_record_scope = (
@@ -92,18 +96,28 @@ def record_changelog(
                 endpoint_names,
             )
         )
+        _emit_progress(
+            progress,
+            f"Mode: {'full refresh' if full_refresh else 'scoped refresh'}",
+        )
 
         if full_refresh:
+            _emit_progress(progress, "Loading existing changelog index...")
             previous_index = _load_current_index(conn, endpoints=endpoint_names)
+            _emit_progress(progress, "Loading current cache...")
             current_index = _build_current_index(conn, endpoints=endpoint_names)
         else:
+            _emit_progress(progress, "Loading scoped changelog index...")
             previous_index = _load_current_index_for_keys(conn, keys=scoped_keys)
+            _emit_progress(progress, "Loading scoped cache records...")
             current_index = _build_scoped_current_index(
                 conn,
                 record_ids_by_endpoint=record_ids_by_endpoint or {},
             )
 
+        _emit_progress(progress, "Loading user names...")
         user_names = _load_user_names(conn)
+        _emit_progress(progress, "Diffing records...")
         events = _diff_indexes(
             run_id=run_id,
             changed_at=created_at,
@@ -114,6 +128,7 @@ def record_changelog(
         )
         scoped_record_count = _scoped_record_count(scoped_keys)
 
+        _emit_progress(progress, "Writing changelog tables...")
         conn.execute("BEGIN")
         try:
             conn.execute(
@@ -162,6 +177,11 @@ def record_changelog(
         full_refresh=full_refresh,
         scoped_record_count=scoped_record_count,
     )
+
+
+def _emit_progress(progress: ProgressCallback | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
 
 
 def list_changelog_runs(

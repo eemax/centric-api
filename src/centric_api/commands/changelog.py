@@ -29,11 +29,19 @@ def run_changelog(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args.db)
     since = parse_since(args.since)
     if args.action == "update":
+        if not args.json:
+            print("Updating changelog...")
+            print(f"DB:    {db_path}")
+            print(f"Scope: {_format_update_scope(args.endpoint)}")
+            print()
         run = record_changelog(
             db_path,
             endpoints=set(args.endpoint) if args.endpoint else None,
             full=True,
+            progress=print if not args.json else None,
         )
+        if not args.json:
+            print()
         print_or_json(
             args.json,
             {
@@ -169,3 +177,9 @@ def run_changelog(args: argparse.Namespace) -> int:
         limit=args.limit,
     )
     return 0
+
+
+def _format_update_scope(endpoints: list[str]) -> str:
+    if not endpoints:
+        return "all endpoints"
+    return ", ".join(endpoints)

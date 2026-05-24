@@ -12,9 +12,9 @@ command:
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
   `bundle list --json`, and `view list --json` emit JSON Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
-- `bundle run --json`, `bundle show --json`, `bundle changelog --json`, `status --json`,
-  `doctor --json`, `rebuild-db --json`, `view show --json`, `view check --json`, and
-  `view export --json` emit one JSON object.
+- `changelog update --json`, `bundle run --json`, `bundle show --json`,
+  `bundle changelog --json`, `status --json`, `doctor --json`, `rebuild-db --json`,
+  `view show --json`, `view check --json`, and `view export --json` emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used.
 
@@ -89,7 +89,9 @@ Actions:
   endpoint breakdowns stay complete for those actors.
 - `runs`: changelog run history.
 - `changes`: recent event rows with changed-field summaries.
-- `update`: rebuilds changelog from current cached records. This is normally automatic after fetch.
+- `update`: rebuilds changelog from current cached records. Human output shows progress through the
+  long-running phases; `--json` keeps stdout to a single summary object. This is normally automatic
+  after fetch.
 
 Removal breakdowns are always present in `leaderboard --json` as `tombstone`, `hard_delete`, and
 `unknown_delete`. Human output keeps tombstone-only removals folded into `Removed`; it adds `Tomb`,
@@ -237,4 +239,5 @@ uv run centric-api rebuild-db --yes --json
 
 `rebuild-db` is the recovery path for SQLite. It refuses to run without `--yes`, backs up the current
 database files, replays raw evidence into a fresh database, rebuilds changelog, and reinstalls
-dashboard views.
+dashboard views. Human output shows progress through the long-running rebuild phases; `--json`
+keeps stdout to a single summary object.

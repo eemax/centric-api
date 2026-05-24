@@ -44,6 +44,54 @@ def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
     assert not db_path.exists()
 
 
+def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="style-1",
+        )
+
+    exit_code = main(["changelog", "update", "--db", str(db_path)])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Updating changelog" in output
+    assert f"DB:    {db_path}" in output
+    assert "Scope: all endpoints" in output
+    assert "Mode: full refresh" in output
+    assert "Loading current cache..." in output
+    assert "Diffing records..." in output
+    assert "Writing changelog tables..." in output
+    assert "Changelog updated:" in output
+
+
+def test_changelog_update_json_suppresses_progress(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="style-1",
+        )
+
+    exit_code = main(["changelog", "update", "--db", str(db_path), "--json"])
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert exit_code == 0
+    assert "Updating changelog" not in output
+    assert "Loading current cache" not in output
+    assert payload["endpoint_count"] == 1
+    assert payload["record_count"] == 1
+    assert payload["event_count"] == 1
+
+
 def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -880,11 +928,51 @@ def test_rebuild_db_replays_raw_evidence(tmp_path, capsys) -> None:
     )
 
     assert exit_code == 0
-    payload = json.loads(capsys.readouterr().out)
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert "Rebuilding SQLite" not in output
+    assert "Ingesting raw records" not in output
     assert payload["ingest"]["records_read"] == 1
     with sqlite3.connect(db_path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
     assert count == 1
+
+
+def test_rebuild_db_reports_human_progress(tmp_path, capsys) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    exit_code = main(["rebuild-db", "--db", str(db_path), "--raw-dir", str(raw_dir), "--yes"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Rebuilding SQLite..." in output
+    assert f"DB:  {db_path}" in output
+    assert f"Raw: {raw_dir}" in output
+    assert "Loading endpoint schemas..." in output
+    assert "Backing up existing DB files..." in output
+    assert "Ingesting raw records..." in output
+    assert "Updating changelog..." in output
+    assert "  Loading current cache..." in output
+    assert "Opening rebuilt DB..." in output
+    assert "SQLite Rebuilt" in output
 
 
 def _insert_bundle_run(conn, run_id: str, finished_at: str) -> None:
