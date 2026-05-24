@@ -200,12 +200,15 @@ uv run centric-api units list
 uv run centric-api units show mass
 uv run centric-api units normalize "sq m"
 uv run centric-api units convert 1500 g kg
+uv run centric-api units basis gsm
 uv run centric-api units check
 ```
 
 `units` validates and uses the local unit registry. The default registry is `config/units.yml`;
 private `CENTRIC_API_HOME/units.yml` extends the defaults when present. Pass `--units-config PATH`
 before the units action to use an explicit registry.
+`units basis UNIT` shows the material-consumption formula implied by material UOMs such as `pcs`,
+`kg`, `gsm`, or `g/m`.
 
 See [Units](units.md) for registry authoring rules.
 

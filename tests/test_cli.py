@@ -46,6 +46,18 @@ def test_units_cli_convert_and_normalize(capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload == {"input": "sq m", "unit": "m2", "dimension": "area"}
 
+    assert main(["units", "basis", "gsm"]) == 0
+    output = capsys.readouterr().out
+    assert "Basis:          areal_density" in output
+    assert "BOM unit:       m" in output
+    assert "Width unit:     m" in output
+    assert "Requires:       bom_quantity, material_uom, material_weight, cuttable_width" in output
+
+    assert main(["units", "basis", "pcs", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["basis"] == "per_piece_mass"
+    assert payload["material_value_unit"] == "g"
+
 
 def test_units_cli_uses_explicit_config(tmp_path, capsys) -> None:
     config = tmp_path / "units.yml"

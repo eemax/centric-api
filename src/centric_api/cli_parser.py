@@ -152,6 +152,13 @@ def build_parser() -> argparse.ArgumentParser:
     units_convert_parser.add_argument("to_unit")
     units_convert_parser.add_argument("--json", action="store_true")
 
+    units_basis_parser = units_actions.add_parser(
+        "basis",
+        help="Show how a material unit drives consumption math",
+    )
+    units_basis_parser.add_argument("unit")
+    units_basis_parser.add_argument("--json", action="store_true")
+
     units_check_parser = units_actions.add_parser("check", help="Validate unit registry")
     units_check_parser.add_argument("--json", action="store_true")
 

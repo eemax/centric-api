@@ -3,6 +3,13 @@ version: 1
 dimensions:
   mass:
     base: kg
+    consumption:
+      basis: direct_mass
+      bom_quantity: mass
+      material_value: ignored
+      output_unit: kg
+      requires: [bom_quantity, material_uom]
+      formula: unit_convert(bom_quantity, material_uom, "kg")
     units:
       mg:
         factor: 0.000001
@@ -25,6 +32,76 @@ dimensions:
       t:
         factor: 1000
         aliases: [tonne, tonnes, metric ton, metric tons, metric tonne, metric tonnes]
+
+  areal_density:
+    base: kg_per_m2
+    consumption:
+      basis: areal_density
+      bom_quantity: length
+      material_value: mass_per_area
+      output_unit: kg
+      requires: [bom_quantity, material_uom, material_weight, cuttable_width]
+      formula: bom_length * cuttable_width * material_weight_per_area
+    units:
+      kg_per_m2:
+        factor: 1
+        basis_units:
+          bom_quantity_unit: m
+          width_unit: m
+        aliases: [kg/m2, kg/m², kg per m2, kg/sqm]
+      g_per_m2:
+        factor: 0.001
+        basis_units:
+          bom_quantity_unit: m
+          width_unit: m
+        aliases: [gsm, g/m2, g/m², g per m2, g/sqm]
+      oz_per_yd2:
+        factor: 0.0339057474748823
+        basis_units:
+          bom_quantity_unit: yd
+          width_unit: yd
+        aliases: [oz/yd2, oz/yd², oz per yd2, ounce per square yard, ounces per square yard]
+
+  linear_density:
+    base: kg_per_m
+    consumption:
+      basis: linear_density
+      bom_quantity: length
+      material_value: mass_per_length
+      output_unit: kg
+      requires: [bom_quantity, material_uom, material_weight]
+      formula: bom_length * material_weight_per_length
+    units:
+      kg_per_m:
+        factor: 1
+        basis_units:
+          bom_quantity_unit: m
+        aliases: [kg/m, kg per m]
+      g_per_m:
+        factor: 0.001
+        basis_units:
+          bom_quantity_unit: m
+        aliases: [g/m, g per m]
+      tex:
+        factor: 0.000001
+        basis_units:
+          bom_quantity_unit: m
+        aliases: [tex]
+      dtex:
+        factor: 0.0000001
+        basis_units:
+          bom_quantity_unit: m
+        aliases: [decitex]
+      denier:
+        factor: 0.000000111111111111
+        basis_units:
+          bom_quantity_unit: m
+        aliases: [den]
+      oz_per_yd:
+        factor: 0.0310034154910324
+        basis_units:
+          bom_quantity_unit: yd
+        aliases: [oz/yd, oz per yd, ounce per yard, ounces per yard]
 
   area:
     base: m2
@@ -72,6 +149,14 @@ dimensions:
 
   count:
     base: pcs
+    consumption:
+      basis: per_piece_mass
+      bom_quantity: count
+      material_value: grams_per_piece
+      material_value_unit: g
+      output_unit: kg
+      requires: [bom_quantity, material_uom, material_weight]
+      formula: bom_quantity * material_weight_g / 1000
     units:
       pcs:
         factor: 1

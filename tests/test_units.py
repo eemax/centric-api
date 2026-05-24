@@ -24,7 +24,50 @@ def test_unit_registry_converts_and_normalizes_defaults() -> None:
     assert str(registry.convert("1", "lb", "oz").output_value) == "16"
     assert str(registry.convert("1", "yd", "ft").output_value) == "3"
     assert str(registry.convert("1", "gal", "l").output_value) == "3.785411784"
+    assert str(registry.convert("150", "gsm", "kg_per_m2").output_value) == "0.150"
+    assert str(registry.convert("1", "tex", "g_per_m").output_value) == "0.001"
     assert registry.dimensions["mass"].base == "kg"
+
+
+def test_unit_registry_resolves_consumption_basis() -> None:
+    registry = load_unit_registry("config/units.yml")
+
+    mass_basis = registry.basis("kg")
+    assert mass_basis.consumption.basis == "direct_mass"
+    assert mass_basis.consumption.material_value == "ignored"
+
+    count_basis = registry.basis("pcs")
+    assert count_basis.consumption.basis == "per_piece_mass"
+    assert count_basis.consumption.material_value_unit == "g"
+
+    fabric_basis = registry.basis("gsm")
+    assert fabric_basis.unit == "g_per_m2"
+    assert fabric_basis.consumption.basis == "areal_density"
+    assert fabric_basis.consumption.requires == (
+        "bom_quantity",
+        "material_uom",
+        "material_weight",
+        "cuttable_width",
+    )
+    assert fabric_basis.unit_context is not None
+    assert fabric_basis.unit_context.bom_quantity_unit == "m"
+    assert fabric_basis.unit_context.width_unit == "m"
+
+    thread_basis = registry.basis("g/m")
+    assert thread_basis.unit == "g_per_m"
+    assert thread_basis.consumption.basis == "linear_density"
+    assert thread_basis.consumption.requires == (
+        "bom_quantity",
+        "material_uom",
+        "material_weight",
+    )
+    assert thread_basis.unit_context is not None
+    assert thread_basis.unit_context.bom_quantity_unit == "m"
+
+    yards_basis = registry.basis("oz/yd2")
+    assert yards_basis.unit_context is not None
+    assert yards_basis.unit_context.bom_quantity_unit == "yd"
+    assert yards_basis.unit_context.width_unit == "yd"
 
 
 def test_unit_registry_rejects_incompatible_units() -> None:

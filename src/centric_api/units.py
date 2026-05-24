@@ -12,12 +12,45 @@ from .config import ConfigError, runtime_home
 DEFAULT_UNITS_CONFIG_PATH = Path("config/units.yml")
 PRIVATE_UNITS_CONFIG_PATH = Path("units.yml")
 ROOT_CONFIG_KEYS = {"version", "dimensions"}
-DIMENSION_CONFIG_KEYS = {"base", "units"}
-UNIT_CONFIG_KEYS = {"factor", "aliases"}
+DIMENSION_CONFIG_KEYS = {"base", "consumption", "units"}
+UNIT_CONFIG_KEYS = {"factor", "aliases", "basis_units"}
+BASIS_UNITS_CONFIG_KEYS = {"bom_quantity_unit", "width_unit"}
+CONSUMPTION_CONFIG_KEYS = {
+    "basis",
+    "bom_quantity",
+    "material_value",
+    "material_value_unit",
+    "output_unit",
+    "requires",
+    "formula",
+}
+CONSUMPTION_BASIS_TYPES = {
+    "direct_mass",
+    "per_piece_mass",
+    "areal_density",
+    "linear_density",
+}
 
 
 class UnitError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class ConsumptionUnitContext:
+    bom_quantity_unit: str | None = None
+    width_unit: str | None = None
+
+
+@dataclass(frozen=True)
+class ConsumptionBasis:
+    basis: str
+    bom_quantity: str
+    material_value: str
+    output_unit: str
+    formula: str
+    material_value_unit: str | None = None
+    requires: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -26,6 +59,7 @@ class UnitDefinition:
     unit: str
     factor: Decimal
     aliases: tuple[str, ...]
+    basis_units: ConsumptionUnitContext | None = None
 
 
 @dataclass(frozen=True)
@@ -33,6 +67,7 @@ class UnitDimension:
     name: str
     base: str
     units: dict[str, UnitDefinition]
+    consumption: ConsumptionBasis | None = None
 
 
 @dataclass(frozen=True)
@@ -49,6 +84,15 @@ class UnitConversion:
     from_unit: str
     to_unit: str
     dimension: str
+
+
+@dataclass(frozen=True)
+class UnitBasis:
+    input: str
+    unit: str
+    dimension: str
+    consumption: ConsumptionBasis
+    unit_context: ConsumptionUnitContext | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +132,22 @@ class UnitRegistry:
             from_unit=source.unit,
             to_unit=target.unit,
             dimension=source.dimension,
+        )
+
+    def basis(self, unit: str) -> UnitBasis:
+        normalized = self.normalize(unit)
+        dimension = self.dimensions[normalized.dimension]
+        if dimension.consumption is None:
+            raise UnitError(
+                f"Unit {unit!r} belongs to dimension {dimension.name!r}, "
+                "which has no material consumption basis."
+            )
+        return UnitBasis(
+            input=unit,
+            unit=normalized.unit,
+            dimension=normalized.dimension,
+            consumption=dimension.consumption,
+            unit_context=dimension.units[normalized.unit].basis_units,
         )
 
 
@@ -194,6 +254,13 @@ def _merge_payloads(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, 
                 f"units dimension[{dimension_name}].base cannot override "
                 f"{raw_base_dimension.get('base')!r} with {overlay_base!r}."
             )
+        if "consumption" in raw_overlay_dimension:
+            consumption = raw_overlay_dimension["consumption"]
+            if not isinstance(consumption, dict):
+                raise ConfigError(
+                    f"units dimension[{dimension_name}].consumption must be an object."
+                )
+            raw_base_dimension["consumption"] = dict(consumption)
         base_units = raw_base_dimension.get("units", {})
         overlay_units = raw_overlay_dimension.get("units", {})
         if not isinstance(base_units, dict) or not isinstance(overlay_units, dict):
@@ -242,7 +309,55 @@ def _parse_dimension(name: Any, raw: Any) -> UnitDimension:
         units[unit.unit] = unit
     if base not in units:
         raise ConfigError(f"units dimension[{dimension_name}].base must be defined in units.")
-    return UnitDimension(name=dimension_name, base=base, units=units)
+    consumption = _parse_consumption(raw.get("consumption"), dimension_name)
+    return UnitDimension(name=dimension_name, base=base, units=units, consumption=consumption)
+
+
+def _parse_consumption(raw: Any, dimension: str) -> ConsumptionBasis | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"units dimension[{dimension}].consumption must be an object.")
+    _reject_unknown_keys(raw, CONSUMPTION_CONFIG_KEYS, f"units dimension[{dimension}].consumption")
+    basis = _required_name(raw.get("basis"), f"units dimension[{dimension}].consumption.basis")
+    if basis not in CONSUMPTION_BASIS_TYPES:
+        valid = ", ".join(sorted(CONSUMPTION_BASIS_TYPES))
+        raise ConfigError(
+            f"units dimension[{dimension}].consumption.basis must be one of: {valid}."
+        )
+    material_value_unit = raw.get("material_value_unit")
+    if material_value_unit is not None:
+        material_value_unit = _required_name(
+            material_value_unit,
+            f"units dimension[{dimension}].consumption.material_value_unit",
+        )
+    requires_raw = raw.get("requires", [])
+    if not isinstance(requires_raw, list):
+        raise ConfigError(f"units dimension[{dimension}].consumption.requires must be an array.")
+    return ConsumptionBasis(
+        basis=basis,
+        bom_quantity=_required_name(
+            raw.get("bom_quantity"),
+            f"units dimension[{dimension}].consumption.bom_quantity",
+        ),
+        material_value=_required_name(
+            raw.get("material_value"),
+            f"units dimension[{dimension}].consumption.material_value",
+        ),
+        material_value_unit=material_value_unit,
+        output_unit=_required_name(
+            raw.get("output_unit"),
+            f"units dimension[{dimension}].consumption.output_unit",
+        ),
+        requires=tuple(
+            _required_name(item, f"units dimension[{dimension}].consumption.requires")
+            for item in requires_raw
+        ),
+        formula=_required_name(
+            raw.get("formula"),
+            f"units dimension[{dimension}].consumption.formula",
+        ),
+    )
 
 
 def _parse_unit(dimension: str, name: Any, raw: Any) -> UnitDefinition:
@@ -262,7 +377,52 @@ def _parse_unit(dimension: str, name: Any, raw: Any) -> UnitDefinition:
     if not isinstance(aliases_raw, list):
         raise ConfigError(f"units[{unit_name}].aliases must be an array.")
     aliases = tuple(_required_name(alias, f"units[{unit_name}].aliases") for alias in aliases_raw)
-    return UnitDefinition(dimension=dimension, unit=unit_name, factor=factor, aliases=aliases)
+    basis_units = _parse_basis_units(raw.get("basis_units"), dimension, unit_name)
+    return UnitDefinition(
+        dimension=dimension,
+        unit=unit_name,
+        factor=factor,
+        aliases=aliases,
+        basis_units=basis_units,
+    )
+
+
+def _parse_basis_units(
+    raw: Any,
+    dimension: str,
+    unit: str,
+) -> ConsumptionUnitContext | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"units dimension[{dimension}].units[{unit}].basis_units must be an object."
+        )
+    _reject_unknown_keys(
+        raw,
+        BASIS_UNITS_CONFIG_KEYS,
+        f"units dimension[{dimension}].units[{unit}].basis_units",
+    )
+    bom_quantity_unit = raw.get("bom_quantity_unit")
+    width_unit = raw.get("width_unit")
+    return ConsumptionUnitContext(
+        bom_quantity_unit=(
+            _required_name(
+                bom_quantity_unit,
+                f"units dimension[{dimension}].units[{unit}].basis_units.bom_quantity_unit",
+            )
+            if bom_quantity_unit is not None
+            else None
+        ),
+        width_unit=(
+            _required_name(
+                width_unit,
+                f"units dimension[{dimension}].units[{unit}].basis_units.width_unit",
+            )
+            if width_unit is not None
+            else None
+        ),
+    )
 
 
 def _register_alias(

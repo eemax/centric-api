@@ -133,6 +133,22 @@ expression: unit_convert(line.quantity, line.uom, "kg")
 Unknown units and incompatible conversions should fail `model check` or `model run` loudly with
 model name, path, and sample record context.
 
+Material consumption models should resolve the material UOM to a consumption basis before choosing
+the formula:
+
+- `mass`: BOM quantity is already mass; material weight is ignored.
+- `count`: BOM quantity is pieces; material weight is grams per piece.
+- `areal_density`: BOM quantity is length; material weight is mass per area and cuttable width is
+  required.
+- `linear_density`: BOM quantity is length; material weight is mass per length.
+
+That basis is unit-registry metadata, visible with `centric-api units basis UNIT`, so the model layer
+does not need hardcoded unit-label branching.
+Each basis lists all required semantic inputs for the formula; areal density has the same base needs
+as other material-weight formulas plus cuttable width.
+Density units can also declare the denominator units for BOM quantity and width, such as meters for
+`gsm` or yards for `oz/yd2`.
+
 ## Initial Scope
 
 The first model implementation should stay narrow:
