@@ -1,164 +1,93 @@
-# Modeling Spec
+# Modeling
 
-This is a future implementation spec for calculated, business-shaped local datasets. The feature is
-not implemented yet.
+`centric-api model` runs calculated local data models from Python modules in
+`CENTRIC_API_HOME/models`. Models are intentionally code-first: joins, conditional logic, validation,
+and business formulas live in normal Python instead of a large YAML expression language.
 
-The model layer should sit between fetched records and view exports:
+The model layer sits between fetched records and view exports:
 
 ```text
 fetch       -> cache Centric records in SQLite
-model run   -> build calculated local tables from cached records
-view export -> export endpoint or model output tables
+model run   -> refresh calculated local tables
+next step   -> export or report from model output tables
 ```
 
-## CLI Shape
+## CLI
 
 ```bash
 centric-api model list
-centric-api model show material-consumption
-centric-api model check material-consumption
-centric-api model run material-consumption
-centric-api model run --all
+centric-api model show style-bom-consumption
+centric-api model check style-bom-consumption
+centric-api model run style-bom-consumption
 ```
 
-## Config
+Options:
 
-Models should resolve from `config/models.yml`, then private `CENTRIC_API_HOME/models.yml`, with an
-override flag such as `--model-config`.
+- `--models-dir PATH`: load private model modules from a specific directory.
+- `--units-config PATH`: use an explicit unit registry.
+- `--db PATH`: use a non-default SQLite cache for `check` or `run`.
+- `--json`: emit machine-readable output.
 
-```yaml
-version: 1
+## Model Modules
 
-models:
-  - name: material-consumption
-    title: Material Consumption
-    output: model_material_consumption
+Each model file exposes `MODEL` or `get_model()` and implements a small interface:
 
-    grain:
-      - style_id
-      - bom_id
-      - material_id
+```python
+from centric_api.modeling import ModelColumn, ModelDefinition, ModelOutput
 
-    root:
-      endpoint: styles
-      as: style
 
-    joins:
-      - as: bom
-        endpoint: boms
-        from: style.id
-        to: style
-        relationship: many
-        filters:
-          - path: bom.active
-            equals: true
+class MyModel:
+    definition = ModelDefinition(
+        name="my-model",
+        title="My Model",
+        output_table="model_my_model",
+        required_endpoints=("styles",),
+    )
 
-      - as: line
-        endpoint: bom_lines
-        from: bom.id
-        to: bom
-        relationship: many
+    def check(self, ctx):
+        ...
 
-      - as: material
-        endpoint: materials
-        from: line.material
-        to: id
-        relationship: one
+    def run(self, ctx):
+        return ModelOutput(
+            columns=(ModelColumn("style_id", "text"),),
+            rows=({"style_id": "S1"},),
+        )
 
-    filters:
-      - path: style.active
-        equals: true
 
-    columns:
-      - name: style_id
-        expression: style.id
-        type: text
-
-      - name: bom_id
-        expression: bom.id
-        type: text
-
-      - name: material_id
-        expression: material.id
-        type: text
-
-      - name: line_quantity
-        expression: to_number(line.quantity)
-        type: number
-
-      - name: material_weight_kg
-        expression: unit_convert(material.weight, material.weight_uom, "kg")
-        type: number
-
-      - name: total_weight_kg
-        expression: line_quantity * material_weight_kg
-        type: number
-
-    aggregate:
-      group_by:
-        - style_id
-        - bom_id
-        - material_id
-      measures:
-        - name: total_quantity
-          op: sum
-          expression: line_quantity
-        - name: total_weight_kg
-          op: sum
-          expression: total_weight_kg
+MODEL = MyModel()
 ```
 
-## Rules
+`check` should validate inputs and report issues through `ctx.error(...)` or `ctx.warning(...)`.
+`run` should calculate rows and return a `ModelOutput`.
 
-Every model must declare grain. Grain is the contract that prevents accidental row multiplication
-and unclear rollups.
+## Context
 
-Relationships must be explicit:
+The model context provides reusable engine services:
 
-- `one`: enrich the current row
-- `many`: expand rows
+- `ctx.records(endpoint)`: cached endpoint payloads.
+- `ctx.records_any("bom_lines", "bomrows")`: first cached endpoint from aliases.
+- `ctx.index_by_id(endpoint)`: endpoint payloads keyed by `id`.
+- `ctx.index_by_id_any(...)`: first cached endpoint from aliases, keyed by `id`.
+- `ctx.units`: loaded unit registry.
+- `ctx.error(...)` and `ctx.warning(...)`: structured run issues.
 
-Models should persist output to SQLite tables, such as `model_material_consumption`, and record run
-metadata in model run tables.
+## Output Tables
+
+Successful `model run` replaces one stable SQLite output table, such as
+`model_style_bom_consumption`. It does not create a new output table per run.
+
+Runs are recorded in:
+
+- `model_runs`
+- `model_run_issues`
+
+If a model run has errors, the previous output table is left untouched.
 
 ## Units
 
-Models should use the first-class unit registry documented in [Units](units.md). Unit conversion
-must happen before aggregation whenever source rows can contain mixed units:
+Models should use the first-class unit registry documented in [Units](units.md). Private models can
+call `ctx.units.normalize(...)`, `ctx.units.convert(...)`, and `ctx.units.basis(...)`.
 
-```yaml
-expression: unit_convert(line.quantity, line.uom, "kg")
-```
-
-Unknown units and incompatible conversions should fail `model check` or `model run` loudly with
-model name, path, and sample record context.
-
-Material consumption models should resolve the material UOM to a consumption basis before choosing
-the formula:
-
-- `mass`: BOM quantity is already mass; material weight is ignored.
-- `count`: BOM quantity is pieces; material weight is grams per piece.
-- `areal_density`: BOM quantity is length; material weight is mass per area and cuttable width is
-  required.
-- `linear_density`: BOM quantity is length; material weight is mass per length.
-
-That basis is unit-registry metadata, visible with `centric-api units basis UNIT`, so the model layer
-does not need hardcoded unit-label branching.
-Each basis lists all required semantic inputs for the formula; areal density has the same base needs
-as other material-weight formulas plus cuttable width.
-Density units can also declare the denominator units for BOM quantity and width, such as meters for
-`gsm` or yards for `oz/yd2`.
-
-## Initial Scope
-
-The first model implementation should stay narrow:
-
-- list/show/check/run commands
-- cached endpoint inputs only
-- explicit joins and filters
-- basic expression engine with path references, arithmetic, `to_number`, `coalesce`, and
-  `unit_convert`
-- `group_by` plus `sum`, `count`, `min`, and `max`
-- replace output tables per successful run
-
-View export integration can come after model output tables exist.
+Unknown units, incompatible conversions, missing references, and missing business inputs should be
+reported during `model check` or `model run` with enough endpoint/record context to fix the cached
+data.

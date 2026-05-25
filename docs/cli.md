@@ -14,8 +14,8 @@ command:
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `changelog update --json`, `bundle run --json`, `bundle show --json`,
   `bundle changelog --json`, `status --json`, `doctor --json`, `rebuild-db --json`,
-  `view show --json`, `view check --json`, `view export --json`, and units commands emit one JSON
-  object.
+  `view show --json`, `view check --json`, `view export --json`, `model show --json`,
+  `model check --json`, `model run --json`, and units commands emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used.
 
@@ -192,6 +192,30 @@ Options:
 - `--json`: machine-readable output.
 
 See [View exports](views.md) for the schema contract and authoring rules.
+
+## Models
+
+```bash
+uv run centric-api model list
+uv run centric-api model show style-bom-consumption
+uv run centric-api model check style-bom-consumption
+uv run centric-api model run style-bom-consumption
+```
+
+`model` loads private Python model modules from `CENTRIC_API_HOME/models`. Models read the local
+SQLite cache, validate business inputs, and refresh stable calculated output tables. Successful runs
+replace the current output table; failed runs leave the previous output table intact.
+
+Options:
+
+- `--models-dir PATH`: load models from a specific directory.
+- `--units-config PATH`: use an explicit unit registry.
+- `--db PATH`: SQLite cache for `check` or `run`.
+- `--json`: machine-readable output.
+
+Pass `--models-dir` and `--units-config` before the model action.
+
+See [Modeling](modeling.md) for the private model interface.
 
 ## Units
 

@@ -34,6 +34,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "download" in output
     assert "bundle" in output
     assert "view" in output
+    assert "model" in output
     assert "units" in output
 
 

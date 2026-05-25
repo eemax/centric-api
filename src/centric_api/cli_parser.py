@@ -131,6 +131,28 @@ def build_parser() -> argparse.ArgumentParser:
     view_export_parser.add_argument("--output", default=None)
     view_export_parser.add_argument("--json", action="store_true")
 
+    model_parser = subparsers.add_parser("model", help="Run private calculated data models")
+    model_parser.add_argument("--models-dir", default=None)
+    model_parser.add_argument("--units-config", default=None)
+    model_actions = model_parser.add_subparsers(dest="action", required=True)
+
+    model_list_parser = model_actions.add_parser("list", help="List available models")
+    model_list_parser.add_argument("--json", action="store_true")
+
+    model_show_parser = model_actions.add_parser("show", help="Show one model")
+    model_show_parser.add_argument("name")
+    model_show_parser.add_argument("--json", action="store_true")
+
+    model_check_parser = model_actions.add_parser("check", help="Check one model")
+    model_check_parser.add_argument("name")
+    model_check_parser.add_argument("--db", default=None)
+    model_check_parser.add_argument("--json", action="store_true")
+
+    model_run_parser = model_actions.add_parser("run", help="Run one model")
+    model_run_parser.add_argument("name")
+    model_run_parser.add_argument("--db", default=None)
+    model_run_parser.add_argument("--json", action="store_true")
+
     units_parser = subparsers.add_parser("units", help="Inspect and convert configured units")
     units_parser.add_argument("--units-config", default=None)
     units_actions = units_parser.add_subparsers(dest="action", required=True)

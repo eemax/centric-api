@@ -33,6 +33,8 @@ uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
 uv run centric-api view list
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
+uv run centric-api model list
+uv run centric-api model check style-bom-consumption
 uv run centric-api units convert 1500 g kg
 uv run centric-api units basis gsm
 uv run centric-api status

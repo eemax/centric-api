@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from .modeling.tables import ensure_model_tables
+
 SCHEMA_VERSION = 1
 REBUILD_DB_MESSAGE = "stale local DB; run centric-api rebuild-db --yes"
 REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
@@ -247,6 +249,30 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "last_run_id",
         "selected_at",
     },
+    "model_runs": {
+        "run_id",
+        "model_name",
+        "title",
+        "output_table",
+        "action",
+        "status",
+        "started_at",
+        "finished_at",
+        "row_count",
+        "issue_count",
+        "error_count",
+        "warning_count",
+    },
+    "model_run_issues": {
+        "run_id",
+        "severity",
+        "code",
+        "message",
+        "endpoint",
+        "record_id",
+        "sample_json",
+        "created_at",
+    },
 }
 
 
@@ -275,6 +301,7 @@ def ensure_feature_tables(conn: sqlite3.Connection) -> None:
     ensure_changelog_tables(conn)
     ensure_download_tables(conn)
     ensure_bundle_tables(conn)
+    ensure_model_tables(conn)
 
 
 def ensure_schema_metadata(conn: sqlite3.Connection) -> None:
