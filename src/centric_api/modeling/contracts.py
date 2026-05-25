@@ -28,6 +28,7 @@ class ModelColumn:
 class ModelOutput:
     columns: tuple[ModelColumn, ...]
     rows: tuple[dict[str, Any], ...]
+    metrics: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -48,11 +49,14 @@ class ModelRunSummary:
     output_table: str
     action: ModelAction
     status: ModelStatus
+    started_at: str
+    finished_at: str
     row_count: int
     issue_count: int
     error_count: int
     warning_count: int
     issues: tuple[ModelIssue, ...]
+    metrics: dict[str, Any] | None = None
 
 
 class ModelProtocol(Protocol):

@@ -174,11 +174,12 @@ uv run centric-api view export style-colorways-demo --format csv
 uv run centric-api view export style-colorways-demo --output ~/Desktop/style-colorways.xlsx
 ```
 
-`view export` writes flat XLSX or CSV tables from local cached endpoint records. It does not call the
-Centric API. The root endpoint plus any `many_expand` joins define row grain; supplementary arrays
-should use `many_concat`. Filters live in the view schema and can reference root or joined aliases.
+`view export` writes flat XLSX or CSV tables from local cached endpoint records or calculated model
+output tables. It does not call the Centric API. The root source plus any `many_expand` joins define
+row grain; supplementary arrays should use `many_concat`. Filters live in the view schema and can
+reference root or joined aliases.
 When joins cannot resolve, the export summary includes a per-join breakdown with the joined
-endpoint, join paths, missing counts, and sample reference keys.
+source, join paths, missing counts, and sample reference keys.
 Use `view check NAME` to run the same materialization and reference diagnostics without writing a
 file.
 
@@ -197,9 +198,9 @@ See [View exports](views.md) for the schema contract and authoring rules.
 
 ```bash
 uv run centric-api model list
-uv run centric-api model show style-bom-consumption
-uv run centric-api model check style-bom-consumption
-uv run centric-api model run style-bom-consumption
+uv run centric-api model show my-model
+uv run centric-api model check my-model
+uv run centric-api model run my-model
 ```
 
 `model` loads private Python model modules from `CENTRIC_API_HOME/models`. Models read the local

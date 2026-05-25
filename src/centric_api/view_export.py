@@ -17,12 +17,15 @@ ExportFormat = Literal["xlsx", "csv"]
 SUPPORTED_EXPORT_FORMATS = {"xlsx", "csv"}
 HEADER_ROW_HEIGHT = 18
 MISSING_JOIN_SAMPLE_LIMIT = 10
+SQL_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SourceKey = tuple[str, str]
 
 
 @dataclass(frozen=True)
 class MissingJoinDetail:
     alias: str
-    endpoint: str
+    source_type: str
+    source_name: str
     from_path: str
     to_path: str
     missing_count: int
@@ -32,6 +35,10 @@ class MissingJoinDetail:
     missing_endpoint: bool
     filters_applied: bool
     sample_keys: tuple[str, ...]
+
+    @property
+    def endpoint(self) -> str:
+        return self.source_name
 
 
 @dataclass(frozen=True)
@@ -74,9 +81,16 @@ def materialize_view(db_path: Path, view: ViewDefinition) -> ViewMaterialized:
     with connect_readonly(db_path) as conn:
         if not table_exists(conn, "endpoint_records"):
             raise ConfigError("View export requires endpoint_records. Run centric-api fetch first.")
-        records_by_endpoint = _load_records_by_endpoint(conn, _view_endpoints(view))
-    indexes = _build_join_indexes(view, records_by_endpoint)
-    root_records = records_by_endpoint.get(view.root.endpoint, [])
+        records_by_source, source_exists = _load_records_by_source(conn, _view_sources(view))
+    root_key = _source_key(view.root.source_type, view.root.source_name)
+    if view.root.source_type == "table" and not source_exists.get(root_key, False):
+        message = (
+            f"View root table not found: {view.root.source_name}. "
+            "Run the model that creates it first."
+        )
+        raise ConfigError(message)
+    indexes = _build_join_indexes(view, records_by_source)
+    root_records = records_by_source.get(root_key, [])
     contexts: list[dict[str, Any]] = [{view.root.alias: record} for record in root_records]
     available_aliases = {view.root.alias}
     pending_filters = list(view.filters)
@@ -93,7 +107,7 @@ def materialize_view(db_path: Path, view: ViewDefinition) -> ViewMaterialized:
             contexts,
             join,
             indexes[(join.alias, join.to_path)],
-            endpoint_record_count=len(records_by_endpoint.get(join.endpoint, [])),
+            source_exists=source_exists.get(_source_key(join.source_type, join.source_name), False),
             view=view,
             warnings=warnings,
         )
@@ -189,32 +203,50 @@ def infer_export_format(output_path: Path | None, requested_format: str | None) 
     return "xlsx"
 
 
-def _load_records_by_endpoint(
+def _load_records_by_source(
     conn: sqlite3.Connection,
-    endpoints: set[str],
-) -> dict[str, list[dict[str, Any]]]:
-    records: dict[str, list[dict[str, Any]]] = {}
-    for endpoint in sorted(endpoints):
+    sources: set[SourceKey],
+) -> tuple[dict[SourceKey, list[dict[str, Any]]], dict[SourceKey, bool]]:
+    records: dict[SourceKey, list[dict[str, Any]]] = {}
+    exists: dict[SourceKey, bool] = {}
+    for source_type, source_name in sorted(sources):
+        key = _source_key(source_type, source_name)
+        if source_type == "endpoint":
+            rows = conn.execute(
+                """
+                SELECT record_id, payload_json
+                FROM endpoint_records
+                WHERE endpoint = ?
+                ORDER BY record_id
+                """,
+                [source_name],
+            ).fetchall()
+            records[key] = [_json_dict(row["payload_json"]) for row in rows]
+            exists[key] = bool(rows)
+            continue
+        _validate_sql_identifier(source_name, "view source table")
+        if not table_exists(conn, source_name):
+            records[key] = []
+            exists[key] = False
+            continue
         rows = conn.execute(
-            """
-            SELECT record_id, payload_json
-            FROM endpoint_records
-            WHERE endpoint = ?
-            ORDER BY record_id
-            """,
-            [endpoint],
+            f"SELECT * FROM {_quote_identifier(source_name)} ORDER BY rowid"
         ).fetchall()
-        records[endpoint] = [_json_dict(row["payload_json"]) for row in rows]
-    return records
+        records[key] = [dict(row) for row in rows]
+        exists[key] = True
+    return records, exists
 
 
-def _view_endpoints(view: ViewDefinition) -> set[str]:
-    return {view.root.endpoint, *(join.endpoint for join in view.joins)}
+def _view_sources(view: ViewDefinition) -> set[SourceKey]:
+    return {
+        _source_key(view.root.source_type, view.root.source_name),
+        *(_source_key(join.source_type, join.source_name) for join in view.joins),
+    }
 
 
 def _build_join_indexes(
     view: ViewDefinition,
-    records_by_endpoint: dict[str, list[dict[str, Any]]],
+    records_by_source: dict[SourceKey, list[dict[str, Any]]],
 ) -> dict[tuple[str, str], dict[str, list[dict[str, Any]]]]:
     indexes: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = {}
     for join in view.joins:
@@ -222,7 +254,8 @@ def _build_join_indexes(
         if key in indexes:
             continue
         index: dict[str, list[dict[str, Any]]] = {}
-        for payload in records_by_endpoint.get(join.endpoint, []):
+        source_key = _source_key(join.source_type, join.source_name)
+        for payload in records_by_source.get(source_key, []):
             for value in _join_keys(_extract_path(payload, join.to_path)):
                 index.setdefault(value, []).append(payload)
         indexes[key] = index
@@ -234,7 +267,7 @@ def _apply_join(
     join: ViewJoin,
     index: dict[str, list[dict[str, Any]]],
     *,
-    endpoint_record_count: int,
+    source_exists: bool,
     view: ViewDefinition,
     warnings: list[str],
 ) -> tuple[list[dict[str, Any]], MissingJoinDetail]:
@@ -286,17 +319,31 @@ def _apply_join(
             output.extend({**context, join.alias: match} for match in matches)
     return output, MissingJoinDetail(
         alias=join.alias,
-        endpoint=join.endpoint,
+        source_type=join.source_type,
+        source_name=join.source_name,
         from_path=join.from_path,
         to_path=join.to_path,
         missing_count=missing_count,
         missing_source_count=missing_source_count,
         missing_ref_count=missing_ref_count,
         filtered_out_count=filtered_out_count,
-        missing_endpoint=endpoint_record_count == 0,
+        missing_endpoint=not source_exists,
         filters_applied=bool(join.filters),
         sample_keys=tuple(sample_keys),
     )
+
+
+def _source_key(source_type: str, source_name: str) -> SourceKey:
+    return source_type, source_name
+
+
+def _validate_sql_identifier(value: str, label: str) -> None:
+    if not SQL_IDENTIFIER_PATTERN.match(value):
+        raise ConfigError(f"{label} must be a SQLite-safe identifier.")
+
+
+def _quote_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
 
 
 def _apply_available_filters(

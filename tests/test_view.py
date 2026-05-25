@@ -181,6 +181,106 @@ views:
     assert rows == [["Style", "Documents"], ["Linen Shirt", "Spec.pdf"]]
 
 
+def test_view_export_can_use_model_output_table_as_root(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE model_material_footprint (
+                style_id TEXT,
+                bom_id TEXT,
+                composition_name TEXT,
+                consumed_mass_kg REAL,
+                row_status TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO model_material_footprint (
+                style_id, bom_id, composition_name, consumed_mass_kg, row_status
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("S1", "B1", "Cotton", 1.25, "ok"),
+                ("S1", "B1", "Polyester", 0.75, "ok"),
+                ("S1", "B1", None, None, "error"),
+            ],
+        )
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "node_name": "Linen Shirt"},
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: material-footprint
+    root:
+      table: model_material_footprint
+      as: footprint
+    joins:
+      - as: style
+        endpoint: styles
+        from: footprint.style_id
+        to: id
+        relationship: one
+    filters:
+      - path: footprint.row_status
+        equals: ok
+    columns:
+      - header: Style
+        path: style.node_name
+      - header: Composition
+        path: footprint.composition_name
+      - header: KG
+        path: footprint.consumed_mass_kg
+        type: number
+""",
+        encoding="utf-8",
+    )
+    config = load_view_config(config_path)
+    view = select_view(config, "material-footprint")
+
+    materialized = materialize_view(db_path, view)
+
+    assert view.root.table == "model_material_footprint"
+    assert materialized.root_row_count == 3
+    assert materialized.rows == (
+        ("Linen Shirt", "Cotton", 1.25),
+        ("Linen Shirt", "Polyester", 0.75),
+    )
+
+
+def test_view_missing_model_output_root_table_is_clear(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path):
+        pass
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: missing-model
+    root:
+      table: model_missing
+      as: model
+    columns:
+      - header: Style
+        path: model.style_id
+""",
+        encoding="utf-8",
+    )
+    config = load_view_config(config_path)
+
+    with pytest.raises(ConfigError, match="Run the model that creates it first"):
+        materialize_view(db_path, select_view(config, "missing-model"))
+
+
 def test_view_rejects_independent_expansion_chains(tmp_path: Path) -> None:
     config_path = tmp_path / "views.yml"
     config_path.write_text(

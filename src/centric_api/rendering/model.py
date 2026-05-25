@@ -26,10 +26,13 @@ def summary_record(summary: ModelRunSummary) -> dict[str, Any]:
         "output_table": summary.output_table,
         "action": summary.action,
         "status": summary.status,
+        "started_at": summary.started_at,
+        "finished_at": summary.finished_at,
         "rows": summary.row_count,
         "issues": summary.issue_count,
         "errors": summary.error_count,
         "warnings": summary.warning_count,
+        "metrics": summary.metrics or {},
         "issue_details": [issue_record(issue) for issue in summary.issues],
     }
 
@@ -78,7 +81,20 @@ def print_human_model_summary(summary: ModelRunSummary) -> None:
     print(f"Issues:   {format_count(summary.issue_count)}")
     print(f"Errors:   {format_count(summary.error_count)}")
     print(f"Warnings: {format_count(summary.warning_count)}")
+    _print_metrics(summary)
     _print_issues(summary)
+
+
+def _print_metrics(summary: ModelRunSummary) -> None:
+    if not summary.metrics:
+        return
+    print()
+    print("Metrics")
+    for key, value in summary.metrics.items():
+        label = key.replace("_", " ").title()
+        if isinstance(value, int):
+            value = format_count(value)
+        print(f"  {label}: {value}")
 
 
 def _print_issues(summary: ModelRunSummary) -> None:

@@ -51,10 +51,21 @@ def test_model_cli_runs_private_model(tmp_path, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "ok"
     assert payload["rows"] == 1
+    assert payload["metrics"] == {"ok_rows": 1, "error_rows": 0}
 
     with sqlite3.connect(db_path) as conn:
         row = conn.execute("SELECT style_id, style_name FROM model_demo").fetchone()
+        metrics_json = conn.execute(
+            """
+            SELECT metrics_json
+            FROM model_runs
+            WHERE model_name = 'demo-model' AND action = 'run'
+            ORDER BY finished_at DESC
+            LIMIT 1
+            """
+        ).fetchone()[0]
     assert row == ("S1", "Style One")
+    assert json.loads(metrics_json) == {"ok_rows": 1, "error_rows": 0}
 
 
 def _write_demo_model(path: Path) -> None:
@@ -85,6 +96,7 @@ class DemoModel:
                 ModelColumn("style_name", "text"),
             ),
             rows=tuple(rows),
+            metrics={"ok_rows": len(rows), "error_rows": 0},
         )
 
 

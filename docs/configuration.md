@@ -220,7 +220,7 @@ object folder.
 ## View Config
 
 View configs use version `1` and reject unknown keys. They define flat spreadsheet views over cached
-endpoint records:
+endpoint records or calculated model output tables:
 
 ```yaml
 version: 1
@@ -252,4 +252,5 @@ views:
 
 Use `docs/views.md` as the full schema reference. The core rule is that the root plus one linear
 `many_expand` chain define row grain; other arrays should be `many_concat`. Filters can live on joins
-or on the final view and can reference joined aliases.
+or on the final view and can reference joined aliases. Use `endpoint` for cached Centric records and
+`table` for SQLite model output tables.

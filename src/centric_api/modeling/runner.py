@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..store import connect
@@ -36,6 +37,7 @@ def _execute_model(
     units_config: str | Path | None,
 ) -> ModelRunSummary:
     run_id = uuid.uuid4().hex
+    started_at = _utc_iso()
     with connect(db_path) as conn:
         ensure_model_tables(conn)
         ctx = ModelContext(
@@ -64,11 +66,14 @@ def _execute_model(
             output_table=model.definition.output_table,
             action=action,
             status=status,
+            started_at=started_at,
+            finished_at=_utc_iso(),
             row_count=row_count,
             issue_count=ctx.issue_count,
             error_count=ctx.error_count,
             warning_count=ctx.warning_count,
             issues=tuple(ctx.issues),
+            metrics=output.metrics if output is not None else None,
         )
         record_model_run(conn, summary)
         return summary
@@ -80,3 +85,7 @@ def _status(has_errors: bool, issues: list[object]) -> ModelStatus:
     if issues:
         return "attention"
     return "ok"
+
+
+def _utc_iso() -> str:
+    return datetime.now(UTC).isoformat()

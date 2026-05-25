@@ -262,6 +262,7 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "issue_count",
         "error_count",
         "warning_count",
+        "metrics_json",
     },
     "model_run_issues": {
         "run_id",

@@ -34,7 +34,7 @@ uv run centric-api view list
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
 uv run centric-api model list
-uv run centric-api model check style-bom-consumption
+uv run centric-api model check my-model
 uv run centric-api units convert 1500 g kg
 uv run centric-api units basis gsm
 uv run centric-api status
@@ -101,10 +101,10 @@ inspect one, and `centric-api bundle changelog FROM_BUNDLE_RUN_ID` to compare a 
 against the latest later run of the same bundle. Pass `--to BUNDLE_RUN_ID` for an exact comparison
 target.
 
-`view export` turns cached endpoint records into flat XLSX or CSV tables using configured view
-schemas. The repo includes `config/views.yml` as a demo; production schemas normally live in private
-`CENTRIC_API_HOME/views.yml` or are passed with `--view-config`. Views are read-only and local: they
-do not call the Centric API.
+`view export` turns cached endpoint records or calculated model output tables into flat XLSX or CSV
+tables using configured view schemas. The repo includes `config/views.yml` as a demo; production
+schemas normally live in private `CENTRIC_API_HOME/views.yml` or are passed with `--view-config`.
+Views are read-only and local: they do not call the Centric API.
 
 `status` gives a quick read-only overview of runtime home, DB path, locks, latest fetch/changelog,
 download, bundle, and endpoint counts. `doctor` validates local setup, config, credentials presence,

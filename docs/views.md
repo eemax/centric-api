@@ -1,8 +1,8 @@
 # View Exports
 
-View exports turn cached Centric endpoint records into flat spreadsheet tables. They are local and
-read-only: `centric-api view export` reads SQLite `endpoint_records` and writes an `.xlsx` or `.csv`
-file without calling the Centric API.
+View exports turn cached Centric endpoint records or calculated model output tables into flat
+spreadsheet tables. They are local and read-only: `centric-api view export` reads SQLite and writes
+an `.xlsx` or `.csv` file without calling the Centric API.
 
 Use views for business-facing tables such as BOM line exports, style/colorway rollups, supplier
 worksheets, and QA extracts. Use `bundle` when you need to package downloaded document files.
@@ -26,6 +26,20 @@ Filters are part of the schema, not command-line flags, so production exports st
 
 A view has one root and zero or more joins. The root plus any `many_expand` joins define row grain.
 All other joined arrays must use `many_concat`, otherwise the view is invalid.
+
+Sources can be cached endpoints or SQLite model output tables:
+
+```yaml
+root:
+  endpoint: styles
+  as: style
+```
+
+```yaml
+root:
+  table: model_my_model
+  as: model
+```
 
 For example, if `styles` is the root and `colorways` is a `many_expand` join, each output row is one
 style/colorway pair. Joined season, collection, supplier, or factory values can be repeated onto
@@ -161,6 +175,7 @@ View fields:
 - `name`: command name used by `view show` and `view export`.
 - `title`: human-readable title and default Excel sheet title.
 - `root.endpoint`: cached endpoint used as the starting table.
+- `root.table`: SQLite table used as the starting table, usually a `model_*` output table.
 - `root.as`: alias for the root record in joins and column paths.
 - `joins`: optional ordered joins. A join can reference aliases created by earlier joins.
 - `filters`: optional final row filters. Filters can reference root or joined aliases.
@@ -202,12 +217,15 @@ Join fields:
 
 - `as`: alias created by the join.
 - `endpoint`: cached endpoint to read.
+- `table`: SQLite table to read, usually a `model_*` output table.
 - `from`: path on an existing alias. Values are used as join keys.
-- `to`: path on the joined endpoint. Records whose `to` value matches `from` are joined.
+- `to`: path on the joined source. Records whose `to` value matches `from` are joined.
 - `relationship`: `one`, `many_concat`, or `many_expand`.
 - `missing`: optional `blank`, `drop`, or `error`.
 - `separator`: optional string for `many_concat` columns from this alias.
 - `filters`: optional filters applied to candidate joined records before they are attached.
+
+Roots and joins must define exactly one of `endpoint` or `table`.
 
 Relationships:
 
@@ -230,8 +248,8 @@ Missing behavior:
 Default missing behavior is `blank`.
 
 Exports report missing joins in both human and JSON output. The summary includes the join alias,
-target endpoint, `from -> to` paths, counts for unresolved references, blank source values, records
-excluded by join filters, whether the target endpoint cache is empty, and a capped list of sample
+target source, `from -> to` paths, counts for unresolved references, blank source values, records
+excluded by join filters, whether the target source is empty or missing, and a capped list of sample
 keys.
 
 Use `view check NAME` before exporting to run the same row materialization and missing-reference
@@ -340,5 +358,6 @@ When a view feels hard to model, check for two unrelated arrays. One of them pro
 `many_concat`, or the view should be split into two exports.
 
 Fetch every endpoint used by the view before exporting. Missing endpoints simply produce no joined
-records; `doctor` may grow view-specific checks later, but the export itself is intentionally
-local-cache based.
+records. Run every model whose output table is used by the view before exporting; a missing root
+table fails clearly, while a missing join table is reported as a missing join source. `doctor` may
+grow view-specific checks later, but the export itself is intentionally local-cache based.

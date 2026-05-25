@@ -12,11 +12,11 @@ def view_record(view: ViewDefinition) -> dict[str, Any]:
     return {
         "name": view.name,
         "title": view.title,
-        "root": {"endpoint": view.root.endpoint, "as": view.root.alias},
+        "root": {view.root.source_type: view.root.source_name, "as": view.root.alias},
         "joins": [
             {
                 "as": join.alias,
-                "endpoint": join.endpoint,
+                join.source_type: join.source_name,
                 "from": join.from_path,
                 "to": join.to_path,
                 "relationship": join.relationship,
@@ -86,14 +86,14 @@ def print_human_view_list(views: tuple[ViewDefinition, ...]) -> None:
     print(f"Views: {format_count(len(views))}")
     print()
     name_width = max(len("Name"), *(len(view.name) for view in views))
-    root_width = max(len("Root"), *(len(view.root.endpoint) for view in views))
+    root_width = max(len("Root"), *(len(_source_label(view.root)) for view in views))
     header = f"{'Name':<{name_width}}  {'Root':<{root_width}}  Columns  Title"
     print(header)
     print("-" * len(header))
     for view in views:
         print(
             f"{view.name:<{name_width}}  "
-            f"{view.root.endpoint:<{root_width}}  "
+            f"{_source_label(view.root):<{root_width}}  "
             f"{format_count(len(view.columns)):>7}  "
             f"{view.title}"
         )
@@ -103,18 +103,18 @@ def print_human_view_show(view: ViewDefinition) -> None:
     print(f"View: {view.name}")
     print()
     print(f"Title: {view.title}")
-    print(f"Root:  {view.root.endpoint} as {view.root.alias}")
+    print(f"Root:  {_source_label(view.root)} as {view.root.alias}")
     print()
     if view.joins:
         print("Joins")
         alias_width = max(len("Alias"), *(len(join.alias) for join in view.joins))
-        endpoint_width = max(len("Endpoint"), *(len(join.endpoint) for join in view.joins))
+        source_width = max(len("Source"), *(len(_source_label(join)) for join in view.joins))
         relationship_width = max(
             len("Relationship"),
             *(len(join.relationship) for join in view.joins),
         )
         header = (
-            f"  {'Alias':<{alias_width}}  {'Endpoint':<{endpoint_width}}  "
+            f"  {'Alias':<{alias_width}}  {'Source':<{source_width}}  "
             f"{'Relationship':<{relationship_width}}  From -> To"
         )
         print(header)
@@ -122,7 +122,7 @@ def print_human_view_show(view: ViewDefinition) -> None:
         for join in view.joins:
             print(
                 f"  {join.alias:<{alias_width}}  "
-                f"{join.endpoint:<{endpoint_width}}  "
+                f"{_source_label(join):<{source_width}}  "
                 f"{join.relationship:<{relationship_width}}  "
                 f"{join.from_path} -> {join.to_path}"
             )
@@ -181,13 +181,16 @@ def _print_missing_join_details(details: tuple[Any, ...], missing_count: int) ->
     print(f"Missing refs: {format_count(missing_count)}")
     for item in details:
         print()
-        print(f"  {item.alias} -> {item.endpoint}")
+        print(f"  {item.alias} -> {_source_label(item)}")
         print(f"    join:    {_missing_join_path(item)}")
         print(f"    missing: {_missing_join_summary(item)}")
         for category in _missing_join_extra_categories(item):
             print(f"    {category}")
         if item.missing_endpoint:
-            print(f"    endpoint cache empty: fetch {item.endpoint}")
+            if getattr(item, "source_type", "endpoint") == "table":
+                print(f"    table missing: run the model that creates {item.source_name}")
+            else:
+                print(f"    endpoint cache empty: fetch {item.source_name}")
         if item.sample_keys and item.missing_ref_count:
             print(f"    samples: {', '.join(item.sample_keys[:3])}")
         if item.filters_applied and item.filtered_out_count:
@@ -259,7 +262,10 @@ def _filter_record(item: Any) -> dict[str, Any]:
 def _missing_join_detail_record(item: Any) -> dict[str, Any]:
     return {
         "alias": item.alias,
-        "endpoint": item.endpoint,
+        "source_type": item.source_type,
+        "source": item.source_name,
+        "endpoint": item.source_name if item.source_type == "endpoint" else None,
+        "table": item.source_name if item.source_type == "table" else None,
         "from": item.from_path,
         "to": item.to_path,
         "missing": item.missing_count,
@@ -278,3 +284,9 @@ def _filter_label(item: Any) -> str:
     path = str(record.pop("path"))
     value = next(iter(record.values()), None)
     return f"{path} {operator} {json.dumps(value, default=str)}"
+
+
+def _source_label(item: Any) -> str:
+    source_type = getattr(item, "source_type", "endpoint")
+    source_name = getattr(item, "source_name", getattr(item, "endpoint", ""))
+    return source_name if source_type == "endpoint" else f"table:{source_name}"

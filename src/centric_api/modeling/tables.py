@@ -37,7 +37,8 @@ def ensure_model_tables(conn: sqlite3.Connection) -> None:
             row_count INTEGER NOT NULL,
             issue_count INTEGER NOT NULL,
             error_count INTEGER NOT NULL,
-            warning_count INTEGER NOT NULL
+            warning_count INTEGER NOT NULL,
+            metrics_json TEXT
         );
 
         CREATE TABLE IF NOT EXISTS model_run_issues (
@@ -60,6 +61,7 @@ def ensure_model_tables(conn: sqlite3.Connection) -> None:
         ON model_run_issues(run_id, severity);
         """
     )
+    _ensure_column(conn, "model_runs", "metrics_json", "TEXT")
 
 
 def replace_output_table(
@@ -107,9 +109,10 @@ def record_model_run(conn: sqlite3.Connection, summary: ModelRunSummary) -> None
         """
         INSERT INTO model_runs (
             run_id, model_name, title, output_table, action, status,
-            started_at, finished_at, row_count, issue_count, error_count, warning_count
+            started_at, finished_at, row_count, issue_count, error_count, warning_count,
+            metrics_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             summary.run_id,
@@ -118,12 +121,13 @@ def record_model_run(conn: sqlite3.Connection, summary: ModelRunSummary) -> None
             summary.output_table,
             summary.action,
             summary.status,
-            _utc_iso(),
-            _utc_iso(),
+            summary.started_at,
+            summary.finished_at,
             summary.row_count,
             summary.issue_count,
             summary.error_count,
             summary.warning_count,
+            json.dumps(summary.metrics, default=str) if summary.metrics is not None else None,
         ],
     )
     insert_issues(conn, summary.run_id, summary.issues)
@@ -195,3 +199,14 @@ def _safe_suffix(value: str) -> str:
 
 def _utc_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    sql_type: str,
+) -> None:
+    columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({_quote(table)})")}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {_quote(table)} ADD COLUMN {_quote(column)} {sql_type}")

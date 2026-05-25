@@ -17,10 +17,11 @@ COLUMN_TYPES = {"text", "number", "integer", "boolean", "date", "datetime"}
 FILTER_OPERATORS = {"equals", "in", "contains", "matches", "exists", "gt", "gte", "lt", "lte"}
 ROOT_CONFIG_KEYS = {"version", "output_dir", "options", "views"}
 VIEW_CONFIG_KEYS = {"name", "title", "root", "joins", "filters", "columns", "options"}
-ROOT_VIEW_KEYS = {"endpoint", "as"}
+ROOT_VIEW_KEYS = {"endpoint", "table", "as"}
 JOIN_CONFIG_KEYS = {
     "as",
     "endpoint",
+    "table",
     "from",
     "to",
     "relationship",
@@ -46,20 +47,38 @@ ColumnType = Literal["text", "number", "integer", "boolean", "date", "datetime"]
 
 @dataclass(frozen=True)
 class ViewRoot:
-    endpoint: str
+    endpoint: str | None
+    table: str | None
     alias: str
+
+    @property
+    def source_name(self) -> str:
+        return self.endpoint or self.table or ""
+
+    @property
+    def source_type(self) -> str:
+        return "endpoint" if self.endpoint is not None else "table"
 
 
 @dataclass(frozen=True)
 class ViewJoin:
     alias: str
-    endpoint: str
+    endpoint: str | None
+    table: str | None
     from_path: str
     to_path: str
     relationship: Relationship = "one"
     missing: MissingPolicy | None = None
     separator: str | None = None
     filters: tuple[ViewFilter, ...] = ()
+
+    @property
+    def source_name(self) -> str:
+        return self.endpoint or self.table or ""
+
+    @property
+    def source_type(self) -> str:
+        return "endpoint" if self.endpoint is not None else "table"
 
 
 @dataclass(frozen=True)
@@ -205,8 +224,10 @@ def _parse_root(raw: Any, field_name: str) -> ViewRoot:
     if not isinstance(raw, dict):
         raise ConfigError(f"{field_name} must be an object.")
     _reject_unknown_keys(raw, ROOT_VIEW_KEYS, field_name)
+    endpoint, table = _parse_source(raw, field_name)
     return ViewRoot(
-        endpoint=_required_string(raw.get("endpoint"), f"{field_name}.endpoint"),
+        endpoint=endpoint,
+        table=table,
         alias=_required_string(raw.get("as"), f"{field_name}.as"),
     )
 
@@ -230,9 +251,11 @@ def _parse_join(raw: Any, field_name: str) -> ViewJoin:
         _parse_filter(item, f"{field_name}.filters[{filter_index}]")
         for filter_index, item in enumerate(_list(raw.get("filters", []), f"{field_name}.filters"))
     )
+    endpoint, table = _parse_source(raw, field_name)
     return ViewJoin(
         alias=_required_string(raw.get("as"), f"{field_name}.as"),
-        endpoint=_required_string(raw.get("endpoint"), f"{field_name}.endpoint"),
+        endpoint=endpoint,
+        table=table,
         from_path=_required_string(raw.get("from"), f"{field_name}.from"),
         to_path=_required_string(raw.get("to"), f"{field_name}.to"),
         relationship=relationship,  # type: ignore[arg-type]
@@ -240,6 +263,18 @@ def _parse_join(raw: Any, field_name: str) -> ViewJoin:
         separator=separator,
         filters=filters,
     )
+
+
+def _parse_source(raw: dict[str, Any], field_name: str) -> tuple[str | None, str | None]:
+    has_endpoint = raw.get("endpoint") is not None
+    has_table = raw.get("table") is not None
+    if has_endpoint == has_table:
+        raise ConfigError(f"{field_name} must define exactly one of endpoint or table.")
+    endpoint = (
+        _required_string(raw.get("endpoint"), f"{field_name}.endpoint") if has_endpoint else None
+    )
+    table = _required_string(raw.get("table"), f"{field_name}.table") if has_table else None
+    return endpoint, table
 
 
 def _parse_filter(raw: Any, field_name: str) -> ViewFilter:
