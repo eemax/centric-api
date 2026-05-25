@@ -45,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
             return run_doctor(args)
         if args.command == "rebuild-db":
             return run_rebuild_db(args)
+    except KeyboardInterrupt:
+        print("Interrupted.", file=sys.stderr)
+        return 130
     except (AuthError, ConfigError, FetchError, FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

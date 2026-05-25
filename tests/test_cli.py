@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
 
@@ -8,6 +9,7 @@ import pytest
 from centric_api.changelog import ChangelogRun, record_changelog
 from centric_api.cli import main
 from centric_api.cli_parser import build_parser
+from centric_api.commands.bundle import run_bundle
 from centric_api.commands.common import (
     append_cron_log_event,
     append_cron_log_fetch_records,
@@ -15,6 +17,8 @@ from centric_api.commands.common import (
     try_acquire_fetch_lock,
 )
 from centric_api.commands.cron import run_cron_fetch_once
+from centric_api.commands.download import run_download
+from centric_api.commands.fetch import run_fetch
 from centric_api.models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
 from centric_api.rendering.changelog import print_human_changelog_changes
 from centric_api.rendering.logs import render_log_line
@@ -83,6 +87,19 @@ dimensions:
 
     output = capsys.readouterr().out
     assert "500 ml = 0.5 l (volume)" in output
+
+
+def test_cli_keyboard_interrupt_returns_clean_130(monkeypatch, capsys) -> None:
+    def interrupt(_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("centric_api.cli.run_status", interrupt)
+
+    assert main(["status"]) == 130
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "Interrupted.\n"
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
@@ -732,6 +749,53 @@ def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     release_fetch_lock(lock_path)
 
     assert not lock_path.exists()
+
+
+def test_fetch_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+
+    def interrupt(_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("centric_api.commands.fetch._run_fetch_unlocked", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_fetch(
+            argparse.Namespace(
+                delta_dry_run=False,
+                skip_fetch_lock=False,
+            )
+        )
+
+    assert not (tmp_path / "fetch.lock").exists()
+
+
+def test_download_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+
+    def interrupt(_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("centric_api.commands.download._run_download_unlocked", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_download(argparse.Namespace(dry_run=False))
+
+    assert not (tmp_path / "download.lock").exists()
+
+
+def test_bundle_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+
+    def interrupt(_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("centric_api.commands.bundle._run_bundle_unlocked", interrupt)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_bundle(argparse.Namespace(action="run", dry_run=False))
+
+    assert not (tmp_path / "bundle.lock").exists()
 
 
 def test_parse_jsonl_preserves_non_json_lines() -> None:

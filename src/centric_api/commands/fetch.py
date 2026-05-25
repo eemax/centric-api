@@ -266,9 +266,23 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                             error=message,
                         )
                         write_delta_state(delta_state_file, delta_state)
-    except Exception:
+    except BaseException as exc:
+        if isinstance(exc, KeyboardInterrupt) and log_callback:
+            log_callback(
+                {
+                    "level": "summary",
+                    "event": "run_interrupted",
+                    "run_id": run_id,
+                    "mode": mode,
+                    "endpoints_ok": len(results),
+                    "endpoints_failed": len(failures),
+                    "endpoints_total": len(selected_specs),
+                    "duration_seconds": round(time.time() - started, 3),
+                }
+            )
         if fetch_log_file is not None:
             fetch_log_file.close()
+            fetch_log_file = None
         raise
 
     _emit_pipeline_progress(pipeline_progress, "Pipeline...")
