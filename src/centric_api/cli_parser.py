@@ -131,6 +131,53 @@ def build_parser() -> argparse.ArgumentParser:
     view_export_parser.add_argument("--output", default=None)
     view_export_parser.add_argument("--json", action="store_true")
 
+    load_parser = subparsers.add_parser("load", help="Load spreadsheet rows into Centric API")
+    load_parser.add_argument("--load-config", default=None)
+    load_actions = load_parser.add_subparsers(dest="action", required=True)
+
+    load_list_parser = load_actions.add_parser("list", help="List configured load jobs")
+    load_list_parser.add_argument("--json", action="store_true")
+
+    load_show_parser = load_actions.add_parser("show", help="Show one load job")
+    load_show_parser.add_argument("name")
+    load_show_parser.add_argument("--json", action="store_true")
+
+    load_check_parser = load_actions.add_parser("check", help="Validate a load workbook")
+    load_check_parser.add_argument("name")
+    load_check_parser.add_argument("workbook")
+    load_check_parser.add_argument("--sheet", default=None)
+    load_check_parser.add_argument("--limit", type=_parse_positive_int, default=None)
+    load_check_parser.add_argument("--db", default=None)
+    load_check_parser.add_argument("--quiet", action="store_true")
+    load_check_parser.add_argument("--json", action="store_true")
+
+    load_run_parser = load_actions.add_parser("run", help="Run a load job")
+    load_run_parser.add_argument("name")
+    load_run_parser.add_argument("workbook")
+    load_run_parser.add_argument("--sheet", default=None)
+    load_run_parser.add_argument("--limit", type=_parse_positive_int, default=None)
+    load_run_parser.add_argument("--db", default=None)
+    load_run_parser.add_argument("--env-file", default=None)
+    load_run_parser.add_argument("--dry-run", action="store_true")
+    load_run_parser.add_argument("--yes", action="store_true")
+    load_run_parser.add_argument("--quiet", action="store_true")
+    load_run_parser.add_argument("--json", action="store_true")
+
+    load_retry_parser = load_actions.add_parser(
+        "retry", help="Retry failed rows from a review workbook"
+    )
+    load_retry_parser.add_argument("name")
+    load_retry_parser.add_argument("workbook")
+    load_retry_parser.add_argument("--sheet", default=None)
+    load_retry_parser.add_argument("--statuses", default=None)
+    load_retry_parser.add_argument("--limit", type=_parse_positive_int, default=None)
+    load_retry_parser.add_argument("--db", default=None)
+    load_retry_parser.add_argument("--env-file", default=None)
+    load_retry_parser.add_argument("--dry-run", action="store_true")
+    load_retry_parser.add_argument("--yes", action="store_true")
+    load_retry_parser.add_argument("--quiet", action="store_true")
+    load_retry_parser.add_argument("--json", action="store_true")
+
     model_parser = subparsers.add_parser("model", help="Run private calculated data models")
     model_parser.add_argument("--models-dir", default=None)
     model_parser.add_argument("--units-config", default=None)
@@ -225,6 +272,16 @@ def _parse_days_back(value: str) -> int:
         raise argparse.ArgumentTypeError(
             f"--days must be between {MIN_DAYS_BACK} and {MAX_DAYS_BACK}."
         )
+    return parsed
+
+
+def _parse_positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be an integer.") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be a positive integer.")
     return parsed
 
 

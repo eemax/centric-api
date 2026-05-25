@@ -1,6 +1,6 @@
 # centric-api
 
-Centric API local data toolkit: fetch, cache, changelog, download, bundle, and export Centric
+Centric API local data toolkit: fetch, cache, changelog, download, bundle, export, and load Centric
 records and documents.
 
 Runtime state is stored in `~/.centric-api` by default. Set `CENTRIC_API_HOME` to use a different
@@ -11,6 +11,7 @@ Docs:
 - [CLI reference](docs/cli.md)
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
+- [Load jobs](docs/load.md)
 - [Modeling spec](docs/modeling.md)
 - [Operations](docs/operations.md)
 - [Units](docs/units.md)
@@ -33,6 +34,9 @@ uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
 uv run centric-api view list
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
+uv run centric-api load check material-create materials.xlsx
+uv run centric-api load run material-create materials.xlsx --dry-run
+uv run centric-api load retry material-create review.xlsx --dry-run
 uv run centric-api model list
 uv run centric-api model check my-model
 uv run centric-api units convert 1500 g kg
@@ -105,6 +109,13 @@ target.
 tables using configured view schemas. The repo includes `config/views.yml` as a demo; production
 schemas normally live in private `CENTRIC_API_HOME/views.yml` or are passed with `--view-config`.
 Views are read-only and local: they do not call the Centric API.
+
+`load` validates workbook rows and can send API requests to Centric. The repo includes
+`material-create`, which reads material rows from Excel, resolves `Material Type` through cached
+`material_types`, and posts to `/v2/materials`. Use `load check` and `load run --dry-run` before
+running with `--yes`. Real runs write a `review.xlsx` copy for row-level success, failure, and
+validation status; `load retry` reprocesses failed or validation-error rows from that review
+workbook. Load schemas live in `config/load.yml` plus private `CENTRIC_API_HOME/load.yml`.
 
 `status` gives a quick read-only overview of runtime home, DB path, locks, latest fetch/changelog,
 download, bundle, and endpoint counts. `doctor` validates local setup, config, credentials presence,

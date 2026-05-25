@@ -16,6 +16,7 @@ locks, raw evidence, downloads, bundles, and the default SQLite database.
 | Download config | `config/download.yml` | `CENTRIC_API_HOME/download.yml` | `--download-config` |
 | Bundle config | `config/bundle.yml` | `CENTRIC_API_HOME/bundle.yml` | `--bundle-config` |
 | View config | `config/views.yml` | `CENTRIC_API_HOME/views.yml` | `--view-config` |
+| Load config | `config/load.yml` plus private overlay when present | `CENTRIC_API_HOME/load.yml` | `--load-config` |
 | Units config | `config/units.yml` plus private overlay when present | `CENTRIC_API_HOME/units.yml` | `--units-config` |
 | Model modules | n/a | `CENTRIC_API_HOME/models/*.py` | `--models-dir` |
 
@@ -254,3 +255,47 @@ Use `docs/views.md` as the full schema reference. The core rule is that the root
 `many_expand` chain define row grain; other arrays should be `many_concat`. Filters can live on joins
 or on the final view and can reference joined aliases. Use `endpoint` for cached Centric records and
 `table` for SQLite model output tables.
+
+## Load Config
+
+Load configs use version `1` and reject unknown keys. They define spreadsheet-to-request jobs:
+
+```yaml
+version: 1
+
+jobs:
+  - name: material-create
+    title: Material Create
+    method: POST
+    path: /v2/materials
+    input:
+      header_row: 1
+    columns:
+      code:
+        header: Code
+        headers: [Material Code]
+        type: text
+        required: true
+      node_name:
+        header: Material Name
+        headers: [Material, Name]
+        type: text
+        required: true
+      material_type:
+        header: Material Type
+        type: ref
+        required: true
+        resolve:
+          endpoint: material_types
+          match: node_name
+          output: id
+          filters:
+            available: true
+    body:
+      code: code
+      node_name: node_name
+      product_type: material_type
+```
+
+Use `docs/load.md` as the full schema reference. The bundled `material-create` job can be extended
+or replaced by private `CENTRIC_API_HOME/load.yml`.

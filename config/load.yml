@@ -1,0 +1,45 @@
+version: 1
+
+jobs:
+  - name: material-create
+    title: Material Create
+    method: POST
+    path: /v2/materials
+    input:
+      header_row: 1
+    columns:
+      code:
+        header: Code
+        headers:
+          - Material Code
+        type: text
+        required: true
+      node_name:
+        header: Material Name
+        headers:
+          - Material
+          - Name
+        type: text
+        required: true
+      material_type:
+        header: Material Type
+        headers:
+          - Type
+        type: ref
+        required: true
+        resolve:
+          endpoint: material_types
+          match: node_name
+          output: id
+          filters:
+            available: true
+      description:
+        header: Description
+        headers:
+          - Desc
+        type: text
+    body:
+      code: code
+      node_name: node_name
+      product_type: material_type
+      description: description

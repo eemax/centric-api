@@ -10,6 +10,7 @@ from .commands.cron import run_cron
 from .commands.doctor import run_doctor
 from .commands.download import run_download
 from .commands.fetch import run_fetch
+from .commands.load import run_load_command
 from .commands.model import run_model_command
 from .commands.rebuild_db import run_rebuild_db
 from .commands.status import run_status
@@ -35,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_bundle(args)
         if args.command == "view":
             return run_view(args)
+        if args.command == "load":
+            return run_load_command(args)
         if args.command == "model":
             return run_model_command(args)
         if args.command == "units":

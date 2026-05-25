@@ -194,6 +194,41 @@ Options:
 
 See [View exports](views.md) for the schema contract and authoring rules.
 
+## Load Jobs
+
+```bash
+uv run centric-api load list
+uv run centric-api load show material-create
+uv run centric-api load check material-create materials.xlsx
+uv run centric-api load check material-create materials.xlsx --sheet Materials
+uv run centric-api load run material-create materials.xlsx --dry-run
+uv run centric-api load run material-create materials.xlsx --yes
+uv run centric-api load retry material-create review.xlsx --dry-run
+uv run centric-api load retry material-create review.xlsx --yes
+```
+
+`load` validates spreadsheet rows and can send API requests to Centric. The bundled
+`material-create` job reads Excel rows, resolves `Material Type` through cached `material_types`, and
+posts valid rows to `/v2/materials`. If `--sheet` is omitted, the first worksheet is used.
+Real runs write a review workbook when rows receive API outcomes or validation errors; `retry`
+processes rows in a review workbook with `_cent_load_status` of `failed` or `validation_error`.
+
+Options:
+
+- `--load-config PATH`: default resolution is `config/load.yml` plus private
+  `CENTRIC_API_HOME/load.yml`.
+- `--sheet NAME`: worksheet to read. Defaults to the first worksheet.
+- `--limit N`: process only the first N non-empty data rows.
+- `--db PATH`: SQLite cache used for reference resolution.
+- `--dry-run`: write planned request artifacts without API calls.
+- `--yes`: required for real API writes.
+- `--env-file PATH`: credential file for real API writes.
+- `--statuses LIST`: retry statuses to process. Defaults to `failed,validation_error`.
+- `--quiet`: suppress human progress lines.
+- `--json`: machine-readable output.
+
+See [Load jobs](load.md) for the schema contract and safety rules.
+
 ## Models
 
 ```bash
