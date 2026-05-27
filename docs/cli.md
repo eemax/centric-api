@@ -35,6 +35,39 @@ uv run centric-api fetch --resume
 run directory under `CENTRIC_API_HOME/raw/runs`, ingests successful endpoint files into SQLite, and
 then updates changelog tables for changed records.
 
+Human fetch output starts with run context, including mode, selected endpoint count, raw output
+directory, and delta state or explicit modified window. Endpoint progress uses `START`, page, and
+`DONE`/`EMPTY` lines; the page line keeps the current page, item, skip, elapsed, progress, average,
+and ETA fields with comma-formatted counts. Post-fetch ingest and changelog work is grouped under a
+`Pipeline` section with status and elapsed time, followed by a concise stderr run result. The final
+human endpoint table includes retry, warning, validation, and elapsed-time columns. Failed human runs
+include the fetch log path when logging is enabled.
+
+Example human progress shape:
+
+```text
+Fetch run
+run=2026-05-27T001500Z-delta  mode=delta  endpoints=2
+raw=/path/to/raw/runs/2026-05-27T001500Z-delta
+delta_state=/path/to/delta.yml  overlap=10m
+
+[styles] START  expected=1,000  limit=50  skip=0  retries=0  delta_floor=2026-05-26T23:50:00Z  elapsed=420ms
+[styles] page 1/20: page_items=50 total_items=50 skip=0 next_skip=50 elapsed=0.81s progress=5.0% avg_page=810ms eta=15.4s
+[styles] DONE   items=1,000/1,000  pages=20  retries=0  warnings=0  elapsed=16.4s
+
+Pipeline
+manifest=writing
+manifest=ok path=/path/to/raw/runs/2026-05-27T001500Z-delta/manifest.json
+ingest=running
+ingest=ok records_read=1,000 upserts=980 deletes=20
+changelog=running
+changelog=ok events=84 scoped=1,000
+pipeline=done ingest=ok changelog=ok elapsed=2.1s
+
+Fetch result
+status=ok endpoints=2/2 records=1,000 pages=20 retries=0 elapsed=18.5s
+```
+
 Modes:
 
 - Default delta mode derives an `_modified_at=ge` floor from `delta.yml`.

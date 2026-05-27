@@ -31,14 +31,15 @@ from ..fetch_delta_state import (
 )
 from ..fetch_manifest import endpoint_manifest_record, write_run_manifest
 from ..fetcher import FetchError, run_endpoint
-from ..models import EndpointSpec, FetchRunResult
+from ..models import EndpointSpec, FetchProgressEvent, FetchRunResult
 from ..rendering.fetch import (
     print_delta_dry_run,
+    print_human_fetch_run_header,
     print_human_fetch_summary,
     print_json_fetch_records,
     write_progress_line,
 )
-from ..rendering.logs import LogCallback, build_log_callback
+from ..rendering.logs import LogCallback, build_log_callback, format_duration
 from ..schema import load_endpoint_schemas
 from ..store import IngestResult, ingest_raw_dir
 from .common import release_fetch_lock, try_acquire_fetch_lock, utc_iso, utc_now
@@ -102,11 +103,12 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
         return 0
 
     fetch_log_file: TextIO | None = None
+    fetch_log_path: Path | None = None
     log_callback: LogCallback | None = None
     if args.log_level != "off":
-        log_path = runtime_path(DEFAULT_FETCH_LOG_PATH)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        fetch_log_file = log_path.open("a", encoding="utf-8")
+        fetch_log_path = runtime_path(DEFAULT_FETCH_LOG_PATH)
+        fetch_log_path.parent.mkdir(parents=True, exist_ok=True)
+        fetch_log_file = fetch_log_path.open("a", encoding="utf-8")
         log_callback = build_log_callback(
             fetch_log_file,
             log_level=args.log_level,
@@ -131,6 +133,18 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     failures: list[tuple[str, str]] = []
     endpoint_records: list[dict[str, Any]] = []
     pipeline_progress = None if args.quiet or args.json else _write_pipeline_progress
+    fetch_progress = None if args.quiet else _fetch_progress_writer()
+    if not args.quiet and not args.json:
+        print_human_fetch_run_header(
+            mode=mode,
+            run_id=run_id,
+            raw_dir=fetcher_cfg.output_dir,
+            selected_count=len(selected_specs),
+            delta_state_file=delta_state_file,
+            overlap_days=overlap_days,
+            overlap_minutes=overlap_minutes,
+            modified_since=modified_since,
+        )
     try:
         with init_auth_context(
             auth_settings,
@@ -178,7 +192,8 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         output_file_suffix=".delta" if mode == "delta" else "",
                         create_empty_output=mode == "full",
                         delta_floor=delta_floor if mode == "delta" else None,
-                        progress_callback=None if args.quiet else write_progress_line,
+                        modified_since=modified_since,
+                        progress_callback=fetch_progress,
                         api_log_callback=log_callback,
                     )
                     results.append(result)
@@ -228,7 +243,12 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                 except (AuthError, FetchError) as exc:
                     message = str(exc)
                     failures.append((spec.name, message))
-                    print(f"[{spec.name}] error: {message}", file=sys.stderr)
+                    attempt_duration = (datetime.now(UTC) - attempt_start_dt).total_seconds()
+                    print(
+                        f"[{spec.name}] ERROR  elapsed={format_duration(attempt_duration)}  "
+                        f"{message}",
+                        file=sys.stderr,
+                    )
                     attempt_end = utc_iso()
                     if log_callback:
                         log_callback(
@@ -237,10 +257,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                                 "event": "endpoint_failed",
                                 "endpoint": spec.name,
                                 "mode": mode,
-                                "duration_seconds": round(
-                                    (datetime.now(UTC) - attempt_start_dt).total_seconds(),
-                                    3,
-                                ),
+                                "duration_seconds": round(attempt_duration, 3),
                                 "error": message,
                             }
                         )
@@ -285,102 +302,183 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             fetch_log_file = None
         raise
 
-    _emit_pipeline_progress(pipeline_progress, "Pipeline...")
-    _emit_pipeline_progress(pipeline_progress, "Writing run manifest...")
-    manifest_path = write_run_manifest(
-        output_dir=fetcher_cfg.output_dir,
-        run_id=run_id,
-        mode=mode,
-        run_started_at=run_started_dt,
-        run_finished_at=utc_now(),
-        selected_specs=selected_specs,
-        results=results,
-        failures=failures,
-        endpoint_records=endpoint_records,
-        modified_since=modified_since,
-        utc_iso=utc_iso,
-    )
+    pipeline_started = time.time()
+    _emit_pipeline_progress(pipeline_progress, "")
+    _emit_pipeline_progress(pipeline_progress, "Pipeline")
+    _emit_pipeline_progress(pipeline_progress, "manifest=writing")
+    manifest_path = fetcher_cfg.output_dir / "manifest.json"
     ingest_result: IngestResult | None = None
     changelog_run: ChangelogRun | None = None
     changelog_skipped: str | None = None
     pipeline_error: str | None = None
-    if results:
-        db_path = resolve_db_path(args.db)
-        _emit_pipeline_progress(pipeline_progress, "Ingesting fetched records...")
-        schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
-        ingest_result = ingest_raw_dir(fetcher_cfg.output_dir, db_path, schemas=schemas)
+    ingest_status = "skipped"
+    changelog_status = "skipped"
+    try:
+        manifest_path = write_run_manifest(
+            output_dir=fetcher_cfg.output_dir,
+            run_id=run_id,
+            mode=mode,
+            run_started_at=run_started_dt,
+            run_finished_at=utc_now(),
+            selected_specs=selected_specs,
+            results=results,
+            failures=failures,
+            endpoint_records=endpoint_records,
+            modified_since=modified_since,
+            utc_iso=utc_iso,
+        )
+    except Exception as exc:
+        pipeline_error = f"manifest failed: {exc}"
+        _emit_pipeline_progress(pipeline_progress, f"manifest=failed error={exc}")
         if log_callback:
             log_callback(
                 {
                     "level": "summary",
-                    "event": "ingest_ok",
-                    "applied_files": ingest_result.applied_files,
-                    "skipped_files": ingest_result.skipped_files,
-                    "records_read": ingest_result.records_read,
-                    "upserts": ingest_result.records_upserted,
-                    "deletes": ingest_result.records_deleted,
-                    "hard_deletes": ingest_result.records_hard_deleted,
-                    "invalid": ingest_result.invalid_records,
+                    "event": "manifest_failed",
+                    "error": str(exc),
                 }
             )
+    else:
+        _emit_pipeline_progress(pipeline_progress, f"manifest=ok path={manifest_path}")
+
+    if results and pipeline_error is None:
+        db_path = resolve_db_path(args.db)
+        _emit_pipeline_progress(pipeline_progress, "ingest=running")
         try:
-            _emit_pipeline_progress(pipeline_progress, "Updating changelog...")
-            changelog_run, changelog_skipped = _run_changelog_after_ingest(
-                db_path,
-                ingest_result,
-                progress=_indented_pipeline_progress(pipeline_progress),
-            )
+            schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
+            ingest_result = ingest_raw_dir(fetcher_cfg.output_dir, db_path, schemas=schemas)
         except Exception as exc:
-            pipeline_error = f"changelog failed after ingest: {exc}"
+            ingest_status = "failed"
+            pipeline_error = f"ingest failed: {exc}"
+            _emit_pipeline_progress(pipeline_progress, f"ingest=failed error={exc}")
             if log_callback:
                 log_callback(
                     {
                         "level": "summary",
-                        "event": "changelog_failed",
+                        "event": "ingest_failed",
                         "error": str(exc),
                     }
                 )
         else:
-            if changelog_skipped:
-                _emit_pipeline_progress(
-                    pipeline_progress,
-                    f"Changelog skipped: {changelog_skipped}.",
-                )
+            ingest_status = "ok"
+            _emit_pipeline_progress(
+                pipeline_progress,
+                (
+                    f"ingest=ok records_read={_fmt_cli_int(ingest_result.records_read)} "
+                    f"upserts={_fmt_cli_int(ingest_result.records_upserted)} "
+                    f"deletes={_fmt_cli_int(ingest_result.records_deleted)}"
+                ),
+            )
             if log_callback:
-                if changelog_run is not None:
+                log_callback(
+                    {
+                        "level": "summary",
+                        "event": "ingest_ok",
+                        "applied_files": ingest_result.applied_files,
+                        "skipped_files": ingest_result.skipped_files,
+                        "records_read": ingest_result.records_read,
+                        "upserts": ingest_result.records_upserted,
+                        "deletes": ingest_result.records_deleted,
+                        "hard_deletes": ingest_result.records_hard_deleted,
+                        "invalid": ingest_result.invalid_records,
+                    }
+                )
+        if ingest_result is not None:
+            _emit_pipeline_progress(pipeline_progress, "changelog=running")
+            try:
+                changelog_run, changelog_skipped = _run_changelog_after_ingest(
+                    db_path,
+                    ingest_result,
+                    progress=_indented_pipeline_progress(pipeline_progress),
+                )
+            except Exception as exc:
+                changelog_status = "failed"
+                pipeline_error = f"changelog failed after ingest: {exc}"
+                _emit_pipeline_progress(pipeline_progress, f"changelog=failed error={exc}")
+                if log_callback:
                     log_callback(
                         {
                             "level": "summary",
-                            "event": "changelog_ok",
-                            "events": changelog_run.event_count,
-                            "scoped": changelog_run.scoped_record_count,
-                            "run_id": changelog_run.run_id,
+                            "event": "changelog_failed",
+                            "error": str(exc),
                         }
                     )
-                elif changelog_skipped:
-                    log_callback(
-                        {
-                            "level": "summary",
-                            "event": "changelog_skipped",
-                            "reason": changelog_skipped,
-                        }
+            else:
+                if changelog_skipped:
+                    changelog_status = "skipped"
+                    _emit_pipeline_progress(
+                        pipeline_progress,
+                        f"changelog=skipped reason={changelog_skipped}",
                     )
-    elif log_callback:
-        log_callback(
-            {
-                "level": "summary",
-                "event": "ingest_skipped",
-                "reason": "no successful endpoint fetches",
-            }
+                elif changelog_run is not None:
+                    changelog_status = "ok"
+                    _emit_pipeline_progress(
+                        pipeline_progress,
+                        (
+                            f"changelog=ok events={_fmt_cli_int(changelog_run.event_count)} "
+                            f"scoped={_fmt_cli_int(changelog_run.scoped_record_count)}"
+                        ),
+                    )
+                if log_callback:
+                    if changelog_run is not None:
+                        log_callback(
+                            {
+                                "level": "summary",
+                                "event": "changelog_ok",
+                                "events": changelog_run.event_count,
+                                "scoped": changelog_run.scoped_record_count,
+                                "run_id": changelog_run.run_id,
+                            }
+                        )
+                    elif changelog_skipped:
+                        log_callback(
+                            {
+                                "level": "summary",
+                                "event": "changelog_skipped",
+                                "reason": changelog_skipped,
+                            }
+                        )
+    else:
+        skipped_reason = "no successful endpoint fetches"
+        if pipeline_error is not None:
+            skipped_reason = pipeline_error
+        _emit_pipeline_progress(
+            pipeline_progress,
+            f"ingest=skipped reason={skipped_reason}",
         )
+        if log_callback:
+            log_callback(
+                {
+                    "level": "summary",
+                    "event": "ingest_skipped",
+                    "reason": skipped_reason,
+                }
+            )
+    _emit_pipeline_progress(
+        pipeline_progress,
+        (
+            f"pipeline=done ingest={ingest_status} changelog={changelog_status} "
+            f"elapsed={format_duration(time.time() - pipeline_started)}"
+        ),
+    )
 
     duration_seconds = time.time() - started
+    run_status = "ok"
+    if pipeline_error or (selected_specs and len(failures) == len(selected_specs)):
+        run_status = "failed"
+    elif failures:
+        run_status = "partial"
+    _emit_run_result_progress(
+        pipeline_progress,
+        status=run_status,
+        endpoints_ok=len(results),
+        endpoints_total=len(selected_specs),
+        records=sum(result.items_fetched for result in results),
+        pages=sum(result.pages_fetched for result in results),
+        retries=sum(result.retries_used for result in results),
+        elapsed_seconds=duration_seconds,
+    )
     if log_callback:
-        run_status = "ok"
-        if pipeline_error or (selected_specs and len(failures) == len(selected_specs)):
-            run_status = "failed"
-        elif failures:
-            run_status = "partial"
         log_callback(
             {
                 "level": "summary",
@@ -423,6 +521,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             changelog_run=changelog_run,
             changelog_skipped=changelog_skipped,
             pipeline_error=pipeline_error,
+            log_path=fetch_log_path if args.log_level != "off" else None,
         )
     return 1 if failures or pipeline_error else 0
 
@@ -525,12 +624,48 @@ def _write_pipeline_progress(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def _fetch_progress_writer() -> Callable[[FetchProgressEvent], None]:
+    seen_endpoint = False
+
+    def emit(event: FetchProgressEvent) -> None:
+        nonlocal seen_endpoint
+        if event.kind == "endpoint_start":
+            if seen_endpoint:
+                print(file=sys.stderr)
+            seen_endpoint = True
+        write_progress_line(event)
+
+    return emit
+
+
 def _emit_pipeline_progress(
     progress: PipelineProgressCallback | None,
     message: str,
 ) -> None:
     if progress is not None:
         progress(message)
+
+
+def _emit_run_result_progress(
+    progress: PipelineProgressCallback | None,
+    *,
+    status: str,
+    endpoints_ok: int,
+    endpoints_total: int,
+    records: int,
+    pages: int,
+    retries: int,
+    elapsed_seconds: float,
+) -> None:
+    if progress is None:
+        return
+    progress("")
+    progress("Fetch result")
+    progress(
+        f"status={status} endpoints={_fmt_cli_int(endpoints_ok)}/{_fmt_cli_int(endpoints_total)} "
+        f"records={_fmt_cli_int(records)} pages={_fmt_cli_int(pages)} "
+        f"retries={_fmt_cli_int(retries)} elapsed={format_duration(elapsed_seconds)}"
+    )
 
 
 def _indented_pipeline_progress(
@@ -543,3 +678,7 @@ def _indented_pipeline_progress(
         progress(f"  {message}")
 
     return emit
+
+
+def _fmt_cli_int(value: int) -> str:
+    return f"{value:,}"

@@ -19,8 +19,17 @@ from centric_api.commands.common import (
 from centric_api.commands.cron import run_cron_fetch_once
 from centric_api.commands.download import run_download
 from centric_api.commands.fetch import run_fetch
-from centric_api.models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
+from centric_api.fetch_common import FetchError
+from centric_api.models import (
+    AuthSettings,
+    CountSpec,
+    EndpointSpec,
+    FetcherConfig,
+    FetchProgressEvent,
+    FetchRunResult,
+)
 from centric_api.rendering.changelog import print_human_changelog_changes
+from centric_api.rendering.fetch import write_progress_line
 from centric_api.rendering.logs import render_log_line
 from centric_api.runtime_io import parse_jsonl
 from centric_api.store import IngestResult, connect
@@ -546,6 +555,31 @@ def test_fetch_log_renderer_uses_human_run_and_endpoint_lines() -> None:
     )
 
 
+def test_fetch_log_renderer_includes_failed_request_url() -> None:
+    line = render_log_line(
+        {
+            "timestamp": "2026-01-01T00:00:01Z",
+            "level": "summary",
+            "event": "request_failed",
+            "endpoint": "styles",
+            "request_kind": "data fetch",
+            "method": "GET",
+            "url": "https://centric.example.com/api/v2/styles?skip=50&limit=50",
+            "reason": "non_retryable_http_status",
+            "status_code": 400,
+            "attempt": 1,
+            "max_attempts": 3,
+        }
+    )
+
+    assert line == (
+        "2026-01-01T00:00:01Z REQUEST failed endpoint=styles "
+        "request_kind=\"data fetch\" method=GET "
+        "url=https://centric.example.com/api/v2/styles?skip=50&limit=50 "
+        "reason=non_retryable_http_status status_code=400 attempt=1 max_attempts=3"
+    )
+
+
 def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
     lock_path = tmp_path / "fetch.lock"
@@ -578,13 +612,24 @@ def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsy
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "Fetch Complete" in captured.out
-    assert "Pipeline..." in captured.err
-    assert "Writing run manifest..." in captured.err
-    assert "Ingesting fetched records..." in captured.err
-    assert "Updating changelog..." in captured.err
+    assert "Fetch complete" in captured.out
+    assert "Warnings" in captured.out
+    assert "Validation" in captured.out
+    assert "ok" in captured.out
+    assert "Fetch run" in captured.err
+    assert "mode=delta" in captured.err
+    assert "Pipeline" in captured.err
+    assert "manifest=writing" in captured.err
+    assert "manifest=ok path=" in captured.err
+    assert "ingest=running" in captured.err
+    assert "ingest=ok records_read=1 upserts=1 deletes=0" in captured.err
+    assert "changelog=running" in captured.err
     assert "  Mode: scoped refresh" in captured.err
     assert "  Writing changelog tables..." in captured.err
+    assert "changelog=ok events=1 scoped=1" in captured.err
+    assert "pipeline=done ingest=ok changelog=ok elapsed=" in captured.err
+    assert "Fetch result" in captured.err
+    assert "status=ok endpoints=1/1 records=1 pages=1 retries=0 elapsed=" in captured.err
 
 
 def test_fetch_json_suppresses_post_fetch_pipeline_progress(
@@ -600,8 +645,228 @@ def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     records = parse_jsonl(captured.out)
     assert exit_code == 0
     assert any(record.get("record_type") == "pipeline_summary" for record in records)
-    assert "Pipeline..." not in captured.err
-    assert "Updating changelog..." not in captured.err
+    assert "Fetch run" not in captured.err
+    assert "Pipeline" not in captured.err
+    assert "changelog=running" not in captured.err
+
+
+def test_fetch_progress_renderer_uses_clean_endpoint_lifecycle(capsys) -> None:
+    write_progress_line(
+        FetchProgressEvent(
+            kind="endpoint_start",
+            endpoint="styles",
+            delta_floor="2026-05-27T00:00:00Z",
+            start_skip=0,
+            limit=50,
+            expected_count=1000,
+            retries_used=0,
+            elapsed_seconds=0.42,
+        )
+    )
+    write_progress_line(
+        FetchProgressEvent(
+            kind="endpoint_finish",
+            endpoint="styles",
+            pages_fetched=20,
+            items_fetched=1000,
+            expected_count=1000,
+            retries_used=0,
+            warnings_count=0,
+            elapsed_seconds=16.4,
+        )
+    )
+    write_progress_line(
+        FetchProgressEvent(
+            kind="endpoint_finish",
+            endpoint="styles",
+            resumed=True,
+            start_skip=500,
+            pages_fetched=10,
+            items_fetched=1000,
+            expected_count=1000,
+            retries_used=0,
+            warnings_count=0,
+            elapsed_seconds=8.2,
+        )
+    )
+    write_progress_line(
+        FetchProgressEvent(
+            kind="page_fetched",
+            endpoint="styles",
+            page_index=20,
+            expected_pages=20,
+            page_items=50,
+            items_fetched=1000,
+            skip=950,
+            next_skip=1000,
+            elapsed_seconds=16.4,
+            percent_complete=100,
+            rolling_avg_seconds=0.82,
+            estimated_remaining_seconds=0,
+        )
+    )
+
+    output = capsys.readouterr().err
+    assert (
+        "[styles] START  expected=1,000  limit=50  skip=0  retries=0 "
+        " delta_floor=2026-05-27T00:00:00Z  elapsed=420ms"
+    ) in output
+    assert (
+        "[styles] DONE   items=1,000/1,000  pages=20  retries=0  warnings=0  "
+        "elapsed=16.4s"
+    ) in output
+    assert (
+        "[styles] DONE   items=1,000/1,000  pages=10  retries=0  warnings=0  "
+        "resumed=true  start_skip=500  elapsed=8.2s"
+    ) in output
+    assert (
+        "[styles] page 20/20: page_items=50 total_items=1,000 skip=950 "
+        "next_skip=1,000 elapsed=16.40s progress=100.0% avg_page=820ms eta=0ms"
+    ) in output
+
+
+def test_fetch_failure_reports_elapsed_and_log_path(tmp_path, monkeypatch, capsys) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    def fail_endpoint(*_args, **_kwargs):
+        raise FetchError("HTTP 429 Too Many Requests")
+
+    monkeypatch.setattr("centric_api.commands.fetch.run_endpoint", fail_endpoint)
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db")])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "[styles] ERROR  elapsed=" in captured.err
+    assert "HTTP 429 Too Many Requests" in captured.err
+    assert "Fetch finished with failures" in captured.out
+    assert f"Log: {tmp_path / 'logs' / 'fetch.log'}" in captured.out
+
+
+def test_fetch_quiet_suppresses_progress_but_reports_errors(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    def fail_endpoint(*_args, **_kwargs):
+        raise FetchError("HTTP 429 Too Many Requests")
+
+    monkeypatch.setattr("centric_api.commands.fetch.run_endpoint", fail_endpoint)
+
+    exit_code = main(["fetch", "--quiet", "--db", str(tmp_path / "centric.db")])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "[styles] ERROR  elapsed=" in captured.err
+    assert "HTTP 429 Too Many Requests" in captured.err
+    assert "Fetch run" not in captured.err
+    assert "Pipeline" not in captured.err
+    assert "Fetch result" not in captured.err
+
+
+def test_fetch_partial_result_reports_partial_status(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    endpoints = [
+        EndpointSpec(
+            name="styles",
+            api_version="v2",
+            path="styles",
+            count_spec=CountSpec(path="count/Style"),
+        ),
+        EndpointSpec(
+            name="boms",
+            api_version="v2",
+            path="boms",
+            count_spec=CountSpec(path="count/BOM"),
+        ),
+    ]
+    fetcher_cfg = FetcherConfig(
+        base_url="https://centric.example.com",
+        output_dir=tmp_path / "raw",
+        checkpoint_dir=tmp_path / "checkpoints",
+    )
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.load_fetcher_settings",
+        lambda _path: (fetcher_cfg, AuthSettings(timeout=1), endpoints),
+    )
+
+    class Auth:
+        base_url = "https://centric.example.com"
+        timeout = 1
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.init_auth_context",
+        lambda *_args, **_kwargs: Auth(),
+    )
+
+    def fake_run_endpoint(spec, *_args, **_kwargs):
+        if spec.name == "boms":
+            raise FetchError("HTTP 400 Bad Request")
+        return FetchRunResult(
+            endpoint="styles",
+            pages_fetched=2,
+            items_fetched=100,
+            expected_count=100,
+            retries_used=0,
+            start_skip=0,
+            next_skip=100,
+            duration_seconds=1.2,
+            output_file=tmp_path / "raw" / "styles.jsonl",
+            checkpoint_file=tmp_path / "checkpoints" / "styles.json",
+            id_validation_checked_items=100,
+            id_validation_unique_ids=100,
+        )
+
+    monkeypatch.setattr("centric_api.commands.fetch.run_endpoint", fake_run_endpoint)
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.ingest_raw_dir",
+        lambda *_args, **_kwargs: IngestResult(
+            applied_files=1,
+            skipped_files=0,
+            records_read=100,
+            records_upserted=100,
+            records_deleted=0,
+            records_hard_deleted=0,
+            invalid_records=0,
+            endpoints={"styles": 100},
+            upserted_record_ids_by_endpoint={"styles": ("S1",)},
+            deleted_record_ids_by_endpoint={},
+            deleted_record_delete_types_by_endpoint={},
+        ),
+    )
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.record_changelog",
+        lambda *_args, **_kwargs: ChangelogRun(
+            run_id="changelog-1",
+            endpoint_count=1,
+            record_count=100,
+            event_count=1,
+            full_refresh=False,
+            scoped_record_count=100,
+        ),
+    )
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db")])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "[boms] ERROR  elapsed=" in captured.err
+    assert "status=partial endpoints=1/2 records=100 pages=2 retries=0 elapsed=" in captured.err
+    assert "Fetch finished with failures" in captured.out
+    assert "- boms: HTTP 400 Bad Request" in captured.out
 
 
 def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:

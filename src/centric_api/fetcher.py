@@ -36,6 +36,7 @@ def run_endpoint(
     output_file_suffix: str = "",
     create_empty_output: bool = True,
     delta_floor: str | None = None,
+    modified_since: str | None = None,
     progress_callback: Callable[[FetchProgressEvent], None] | None = None,
     api_log_callback: ApiLogCallback = None,
     resume_completed_hint: bool | None = None,
@@ -231,6 +232,9 @@ def run_endpoint(
         FetchProgressEvent(
             kind="endpoint_start",
             endpoint=spec.name,
+            delta_floor=effective_delta_floor,
+            modified_since=modified_since,
+            resumed=resume,
             start_skip=start_skip,
             limit=spec.limit,
             expected_count=expected_count,
@@ -356,6 +360,10 @@ def run_endpoint(
             FetchProgressEvent(
                 kind="endpoint_finish",
                 endpoint=spec.name,
+                delta_floor=effective_delta_floor,
+                modified_since=modified_since,
+                resumed=resume,
+                start_skip=start_skip,
                 pages_fetched=pages_fetched,
                 items_fetched=items_fetched,
                 expected_count=expected_count,

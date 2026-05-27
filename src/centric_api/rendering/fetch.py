@@ -11,24 +11,58 @@ from ..store import IngestResult
 from .logs import format_duration, format_seconds
 
 
+def print_human_fetch_run_header(
+    *,
+    mode: str,
+    run_id: str,
+    raw_dir: Path,
+    selected_count: int,
+    delta_state_file: Path,
+    overlap_days: int,
+    overlap_minutes: int,
+    modified_since: str | None,
+) -> None:
+    print("Fetch run", file=sys.stderr)
+    print(
+        f"run={run_id}  mode={mode}  endpoints={_fmt_int(selected_count)}",
+        file=sys.stderr,
+    )
+    print(f"raw={raw_dir}", file=sys.stderr)
+    if mode == "delta":
+        overlap = _format_overlap(overlap_days, overlap_minutes)
+        print(
+            f"delta_state={delta_state_file}  overlap={overlap}",
+            file=sys.stderr,
+        )
+    elif modified_since is not None:
+        print(f"modified_since={modified_since}", file=sys.stderr)
+    print(file=sys.stderr)
+
+
 def write_progress_line(event: FetchProgressEvent) -> None:
     if event.kind == "endpoint_start":
         expected = event.expected_count if event.expected_count is not None else "unknown"
-        print(
-            f"[{event.endpoint}] start: skip={event.start_skip} limit={event.limit} "
-            f"expected={expected} retries={event.retries_used} "
-            f"elapsed={format_seconds(event.elapsed_seconds)}",
-            file=sys.stderr,
-        )
+        pieces = [
+            f"expected={_fmt_int(expected)}",
+            f"limit={_fmt_int(event.limit)}",
+            f"skip={_fmt_int(event.start_skip)}",
+            f"retries={_fmt_int(event.retries_used)}",
+        ]
+        if event.delta_floor is not None:
+            pieces.append(f"delta_floor={event.delta_floor}")
+        elif event.modified_since is not None:
+            pieces.append(f"modified_since={event.modified_since}")
+        pieces.append(f"elapsed={format_duration(event.elapsed_seconds)}")
+        print(f"[{event.endpoint}] START  {'  '.join(pieces)}", file=sys.stderr)
         return
     if event.kind == "page_fetched":
-        page_label = str(event.page_index)
+        page_label = _fmt_int(event.page_index)
         if event.expected_pages is not None:
-            page_label = f"{page_label}/{event.expected_pages}"
+            page_label = f"{page_label}/{_fmt_int(event.expected_pages)}"
         line = (
-            f"[{event.endpoint}] page {page_label}: page_items={event.page_items} "
-            f"total_items={event.items_fetched} skip={event.skip} next_skip={event.next_skip} "
-            f"elapsed={format_seconds(event.elapsed_seconds)}"
+            f"[{event.endpoint}] page {page_label}: page_items={_fmt_int(event.page_items)} "
+            f"total_items={_fmt_int(event.items_fetched)} skip={_fmt_int(event.skip)} "
+            f"next_skip={_fmt_int(event.next_skip)} elapsed={format_seconds(event.elapsed_seconds)}"
         )
         if event.percent_complete is not None:
             line += f" progress={event.percent_complete:.1f}%"
@@ -39,15 +73,23 @@ def write_progress_line(event: FetchProgressEvent) -> None:
         print(line, file=sys.stderr)
         return
     if event.kind == "warning":
-        print(f"[{event.endpoint}] warning: {event.message}", file=sys.stderr)
+        print(f"[{event.endpoint}] WARN   {event.message}", file=sys.stderr)
         return
     if event.kind == "endpoint_finish":
-        print(
-            f"[{event.endpoint}] finish: pages={event.pages_fetched} "
-            f"items={event.items_fetched} retries={event.retries_used} "
-            f"warnings={event.warnings_count} elapsed={format_seconds(event.elapsed_seconds)}",
-            file=sys.stderr,
-        )
+        status = "EMPTY" if event.expected_count == 0 and event.items_fetched == 0 else "DONE"
+        fetched = _fmt_int(event.items_fetched)
+        expected = _fmt_int(event.expected_count)
+        pieces = [
+            f"items={fetched}/{expected}",
+            f"pages={_fmt_int(event.pages_fetched)}",
+            f"retries={_fmt_int(event.retries_used)}",
+            f"warnings={_fmt_int(event.warnings_count)}",
+        ]
+        if event.resumed:
+            pieces.append("resumed=true")
+            pieces.append(f"start_skip={_fmt_int(event.start_skip)}")
+        pieces.append(f"elapsed={format_duration(event.elapsed_seconds)}")
+        print(f"[{event.endpoint}] {status:<5}  {'  '.join(pieces)}", file=sys.stderr)
 
 
 def print_human_fetch_summary(
@@ -63,10 +105,11 @@ def print_human_fetch_summary(
     changelog_run: ChangelogRun | None,
     changelog_skipped: str | None,
     pipeline_error: str | None,
+    log_path: Path | None = None,
 ) -> None:
-    title = (
-        "Fetch Complete" if not failures and not pipeline_error else "Fetch Finished With Failures"
-    )
+    title = "Fetch complete"
+    if failures or pipeline_error:
+        title = "Fetch finished with failures"
     print(title)
     print()
     print(f"Mode: {mode}")
@@ -75,40 +118,73 @@ def print_human_fetch_summary(
     print()
     print("Summary")
     print(f"Endpoints: {len(results)} ok, {len(failures)} failed, {selected_count} total")
-    print(f"Records:   {sum(result.items_fetched for result in results)} fetched")
-    print(f"Pages:     {sum(result.pages_fetched for result in results)} fetched")
+    print(f"Records:   {_fmt_int(sum(result.items_fetched for result in results))} fetched")
+    print(f"Pages:     {_fmt_int(sum(result.pages_fetched for result in results))} fetched")
     print(f"Time:      {format_duration(duration_seconds)}")
-    print(f"Retries:   {sum(result.retries_used for result in results)}")
+    print(f"Retries:   {_fmt_int(sum(result.retries_used for result in results))}")
     if results:
         endpoint_width = max(len("Endpoint"), *(len(result.endpoint) for result in results))
-        header = f"{'Endpoint':<{endpoint_width}}  {'Records':>7}  {'Expected':>8}  {'Pages':>5}"
+        rows = [
+            (
+                result.endpoint,
+                "ok",
+                _fmt_int(result.items_fetched),
+                _fmt_int(result.expected_count),
+                _fmt_int(result.pages_fetched),
+                _fmt_int(result.retries_used),
+                format_duration(result.duration_seconds),
+            )
+            for result in results
+        ]
+        records_width = max(len("Records"), *(len(row[2]) for row in rows))
+        expected_width = max(len("Expected"), *(len(row[3]) for row in rows))
+        pages_width = max(len("Pages"), *(len(row[4]) for row in rows))
+        retries_width = max(len("Retries"), *(len(row[5]) for row in rows))
+        time_width = max(len("Time"), *(len(row[6]) for row in rows))
+        warnings_width = max(
+            len("Warnings"),
+            *(len(_fmt_int(len(result.warnings))) for result in results),
+        )
+        validations = [_validation_status(result) for result in results]
+        validation_width = max(len("Validation"), *(len(value) for value in validations))
+        header = (
+            f"{'Endpoint':<{endpoint_width}}  {'Status':<6}  "
+            f"{'Records':>{records_width}}  {'Expected':>{expected_width}}  "
+            f"{'Pages':>{pages_width}}  {'Retries':>{retries_width}}  "
+            f"{'Warnings':>{warnings_width}}  {'Validation':<{validation_width}}  "
+            f"{'Time':>{time_width}}"
+        )
         print()
         print(header)
         print("-" * len(header))
-        for result in results:
+        for row, result, validation in zip(rows, results, validations, strict=True):
+            endpoint, status, records, expected, pages, retries, elapsed = row
             print(
-                f"{result.endpoint:<{endpoint_width}}  "
-                f"{result.items_fetched:>7}  {result.expected_count:>8}  "
-                f"{result.pages_fetched:>5}"
+                f"{endpoint:<{endpoint_width}}  {status:<6}  "
+                f"{records:>{records_width}}  {expected:>{expected_width}}  "
+                f"{pages:>{pages_width}}  {retries:>{retries_width}}  "
+                f"{_fmt_int(len(result.warnings)):>{warnings_width}}  "
+                f"{validation:<{validation_width}}  "
+                f"{elapsed:>{time_width}}"
             )
     if ingest_result is not None:
         print()
         print("Ingest")
         print(
-            f"Files:     {ingest_result.applied_files} applied, "
-            f"{ingest_result.skipped_files} skipped"
+            f"Files:     {_fmt_int(ingest_result.applied_files)} applied, "
+            f"{_fmt_int(ingest_result.skipped_files)} skipped"
         )
-        print(f"Records:   {ingest_result.records_read} read")
-        print(f"Upserts:   {ingest_result.records_upserted}")
-        print(f"Deletes:   {ingest_result.records_deleted}")
-        print(f"Hard del:  {ingest_result.records_hard_deleted}")
+        print(f"Records:   {_fmt_int(ingest_result.records_read)} read")
+        print(f"Upserts:   {_fmt_int(ingest_result.records_upserted)}")
+        print(f"Deletes:   {_fmt_int(ingest_result.records_deleted)}")
+        print(f"Hard del:  {_fmt_int(ingest_result.records_hard_deleted)}")
         if ingest_result.invalid_records:
-            print(f"Invalid:   {ingest_result.invalid_records}")
+            print(f"Invalid:   {_fmt_int(ingest_result.invalid_records)}")
     if changelog_run is not None:
         print()
         print("Changelog")
-        print(f"Events:    {changelog_run.event_count}")
-        print(f"Scoped:    {changelog_run.scoped_record_count}")
+        print(f"Events:    {_fmt_int(changelog_run.event_count)}")
+        print(f"Scoped:    {_fmt_int(changelog_run.scoped_record_count)}")
         print(f"Run:       {changelog_run.run_id}")
     elif changelog_skipped:
         print()
@@ -122,6 +198,9 @@ def print_human_fetch_summary(
         print("Failures")
         for endpoint, message in failures:
             print(f"- {endpoint}: {message}")
+    if (failures or pipeline_error) and log_path is not None:
+        print()
+        print(f"Log: {log_path}")
 
 
 def print_json_fetch_records(
@@ -186,6 +265,36 @@ def print_delta_dry_run(
             }
         )
     )
+
+
+def _fmt_int(value: int | str | None) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, int):
+        return f"{value:,}"
+    return str(value)
+
+
+def _format_overlap(days: int, minutes: int) -> str:
+    pieces: list[str] = []
+    if days:
+        pieces.append(f"{days}d")
+    if minutes:
+        pieces.append(f"{minutes}m")
+    return " ".join(pieces) if pieces else "0m"
+
+
+def _validation_status(result: FetchRunResult) -> str:
+    count_status = result.count_validation_status
+    id_status = result.id_validation_status
+    if count_status == "passed" and id_status == "passed":
+        return "ok"
+    failed = [
+        f"{label}_failed"
+        for label, status in (("count", count_status), ("id", id_status))
+        if status != "passed"
+    ]
+    return "+".join(failed) if failed else "unknown"
 
 
 def _ingest_record(result: IngestResult | None) -> dict[str, Any] | None:

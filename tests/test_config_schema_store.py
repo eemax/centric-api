@@ -177,6 +177,45 @@ endpoints:
         get_expected_count(endpoints[0], auth, fetcher_cfg)
 
 
+def test_summary_request_failure_logs_exact_request_url(tmp_path: Path) -> None:
+    class Auth:
+        base_url = "https://centric.example.com"
+
+        def request(self, *_args, **_kwargs):
+            class Response:
+                status_code = 400
+                reason_phrase = "Bad Request"
+                text = '{"error": "bad filter"}'
+                headers = {"content-type": "application/json"}
+
+            return Response()
+
+    spec = EndpointSpec(
+        name="styles",
+        api_version="v2",
+        path="styles",
+        count_spec=CountSpec(path="count/Style", query_params={"foo": "bar"}),
+    )
+    fetcher_cfg = FetcherConfig(
+        base_url="https://centric.example.com",
+        output_dir=tmp_path / "raw",
+        checkpoint_dir=tmp_path / "checkpoints",
+    )
+    events = []
+
+    with pytest.raises(FetchError, match="non-retryable HTTP 400"):
+        get_expected_count(spec, Auth(), fetcher_cfg, api_log_callback=events.append)
+
+    request_failed = next(event for event in events if event.get("event") == "request_failed")
+    assert request_failed["level"] == "summary"
+    assert request_failed["endpoint"] == "styles"
+    assert request_failed["request_kind"] == "count preflight"
+    assert request_failed["method"] == "GET"
+    assert request_failed["url"] == (
+        "https://centric.example.com/api/v2/count/Style?foo=bar&decoded=true"
+    )
+
+
 def test_delta_zero_count_skips_empty_raw_file(tmp_path: Path) -> None:
     class Auth:
         base_url = "https://centric.example.com"
