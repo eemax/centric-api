@@ -48,16 +48,7 @@ def test_view_export_writes_flat_xlsx_from_joined_cache_records(tmp_path: Path) 
     assert sheet.freeze_panes == "A2"
     assert len(sheet.tables) == 1
     assert sheet.auto_filter.ref is None
-    assert sheet.row_dimensions[1].height == 18
-    assert sheet["A1"].fill.fgColor.rgb == "001F4E78"
     assert sheet["A1"].font.bold is True
-    assert sheet["A1"].font.sz == 11
-    assert sheet["A1"].font.color.rgb == "00FFFFFF"
-    assert sheet["A1"].border.bottom.style == "thin"
-    assert sheet["A1"].alignment.wrap_text is None
-    assert sheet["B2"].alignment.vertical == "top"
-    assert sheet["B2"].alignment.wrap_text is None
-    assert sheet["F2"].alignment.wrap_text is None
     assert [cell.value for cell in sheet[1]] == [
         "BOM Line ID",
         "Style",

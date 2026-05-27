@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 
-from centric_api.auth import AuthContext
+from centric_api.auth import AuthContext, AuthError
 
 
 def test_auth_context_reuses_cached_token(tmp_path: Path) -> None:
@@ -88,6 +89,60 @@ def test_auth_context_refreshes_cached_token_on_401(tmp_path: Path) -> None:
     assert json.loads(token_path.read_text(encoding="utf-8"))["token"] == "fresh-token"
 
 
+def test_auth_context_ignores_mismatched_cache_and_requires_credentials(tmp_path: Path) -> None:
+    token_path = tmp_path / "auth" / "token.json"
+    token_path.parent.mkdir()
+    token_path.write_text(
+        json.dumps(
+            {
+                "base_url": "https://other.example.com",
+                "username": "user",
+                "token": "wrong-host-token",
+            }
+        ),
+        encoding="utf-8",
+    )
+    auth = AuthContext(
+        base_url="https://centric.example.com",
+        username="user",
+        password=None,
+        timeout=30,
+        client=_Client(post_token="unused"),
+        token_cache_path=token_path,
+    )
+
+    with pytest.raises(AuthError, match="CENTRIC_USERNAME/CENTRIC_PASSWORD"):
+        auth.ensure_token()
+
+
+def test_auth_context_rejects_failed_session_response(tmp_path: Path) -> None:
+    auth = AuthContext(
+        base_url="https://centric.example.com",
+        username="user",
+        password="bad-pass",
+        timeout=30,
+        client=_PostClient(httpx.Response(401, text="denied")),
+        token_cache_path=tmp_path / "auth" / "token.json",
+    )
+
+    with pytest.raises(AuthError, match="Session auth failed with status 401"):
+        auth.ensure_token()
+
+
+def test_auth_context_rejects_session_response_without_token(tmp_path: Path) -> None:
+    auth = AuthContext(
+        base_url="https://centric.example.com",
+        username="user",
+        password="pass",
+        timeout=30,
+        client=_PostClient(httpx.Response(200, json={"ok": True})),
+        token_cache_path=tmp_path / "auth" / "token.json",
+    )
+
+    with pytest.raises(AuthError, match="missing token"):
+        auth.ensure_token()
+
+
 class _Client:
     def __init__(self, *, post_token: str, request_statuses: list[int] | None = None) -> None:
         self.post_token = post_token
@@ -105,6 +160,17 @@ class _Client:
         status_code = self.request_statuses[min(self.request_count, len(self.request_statuses) - 1)]
         self.request_count += 1
         return httpx.Response(status_code, json={})
+
+    def close(self) -> None:
+        return None
+
+
+class _PostClient:
+    def __init__(self, response: httpx.Response) -> None:
+        self.response = response
+
+    def post(self, *_args, **_kwargs) -> httpx.Response:
+        return self.response
 
     def close(self) -> None:
         return None

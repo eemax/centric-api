@@ -4,7 +4,13 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from centric_api.cli import main
+from centric_api.config import ConfigError
+from centric_api.modeling import ModelDefinition, ModelOutput
+from centric_api.modeling.registry import discover_models
+from centric_api.modeling.runner import run_model
 from centric_api.store import connect
 
 
@@ -68,6 +74,55 @@ def test_model_cli_runs_private_model(tmp_path, capsys) -> None:
     assert json.loads(metrics_json) == {"ok_rows": 1, "error_rows": 0}
 
 
+def test_model_run_fails_when_required_endpoint_is_missing(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path):
+        pass
+
+    summary = run_model(db_path, _RequiresMissingEndpointModel())
+
+    assert summary.status == "failed"
+    assert summary.error_count == 1
+    assert summary.issues[0].code == "missing_endpoint"
+    with sqlite3.connect(db_path) as conn:
+        output_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_missing_endpoint'"
+        ).fetchone()
+        run_row = conn.execute(
+            "SELECT status, error_count FROM model_runs WHERE model_name = 'requires-missing'"
+        ).fetchone()
+    assert output_exists is None
+    assert run_row == ("failed", 1)
+
+
+def test_model_output_validation_preserves_existing_output_table(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute("CREATE TABLE model_bad_output (value TEXT)")
+        conn.execute("INSERT INTO model_bad_output (value) VALUES ('existing')")
+
+    with pytest.raises(ConfigError, match="at least one column"):
+        run_model(db_path, _EmptyOutputModel())
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT value FROM model_bad_output").fetchall()
+        run_count = conn.execute(
+            "SELECT COUNT(*) FROM model_runs WHERE model_name = 'empty-output'"
+        ).fetchone()[0]
+    assert rows == [("existing",)]
+    assert run_count == 0
+
+
+def test_model_registry_rejects_duplicate_names(tmp_path: Path) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    _write_named_model(models_dir / "one.py", "duplicate-model")
+    _write_named_model(models_dir / "two.py", "duplicate-model")
+
+    with pytest.raises(ConfigError, match="Duplicate model name"):
+        discover_models(models_dir)
+
+
 def _write_demo_model(path: Path) -> None:
     path.write_text(
         """
@@ -104,6 +159,57 @@ MODEL = DemoModel()
 """,
         encoding="utf-8",
     )
+
+
+def _write_named_model(path: Path, name: str) -> None:
+    path.write_text(
+        f"""
+from centric_api.modeling import ModelColumn, ModelDefinition, ModelOutput
+
+
+class TestModel:
+    definition = ModelDefinition(name={name!r}, title="Test", output_table="model_test")
+
+    def check(self, ctx):
+        return None
+
+    def run(self, ctx):
+        return ModelOutput(columns=(ModelColumn("value"),), rows=())
+
+
+MODEL = TestModel()
+""",
+        encoding="utf-8",
+    )
+
+
+class _RequiresMissingEndpointModel:
+    definition = ModelDefinition(
+        name="requires-missing",
+        title="Requires Missing",
+        output_table="model_missing_endpoint",
+        required_endpoints=("missing_endpoint",),
+    )
+
+    def check(self, _ctx) -> None:
+        return None
+
+    def run(self, _ctx) -> ModelOutput:
+        raise AssertionError("run should not be called when required endpoints are missing")
+
+
+class _EmptyOutputModel:
+    definition = ModelDefinition(
+        name="empty-output",
+        title="Empty Output",
+        output_table="model_bad_output",
+    )
+
+    def check(self, _ctx) -> None:
+        return None
+
+    def run(self, _ctx) -> ModelOutput:
+        return ModelOutput(columns=(), rows=())
 
 
 def _insert_endpoint_record(
