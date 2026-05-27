@@ -2,16 +2,13 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from centric_api.cli import main
+from centric_api.rendering.help import should_color, top_level_help
 
 
 def test_cli_help_commands(capsys) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["--help"])
+    assert main(["--help"]) == 0
 
-    assert exc.value.code == 0
     output = capsys.readouterr().out
     assert "fetch" in output
     assert "changelog" in output
@@ -21,6 +18,45 @@ def test_cli_help_commands(capsys) -> None:
     assert "view" in output
     assert "model" in output
     assert "units" in output
+    assert "CENTRIC API" in output
+    assert "Recommended path:" in output
+    assert "Core workflows:" in output
+    assert "System & advanced:" in output
+    assert "Good first commands:" in output
+    assert "1. doctor" in output
+    assert "centric-api load check material-create materials.xlsx" in output
+
+
+def test_top_level_help_can_render_color() -> None:
+    output = top_level_help(color=True)
+
+    assert "\033[" in output
+    assert "\033[1m\033[36mCENTRIC API\033[0m" in output
+    assert "\033[1mUsage:\033[0m" in output
+    assert "\033[35mcentric-api\033[0m <command> [options]" in output
+    assert "\033[1mRecommended path:\033[0m" in output
+    assert "\033[32mfetch      \033[0m" in output
+    assert "\033[2m1.\033[0m \033[32mdoctor   \033[0m" in output
+    assert "\033[35mcentric-api\033[0m \033[32mfetch\033[0m" in output
+    assert "\033[36m--endpoint\033[0m \033[2mstyles\033[0m" in output
+    assert "\033[32mload\033[0m \033[32mcheck\033[0m" in output
+    assert "\033[2mstyle-colorways-demo\033[0m" in output
+    assert "\033[2mmaterial-create\033[0m" in output
+    assert "\033[33mmaterials.xlsx\033[0m" in output
+
+
+def test_top_level_help_color_detection(monkeypatch) -> None:
+    class Stream:
+        def isatty(self) -> bool:
+            return False
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    assert not should_color(Stream())
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    assert should_color(Stream())
+
 
 def test_units_cli_convert_and_normalize(capsys) -> None:
     assert main(["units", "convert", "1500", "g", "kg"]) == 0
@@ -42,6 +78,7 @@ def test_units_cli_convert_and_normalize(capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["basis"] == "per_piece_mass"
     assert payload["material_value_unit"] == "g"
+
 
 def test_units_cli_uses_explicit_config(tmp_path, capsys) -> None:
     config = tmp_path / "units.yml"
@@ -66,6 +103,7 @@ dimensions:
 
     output = capsys.readouterr().out
     assert "500 ml = 0.5 l (volume)" in output
+
 
 def test_cli_keyboard_interrupt_returns_clean_130(monkeypatch, capsys) -> None:
     def interrupt(_args):

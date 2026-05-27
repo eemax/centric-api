@@ -18,11 +18,16 @@ from .commands.units import run_units
 from .commands.view import run_view
 from .config import ConfigError
 from .fetcher import FetchError
+from .rendering.help import should_color, top_level_help
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+    if raw_argv in (["--help"], ["-h"]):
+        print(top_level_help(color=should_color(sys.stdout)), end="")
+        return 0
     parser = build_parser()
-    args = parser.parse_args(normalize_argv(argv))
+    args = parser.parse_args(normalize_argv(raw_argv))
     try:
         if args.command == "fetch":
             return run_fetch(args)
