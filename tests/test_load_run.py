@@ -20,8 +20,8 @@ def test_load_run_emits_send_progress(tmp_path, monkeypatch) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Fabric"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -57,6 +57,7 @@ def test_load_run_emits_send_progress(tmp_path, monkeypatch) -> None:
     assert review_row["_cent_load_status_code"] == 201
     assert review_row["_cent_load_response_id"] == "created"
 
+
 def test_load_run_records_request_exceptions_as_failures(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -65,8 +66,8 @@ def test_load_run_records_request_exceptions_as_failures(tmp_path, monkeypatch) 
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Fabric"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -104,6 +105,7 @@ def test_load_run_records_request_exceptions_as_failures(tmp_path, monkeypatch) 
     assert (result.run_dir / "responses.jsonl").is_file()
     assert (result.run_dir / "summary.json").is_file()
 
+
 def test_load_run_writes_validation_error_review(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -112,8 +114,8 @@ def test_load_run_writes_validation_error_review(tmp_path, monkeypatch) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Missing Type"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Missing Type"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -144,6 +146,7 @@ def test_load_run_writes_validation_error_review(tmp_path, monkeypatch) -> None:
     assert review_row["_cent_load_status"] == "validation_error"
     assert "was not found" in review_row["_cent_load_message"]
 
+
 def test_load_run_with_only_validation_errors_does_not_require_auth(
     tmp_path,
     monkeypatch,
@@ -155,8 +158,8 @@ def test_load_run_with_only_validation_errors_does_not_require_auth(
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Missing Type"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Missing Type"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -183,6 +186,7 @@ def test_load_run_with_only_validation_errors_does_not_require_auth(
     assert result.issues
     assert result.review_path is not None
 
+
 def test_load_run_header_errors_do_not_write_empty_review_file(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -192,7 +196,7 @@ def test_load_run_header_errors_do_not_write_empty_review_file(tmp_path, monkeyp
     _write_material_workbook(
         workbook_path,
         headers=["Code", "Material Name"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM"]],
+        rows=[["MAT-001", "Unused display name"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -219,6 +223,7 @@ def test_load_run_header_errors_do_not_write_empty_review_file(tmp_path, monkeyp
     assert [issue.code for issue in result.issues] == ["missing_required_header"]
     assert result.review_path is None
 
+
 def test_load_run_sends_valid_rows_when_other_rows_have_validation_errors(
     tmp_path,
     monkeypatch,
@@ -230,10 +235,10 @@ def test_load_run_sends_valid_rows_when_other_rows_have_validation_errors(
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
+        headers=["Code", "Material Type"],
         rows=[
-            ["MAT-001", "Cotton Rib 240 GSM", "Missing Type"],
-            ["MAT-002", "Cotton Jersey 180 GSM", "Fabric"],
+            ["MAT-001", "Missing Type"],
+            ["MAT-002", "Fabric"],
         ],
     )
     with connect(db_path) as conn:

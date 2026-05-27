@@ -32,7 +32,7 @@ jobs:
         filters:
           - path: active
             equals: true
-          - path: material_type
+          - path: product_type
             lookup:
               endpoint: material_types
               path: node_name

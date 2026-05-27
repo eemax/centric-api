@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from centric_api.cli import main
+from centric_api.load_config import load_load_config, select_load_job
 from centric_api.store import connect
 from tests.helpers_load import _insert_record, _write_material_workbook
 
@@ -16,8 +17,8 @@ def test_load_cli_dry_run_writes_request_artifacts(tmp_path, monkeypatch, capsys
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Fabric"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -54,6 +55,81 @@ def test_load_cli_dry_run_writes_request_artifacts(tmp_path, monkeypatch, capsys
     assert request_record["method"] == "POST"
     assert request_record["path"] == "/v2/materials"
 
+
+def test_private_load_job_overrides_bundled_job(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    private_config = home / "load.yml"
+    private_config.write_text(
+        """
+version: 1
+jobs:
+  - name: material-create
+    title: Private Material Create
+    method: POST
+    path: /v2/private-materials
+    columns:
+      code:
+        header: Code
+        required: true
+    body:
+      code: code
+""",
+        encoding="utf-8",
+    )
+
+    config = load_load_config()
+    job = select_load_job(config, "material-create")
+
+    assert config.paths == (Path("config/load.yml"), private_config)
+    assert len([item for item in config.jobs if item.name == "material-create"]) == 1
+    assert job.source == "private"
+    assert job.source_path == private_config
+    assert job.path == "/v2/private-materials"
+
+    assert main(["load", "list"]) == 0
+    list_output = capsys.readouterr().out
+    assert "material-create" in list_output
+    assert "private" in list_output
+    assert "/v2/private-materials" in list_output
+    assert "material-create              private" in list_output
+    assert "material-create              bundled" not in list_output
+
+    assert main(["load", "show", "material-create"]) == 0
+    show_output = capsys.readouterr().out
+    assert "Source:     private" in show_output
+    assert f"Config:     {private_config}" in show_output
+
+
+def test_explicit_load_config_source_is_shown(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    explicit_config = tmp_path / "load.yml"
+    explicit_config.write_text(
+        """
+version: 1
+jobs:
+  - name: explicit-job
+    method: POST
+    path: /v2/explicit
+    columns:
+      code:
+        header: Code
+        required: true
+    body:
+      code: code
+""",
+        encoding="utf-8",
+    )
+
+    assert main(["load", "--load-config", str(explicit_config), "show", "explicit-job"]) == 0
+    show_output = capsys.readouterr().out
+    assert "Source:     explicit" in show_output
+    assert f"Config:     {explicit_config}" in show_output
+
+
 def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -62,8 +138,8 @@ def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Fabric"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -93,6 +169,7 @@ def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     assert "[load] artifacts:" in captured.err
     assert "Load dry run: material-create" in captured.out
 
+
 def test_load_cli_json_suppresses_human_progress(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -101,8 +178,8 @@ def test_load_cli_json_suppresses_human_progress(tmp_path, monkeypatch, capsys) 
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
-        rows=[["MAT-001", "Cotton Rib 240 GSM", "Fabric"]],
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(

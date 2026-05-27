@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -17,9 +18,11 @@ INPUT_CONFIG_KEYS = {"header_row"}
 COLUMN_CONFIG_KEYS = {"header", "headers", "type", "required", "resolve"}
 RESOLVE_CONFIG_KEYS = {"endpoint", "match", "output", "filters"}
 LOAD_METHODS = {"POST", "PUT"}
-COLUMN_TYPES = {"text", "number", "boolean", "ref"}
+COLUMN_TYPES = {"text", "number", "boolean", "ref", "ref_or_id", "composition_list"}
 
-ColumnType = Literal["text", "number", "boolean", "ref"]
+ColumnType = Literal["text", "number", "boolean", "ref", "ref_or_id", "composition_list"]
+LoadSource = Literal["bundled", "private", "explicit"]
+LoadBody = dict[str, str] | str
 
 
 @dataclass(frozen=True)
@@ -62,34 +65,52 @@ class LoadColumn:
 class LoadJob:
     name: str
     title: str
+    source: LoadSource
+    source_path: Path
     method: str
     path: str
     input: LoadInput
     columns: tuple[LoadColumn, ...]
-    body: dict[str, str]
+    body: LoadBody
 
 
 @dataclass(frozen=True)
 class LoadConfig:
-    path: Path
+    paths: tuple[Path, ...]
     jobs: tuple[LoadJob, ...]
+
+    @property
+    def path(self) -> Path:
+        return self.paths[-1]
 
 
 def load_load_config(path: str | Path | None = None) -> LoadConfig:
     if path is not None:
         config_path = Path(path).expanduser()
-        return parse_load_config(_load_payload(config_path), path=config_path)
+        return parse_load_config(_load_payload(config_path), path=config_path, source="explicit")
 
-    payload = _load_payload(DEFAULT_LOAD_CONFIG_PATH)
-    config_path = DEFAULT_LOAD_CONFIG_PATH
+    bundled = parse_load_config(
+        _load_payload(DEFAULT_LOAD_CONFIG_PATH),
+        path=DEFAULT_LOAD_CONFIG_PATH,
+        source="bundled",
+    )
     private_path = runtime_home() / PRIVATE_LOAD_CONFIG_PATH
     if private_path.is_file():
-        payload = _merge_payloads(payload, _load_payload(private_path))
-        config_path = private_path
-    return parse_load_config(payload, path=config_path)
+        private = parse_load_config(
+            _load_payload(private_path),
+            path=private_path,
+            source="private",
+        )
+        return _merge_configs(bundled, private)
+    return bundled
 
 
-def parse_load_config(payload: dict[str, Any], *, path: Path) -> LoadConfig:
+def parse_load_config(
+    payload: dict[str, Any],
+    *,
+    path: Path,
+    source: LoadSource = "explicit",
+) -> LoadConfig:
     _reject_unknown_keys(payload, ROOT_CONFIG_KEYS, "load config")
     version = payload.get("version", 1)
     if version != 1:
@@ -97,9 +118,12 @@ def parse_load_config(payload: dict[str, Any], *, path: Path) -> LoadConfig:
     jobs_raw = payload.get("jobs")
     if not isinstance(jobs_raw, list) or not jobs_raw:
         raise ConfigError("load config jobs must be a non-empty array.")
-    jobs = tuple(_parse_job(raw, index) for index, raw in enumerate(jobs_raw))
+    jobs = tuple(
+        _parse_job(raw, index, source=source, source_path=path)
+        for index, raw in enumerate(jobs_raw)
+    )
     _ensure_unique_jobs(jobs)
-    return LoadConfig(path=path, jobs=jobs)
+    return LoadConfig(paths=(path,), jobs=jobs)
 
 
 def select_load_job(config: LoadConfig, name: str) -> LoadJob:
@@ -110,7 +134,7 @@ def select_load_job(config: LoadConfig, name: str) -> LoadJob:
     raise ConfigError(f"Unknown load job {name!r}. Available: {names}")
 
 
-def _parse_job(raw: Any, index: int) -> LoadJob:
+def _parse_job(raw: Any, index: int, *, source: LoadSource, source_path: Path) -> LoadJob:
     if not isinstance(raw, dict):
         raise ConfigError(f"load jobs[{index}] must be an object.")
     _reject_unknown_keys(raw, JOB_CONFIG_KEYS, f"load jobs[{index}]")
@@ -129,10 +153,12 @@ def _parse_job(raw: Any, index: int) -> LoadJob:
         for key, value in columns_raw.items()
     )
     _ensure_unique_headers(name, columns)
-    body = _parse_body(raw.get("body"), name, {column.key for column in columns})
+    body = _parse_body(raw.get("body"), name, {column.key for column in columns}, path=path)
     return LoadJob(
         name=name,
         title=_string_or_default(raw.get("title"), name, f"load job[{name}].title"),
+        source=source,
+        source_path=source_path,
         method=method,
         path=path,
         input=_parse_input(raw.get("input"), name),
@@ -163,10 +189,12 @@ def _parse_column(key: Any, raw: Any, field_name: str) -> LoadColumn:
     if not isinstance(headers, list):
         raise ConfigError(f"{field_name}.headers must be an array.")
     resolve = _parse_resolve(raw.get("resolve"), field_name)
-    if column_type == "ref" and resolve is None:
-        raise ConfigError(f"{field_name}.resolve is required for ref columns.")
-    if column_type != "ref" and resolve is not None:
-        raise ConfigError(f"{field_name}.resolve is only valid for ref columns.")
+    if column_type in {"ref", "ref_or_id", "composition_list"} and resolve is None:
+        raise ConfigError(f"{field_name}.resolve is required for {column_type} columns.")
+    if column_type not in {"ref", "ref_or_id", "composition_list"} and resolve is not None:
+        raise ConfigError(
+            f"{field_name}.resolve is only valid for ref, ref_or_id, and composition_list columns."
+        )
     required = raw.get("required", False)
     if not isinstance(required, bool):
         raise ConfigError(f"{field_name}.required must be true or false.")
@@ -205,9 +233,17 @@ def _parse_resolve_filters(raw: Any, field_name: str) -> dict[str, Any] | None:
     return filters
 
 
-def _parse_body(raw: Any, job_name: str, column_keys: set[str]) -> dict[str, str]:
+def _parse_body(raw: Any, job_name: str, column_keys: set[str], *, path: str) -> LoadBody:
+    _ensure_path_placeholders(job_name, path, column_keys)
+    if isinstance(raw, str):
+        source_key = _required_string(raw, f"load job[{job_name}].body")
+        if source_key not in column_keys:
+            raise ConfigError(
+                f"load job[{job_name}].body references unknown column {source_key!r}."
+            )
+        return source_key
     if not isinstance(raw, dict) or not raw:
-        raise ConfigError(f"load job[{job_name}].body must be a non-empty object.")
+        raise ConfigError(f"load job[{job_name}].body must be a non-empty object or column name.")
     body: dict[str, str] = {}
     for target, source in raw.items():
         target_key = _required_string(target, f"load job[{job_name}].body key")
@@ -220,23 +256,23 @@ def _parse_body(raw: Any, job_name: str, column_keys: set[str]) -> dict[str, str
     return body
 
 
-def _merge_payloads(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    _reject_unknown_keys(overlay, ROOT_CONFIG_KEYS, "load config")
-    merged = dict(base)
-    if "version" in overlay:
-        merged["version"] = overlay["version"]
-    base_jobs = base.get("jobs", [])
-    overlay_jobs = overlay.get("jobs", [])
-    if not isinstance(base_jobs, list) or not isinstance(overlay_jobs, list):
-        raise ConfigError("load config jobs must be an array.")
-    jobs_by_name: dict[str, Any] = {}
-    for raw_job in [*base_jobs, *overlay_jobs]:
-        if not isinstance(raw_job, dict):
-            raise ConfigError("Each load job must be an object.")
-        name = _required_string(raw_job.get("name"), "load job.name")
-        jobs_by_name[name] = raw_job
-    merged["jobs"] = list(jobs_by_name.values())
-    return merged
+def _ensure_path_placeholders(job_name: str, path: str, column_keys: set[str]) -> None:
+    for placeholder in _path_placeholders(path):
+        if placeholder not in column_keys:
+            raise ConfigError(
+                f"load job[{job_name}].path references unknown column {placeholder!r}."
+            )
+
+
+def _path_placeholders(path: str) -> set[str]:
+    return set(re.findall(r"{([A-Za-z_][A-Za-z0-9_]*)}", path))
+
+
+def _merge_configs(base: LoadConfig, overlay: LoadConfig) -> LoadConfig:
+    jobs_by_name = {job.name: job for job in base.jobs}
+    for job in overlay.jobs:
+        jobs_by_name[job.name] = job
+    return LoadConfig(paths=(*base.paths, *overlay.paths), jobs=tuple(jobs_by_name.values()))
 
 
 def _load_payload(path: Path) -> dict[str, Any]:

@@ -111,8 +111,9 @@ schemas normally live in private `CENTRIC_API_HOME/views.yml` or are passed with
 Views are read-only and local: they do not call the Centric API.
 
 `load` validates workbook rows and can send API requests to Centric. The repo includes
-`material-create`, which reads material rows from Excel, resolves `Material Type` through cached
-`material_types`, and posts to `/v2/materials`. Use `load check` and `load run --dry-run` before
+`material-create`, which posts material rows to `/v2/materials`, and
+`material-composition-create`, which parses composition text like `95% cotton, 5% polyester` and
+posts technical compositions to existing materials. Use `load check` and `load run --dry-run` before
 running with `--yes`. Real runs write a `review.xlsx` copy for row-level success, failure, and
 validation status; `load retry` reprocesses failed or validation-error rows from that review
 workbook. Load schemas live in `config/load.yml` plus private `CENTRIC_API_HOME/load.yml`.

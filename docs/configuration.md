@@ -276,13 +276,9 @@ jobs:
         headers: [Material Code]
         type: text
         required: true
-      node_name:
-        header: Material Name
-        headers: [Material, Name]
-        type: text
-        required: true
-      material_type:
-        header: Material Type
+      product_type:
+        header: Product Type
+        headers: [Material Type, Type]
         type: ref
         required: true
         resolve:
@@ -293,9 +289,9 @@ jobs:
             available: true
     body:
       code: code
-      node_name: node_name
-      product_type: material_type
+      product_type: product_type
 ```
 
-Use `docs/load.md` as the full schema reference. The bundled `material-create` job can be extended
-or replaced by private `CENTRIC_API_HOME/load.yml`.
+Use `docs/load.md` as the full schema reference. Bundled load jobs include `material-create` and
+`material-composition-create`; both can be extended or replaced by private
+`CENTRIC_API_HOME/load.yml`.

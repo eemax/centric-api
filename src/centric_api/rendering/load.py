@@ -14,6 +14,8 @@ def load_job_record(job: LoadJob) -> dict[str, Any]:
     return {
         "name": job.name,
         "title": job.title,
+        "source": job.source,
+        "source_path": str(job.source_path),
         "method": job.method,
         "path": job.path,
         "header_row": job.input.header_row,
@@ -96,18 +98,24 @@ def print_human_load_list(jobs: tuple[LoadJob, ...]) -> None:
         return
     print()
     name_width = max(len("Name"), *(len(job.name) for job in jobs))
+    source_width = max(len("Source"), *(len(job.source) for job in jobs))
     method_width = max(len("Method"), *(len(job.method) for job in jobs))
-    header = f"{'Name':<{name_width}}  {'Method':<{method_width}}  Path"
+    header = f"{'Name':<{name_width}}  {'Source':<{source_width}}  {'Method':<{method_width}}  Path"
     print(header)
     print("-" * len(header))
     for job in jobs:
-        print(f"{job.name:<{name_width}}  {job.method:<{method_width}}  {job.path}")
+        print(
+            f"{job.name:<{name_width}}  {job.source:<{source_width}}  "
+            f"{job.method:<{method_width}}  {job.path}"
+        )
 
 
 def print_human_load_show(job: LoadJob) -> None:
     print(f"Load job: {job.name}")
     print()
     print(f"Title:      {job.title}")
+    print(f"Source:     {job.source}")
+    print(f"Config:     {job.source_path}")
     print(f"Method:     {job.method}")
     print(f"Path:       {job.path}")
     print(f"Header row: {job.input.header_row}")
@@ -134,8 +142,11 @@ def print_human_load_show(job: LoadJob) -> None:
             )
     print()
     print("Body")
-    for target, source in job.body.items():
-        print(f"  {target}: {source}")
+    if isinstance(job.body, str):
+        print(f"  {job.body}")
+    else:
+        for target, source in job.body.items():
+            print(f"  {target}: {source}")
 
 
 def print_human_load_check(result: LoadMaterialized) -> None:

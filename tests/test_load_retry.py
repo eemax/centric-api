@@ -20,10 +20,10 @@ def test_load_retry_processes_failed_review_rows(tmp_path, monkeypatch) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
+        headers=["Code", "Material Type"],
         rows=[
-            ["MAT-001", "Cotton Rib 240 GSM", "Fabric"],
-            ["MAT-002", "Cotton Jersey 180 GSM", "Fabric"],
+            ["MAT-001", "Fabric"],
+            ["MAT-002", "Fabric"],
         ],
     )
     with connect(db_path) as conn:
@@ -63,6 +63,7 @@ def test_load_retry_processes_failed_review_rows(tmp_path, monkeypatch) -> None:
     assert retry.requests[0].row == 3
     assert retry.requests[0].body["code"] == "MAT-002"
 
+
 def test_load_retry_review_clears_unprocessed_old_statuses(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -71,10 +72,10 @@ def test_load_retry_review_clears_unprocessed_old_statuses(tmp_path, monkeypatch
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Name", "Material Type"],
+        headers=["Code", "Material Type"],
         rows=[
-            ["MAT-001", "Cotton Rib 240 GSM", "Fabric"],
-            ["MAT-002", "Cotton Jersey 180 GSM", "Fabric"],
+            ["MAT-001", "Fabric"],
+            ["MAT-002", "Fabric"],
         ],
     )
     with connect(db_path) as conn:

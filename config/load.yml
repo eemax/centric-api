@@ -14,16 +14,10 @@ jobs:
           - Material Code
         type: text
         required: true
-      node_name:
-        header: Material Name
+      product_type:
+        header: Product Type
         headers:
-          - Material
-          - Name
-        type: text
-        required: true
-      material_type:
-        header: Material Type
-        headers:
+          - Material Type
           - Type
         type: ref
         required: true
@@ -40,6 +34,42 @@ jobs:
         type: text
     body:
       code: code
-      node_name: node_name
-      product_type: material_type
+      product_type: product_type
       description: description
+
+  - name: material-composition-create
+    title: Material Composition Create
+    method: POST
+    path: /v2/materials/{material}/technical_compositions
+    input:
+      header_row: 1
+    columns:
+      material:
+        header: Material
+        headers:
+          - Material ID
+          - Material Id
+          - Material Code
+          - Code
+        type: ref_or_id
+        required: true
+        resolve:
+          endpoint: materials
+          match: code
+          output: id
+      compositions:
+        header: Composition
+        headers:
+          - Technical Composition
+          - Material Composition
+          - Fiber Content
+          - Content
+        type: composition_list
+        required: true
+        resolve:
+          endpoint: compositions
+          match: node_name
+          output: id
+          filters:
+            active: true
+    body: compositions

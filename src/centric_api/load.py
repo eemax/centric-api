@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -50,7 +51,7 @@ class LoadRequest:
     row: int
     method: str
     path: str
-    body: dict[str, Any]
+    body: Any
 
 
 @dataclass(frozen=True)
@@ -171,11 +172,16 @@ def materialize_load(
                     error_rows += 1
                     issues.extend(row_issues)
                     continue
+                path = _request_path(job, values, row_number=row_number)
+                if isinstance(path, LoadIssue):
+                    error_rows += 1
+                    issues.append(path)
+                    continue
                 requests.append(
                     LoadRequest(
                         row=row_number,
                         method=job.method,
-                        path=job.path,
+                        path=path,
                         body=_request_body(job, values),
                     )
                 )
@@ -433,6 +439,28 @@ def _row_values(
                 issues.append(resolved)
                 continue
             values[column.key] = resolved
+        elif column.type == "ref_or_id":
+            resolved = _resolve_ref_or_id(
+                column,
+                parsed,
+                row_number=row_number,
+                reference_indexes=reference_indexes,
+            )
+            if isinstance(resolved, LoadIssue):
+                issues.append(resolved)
+                continue
+            values[column.key] = resolved
+        elif column.type == "composition_list":
+            resolved = _resolve_composition_list(
+                column,
+                parsed,
+                row_number=row_number,
+                reference_indexes=reference_indexes,
+            )
+            if isinstance(resolved, LoadIssue):
+                issues.append(resolved)
+                continue
+            values[column.key] = resolved
         else:
             values[column.key] = parsed
     return values, issues
@@ -468,7 +496,162 @@ def _parse_value(column: LoadColumn, raw_value: Any, row_number: int) -> Any | L
             message=f"Value for {column.header} must be boolean.",
             sample=raw_value,
         )
+    if column.type == "composition_list":
+        return _parse_composition_entries(column, raw_value, row_number)
     return raw_value
+
+
+def _parse_composition_entries(
+    column: LoadColumn,
+    raw_value: Any,
+    row_number: int,
+) -> list[tuple[Decimal, str]] | LoadIssue:
+    text = str(raw_value).strip()
+    entries = _composition_entries_from_text(text)
+    if isinstance(entries, LoadIssue):
+        return LoadIssue(
+            row=row_number,
+            code=entries.code,
+            column=column.key,
+            message=entries.message,
+            sample=raw_value,
+        )
+    total = sum((percentage for percentage, _name in entries), Decimal("0"))
+    if abs(total - Decimal("100")) > Decimal("0.0001"):
+        return LoadIssue(
+            row=row_number,
+            code="composition_total_invalid",
+            column=column.key,
+            message=f"Composition total must be 100; got {_decimal_label(total)}.",
+            sample=raw_value,
+        )
+    return entries
+
+
+def _composition_entries_from_text(text: str) -> list[tuple[Decimal, str]] | LoadIssue:
+    cleaned = text.strip().strip(".")
+    if not cleaned:
+        return LoadIssue(row=None, code="empty_composition", message="Composition is blank.")
+    segments = [segment.strip() for segment in re.split(r"[,;/+\n]+", cleaned) if segment.strip()]
+    if len(segments) > 1:
+        return _composition_entries_from_segments(segments)
+    entries = _composition_entries_from_percent_first(cleaned)
+    if len(entries) > 1:
+        return entries
+    entry = _composition_entry_from_segment(cleaned)
+    if isinstance(entry, LoadIssue):
+        return entry
+    return [entry]
+
+
+def _composition_entries_from_segments(
+    segments: list[str],
+) -> list[tuple[Decimal, str]] | LoadIssue:
+    entries: list[tuple[Decimal, str]] = []
+    for segment in segments:
+        entry = _composition_entry_from_segment(segment)
+        if isinstance(entry, LoadIssue):
+            return entry
+        entries.append(entry)
+    return entries
+
+
+def _composition_entries_from_percent_first(text: str) -> list[tuple[Decimal, str]]:
+    entries: list[tuple[Decimal, str]] = []
+    pattern = re.compile(
+        r"(?P<percentage>\d+(?:\.\d+)?)\s*%?\s*"
+        r"(?P<name>[^\d,;/+]+?)"
+        r"(?=(?:\s+\d+(?:\.\d+)?\s*%?)|[,;/+]|$)"
+    )
+    for match in pattern.finditer(text):
+        name = _clean_composition_name(match.group("name"))
+        if not name:
+            continue
+        percentage = _decimal_or_none(match.group("percentage"))
+        if percentage is None or percentage <= 0:
+            continue
+        entries.append((percentage, name))
+    return entries
+
+
+def _composition_entry_from_segment(segment: str) -> tuple[Decimal, str] | LoadIssue:
+    cleaned = segment.strip().strip(".")
+    percent_first = re.fullmatch(
+        r"(?P<percentage>\d+(?:\.\d+)?)\s*%?\s*(?P<name>.+)",
+        cleaned,
+    )
+    if percent_first:
+        return _composition_entry(
+            percent_first.group("percentage"),
+            percent_first.group("name"),
+            sample=segment,
+        )
+    name_first = re.fullmatch(
+        r"(?P<name>.+?)\s+(?P<percentage>\d+(?:\.\d+)?)\s*%?",
+        cleaned,
+    )
+    if name_first:
+        return _composition_entry(
+            name_first.group("percentage"),
+            name_first.group("name"),
+            sample=segment,
+        )
+    if re.search(r"\d", cleaned):
+        return LoadIssue(
+            row=None,
+            code="composition_name_missing",
+            message=f"Composition entry is missing a name: {segment!r}.",
+        )
+    return LoadIssue(
+        row=None,
+        code="composition_percentage_missing",
+        message=f"Composition entry is missing a percentage: {segment!r}.",
+    )
+
+
+def _composition_entry(
+    percentage_text: str,
+    name_text: str,
+    *,
+    sample: str,
+) -> tuple[Decimal, str] | LoadIssue:
+    percentage = _decimal_or_none(percentage_text)
+    if percentage is None:
+        return LoadIssue(
+            row=None,
+            code="invalid_composition_percentage",
+            message=f"Composition percentage must be numeric: {sample!r}.",
+        )
+    if percentage <= 0:
+        return LoadIssue(
+            row=None,
+            code="invalid_composition_percentage",
+            message=f"Composition percentage must be greater than 0: {sample!r}.",
+        )
+    name = _clean_composition_name(name_text)
+    if not name:
+        return LoadIssue(
+            row=None,
+            code="composition_name_missing",
+            message=f"Composition entry is missing a name: {sample!r}.",
+        )
+    return percentage, name
+
+
+def _clean_composition_name(value: str) -> str:
+    return value.strip().strip("%").strip().strip(".").strip()
+
+
+def _decimal_or_none(value: str) -> Decimal | None:
+    try:
+        return Decimal(value.strip())
+    except (InvalidOperation, ValueError, AttributeError):
+        return None
+
+
+def _decimal_label(value: Decimal) -> str:
+    normalized = value.normalize()
+    return str(int(normalized)) if normalized == normalized.to_integral_value() else str(normalized)
 
 
 def _resolve_value(
@@ -514,13 +697,122 @@ def _resolve_value(
     return str(resolved).strip()
 
 
+def _resolve_ref_or_id(
+    column: LoadColumn,
+    value: Any,
+    *,
+    row_number: int,
+    reference_indexes: dict[str, dict[str, list[dict[str, Any]]]],
+) -> str | LoadIssue:
+    resolve = column.resolve
+    if resolve is None:
+        raise ConfigError(f"Column {column.key} is missing resolve config.")
+    text = str(value).strip()
+    direct_matches = reference_indexes.get(_resolve_direct_key(resolve), {}).get(
+        _lookup_key(text),
+        [],
+    )
+    if len(direct_matches) == 1:
+        resolved = direct_matches[0].get(resolve.output)
+        return str(resolved).strip()
+    if len(direct_matches) > 1:
+        return LoadIssue(
+            row=row_number,
+            code="ref_id_ambiguous",
+            column=column.key,
+            message=(
+                f"{column.header} {text!r} matched {len(direct_matches)} records in "
+                f"{resolve.endpoint}.{resolve.output}."
+            ),
+            sample=[match.get("id") for match in direct_matches[:MAX_SAMPLES]],
+        )
+    resolved = _resolve_value(
+        column,
+        value,
+        row_number=row_number,
+        reference_indexes=reference_indexes,
+    )
+    if isinstance(resolved, LoadIssue) and resolved.code == "ref_not_found":
+        return LoadIssue(
+            row=row_number,
+            code="ref_or_id_not_found",
+            column=column.key,
+            message=(
+                f"{column.header} {text!r} was not found in {resolve.endpoint} by "
+                f"{resolve.output} or {resolve.match}."
+            ),
+        )
+    return resolved
+
+
+def _resolve_composition_list(
+    column: LoadColumn,
+    entries: list[tuple[Decimal, str]],
+    *,
+    row_number: int,
+    reference_indexes: dict[str, dict[str, list[dict[str, Any]]]],
+) -> list[dict[str, Any]] | LoadIssue:
+    resolve = column.resolve
+    if resolve is None:
+        raise ConfigError(f"Column {column.key} is missing resolve config.")
+    resolved_entries: dict[str, dict[str, Any]] = {}
+    for percentage, name in entries:
+        matches = reference_indexes.get(_resolve_key(resolve), {}).get(_lookup_key(name), [])
+        if not matches:
+            return LoadIssue(
+                row=row_number,
+                code="composition_not_found",
+                column=column.key,
+                message=(
+                    f"Composition {name!r} was not found in {resolve.endpoint}.{resolve.match}."
+                ),
+            )
+        if len(matches) > 1:
+            return LoadIssue(
+                row=row_number,
+                code="composition_ambiguous",
+                column=column.key,
+                message=(
+                    f"Composition {name!r} matched {len(matches)} records in "
+                    f"{resolve.endpoint}.{resolve.match}."
+                ),
+                sample=[match.get("id") for match in matches[:MAX_SAMPLES]],
+            )
+        resolved = matches[0].get(resolve.output)
+        if _is_blank(resolved):
+            return LoadIssue(
+                row=row_number,
+                code="composition_output_blank",
+                column=column.key,
+                message=f"Resolved {resolve.endpoint} record has blank {resolve.output!r}.",
+                sample=matches[0].get("id"),
+            )
+        resolved_id = str(resolved).strip()
+        existing = resolved_entries.get(resolved_id)
+        if existing is None:
+            resolved_entries[resolved_id] = {
+                "percentage": _number_value(percentage),
+                "composition": resolved_id,
+            }
+        else:
+            existing["percentage"] = _number_value(
+                Decimal(str(existing["percentage"])) + percentage
+            )
+    return list(resolved_entries.values())
+
+
+def _number_value(value: Decimal) -> int | float:
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
 def _build_reference_indexes(
     db_path: Path,
     job: LoadJob,
     *,
     progress_callback: LoadProgressCallback | None = None,
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
-    refs = [column.resolve for column in job.columns if column.resolve is not None]
+    ref_columns = [column for column in job.columns if column.resolve is not None]
+    refs = [column.resolve for column in ref_columns]
     if not refs:
         return {}
     with connect_readonly(db_path) as conn:
@@ -545,12 +837,24 @@ def _build_reference_indexes(
                         "values": len(indexes[key]),
                     },
                 )
+        for column in ref_columns:
+            if column.type != "ref_or_id" or column.resolve is None:
+                continue
+            direct_key = _resolve_direct_key(column.resolve)
+            if direct_key not in indexes:
+                indexes[direct_key] = _reference_index(
+                    conn,
+                    column.resolve,
+                    match_path=column.resolve.output,
+                )
         return indexes
 
 
 def _reference_index(
     conn: sqlite3.Connection,
     resolve: LoadResolve,
+    *,
+    match_path: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     rows = conn.execute(
         """
@@ -566,7 +870,7 @@ def _reference_index(
         payload = _json_dict(row["payload_json"])
         if not _matches_resolve_filters(payload, resolve):
             continue
-        value = _extract_path(payload, resolve.match)
+        value = _extract_path(payload, match_path or resolve.match)
         if _is_blank(value):
             continue
         index.setdefault(_lookup_key(str(value)), []).append(payload)
@@ -581,7 +885,31 @@ def _matches_resolve_filters(payload: dict[str, Any], resolve: LoadResolve) -> b
     )
 
 
-def _request_body(job: LoadJob, values: dict[str, Any]) -> dict[str, Any]:
+def _request_path(job: LoadJob, values: dict[str, Any], *, row_number: int) -> str | LoadIssue:
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        value = values.get(key)
+        return "" if _is_blank(value) else str(value).strip()
+
+    path = re.sub(r"{([A-Za-z_][A-Za-z0-9_]*)}", replace, job.path)
+    if "{}" in path or re.search(r"{[A-Za-z_][A-Za-z0-9_]*}", path):
+        return LoadIssue(
+            row=row_number,
+            code="path_template_unresolved",
+            message=f"Request path could not be resolved from template {job.path!r}.",
+        )
+    if "//" in path:
+        return LoadIssue(
+            row=row_number,
+            code="path_template_blank",
+            message=f"Request path has a blank template value: {job.path!r}.",
+        )
+    return path
+
+
+def _request_body(job: LoadJob, values: dict[str, Any]) -> Any:
+    if isinstance(job.body, str):
+        return values.get(job.body)
     body: dict[str, Any] = {}
     for target, source in job.body.items():
         value = values.get(source)
@@ -830,7 +1158,7 @@ def _write_responses(path: Path, responses: tuple[LoadResponse, ...]) -> None:
 
 def _write_summary(path: Path, result: LoadRunResult, config: LoadConfig) -> None:
     payload = run_record(result)
-    payload["config"] = str(config.path)
+    payload["config"] = [str(path) for path in config.paths]
     path.write_text(json.dumps(payload, default=str, indent=2, sort_keys=True) + "\n")
 
 
@@ -914,6 +1242,11 @@ def _response_record(response: LoadResponse) -> dict[str, Any]:
 def _resolve_key(resolve: LoadResolve) -> str:
     filters = json.dumps(resolve.filters or {}, default=str, sort_keys=True)
     return f"{resolve.endpoint}:{resolve.match}:{resolve.output}:{filters}"
+
+
+def _resolve_direct_key(resolve: LoadResolve) -> str:
+    filters = json.dumps(resolve.filters or {}, default=str, sort_keys=True)
+    return f"{resolve.endpoint}:{resolve.output}:{resolve.output}:{filters}"
 
 
 def _lookup_key(value: str) -> str:
