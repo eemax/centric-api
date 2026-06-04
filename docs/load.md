@@ -182,6 +182,8 @@ Accepted examples include:
 50% Polyester, 50% Cotton
 Polyester 50%, Cotton 50%
 95 cotton 5 polyester
+polyester-recycled 95 5 elastane
+95 polyester-recycled; elastane 5
 95 % cotton / 5 % elastane
 ```
 
@@ -194,10 +196,13 @@ The request body becomes:
 ]
 ```
 
-Composition parsing is case-insensitive for reference matching and tolerant of extra spacing,
-optional `%`, commas, semicolons, slashes, plus signs, newlines, and trailing periods. Validation
-fails before any API request when the total is not 100, a percentage is missing or invalid, a
-composition cannot be found, or a composition name is ambiguous in the cache.
+Composition parsing treats every numeric token as a percentage, so percentages can appear before or
+after composition names. Reference matching first tries the exact trimmed/case-folded name, then a
+strict canonical fallback where punctuation, separators, and word order do not matter. For example,
+`polyester-recycled`, `recycled polyester`, and `Polyester - Recycled` can resolve to the same
+cached composition record. Words still need to be spelled out; shorthand such as `poly` is not fuzzy
+matched. Validation fails before any API request when the total is not 100, a percentage is missing
+or invalid, a composition cannot be found, or a composition name is ambiguous in the cache.
 
 ## Safety
 

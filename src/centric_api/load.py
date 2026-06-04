@@ -532,16 +532,17 @@ def _composition_entries_from_text(text: str) -> list[tuple[Decimal, str]] | Loa
     cleaned = text.strip().strip(".")
     if not cleaned:
         return LoadIssue(row=None, code="empty_composition", message="Composition is blank.")
-    segments = [segment.strip() for segment in re.split(r"[,;/+\n]+", cleaned) if segment.strip()]
+    segments = [segment.strip() for segment in re.split(r"[,;+\n]+", cleaned) if segment.strip()]
     if len(segments) > 1:
         return _composition_entries_from_segments(segments)
-    entries = _composition_entries_from_percent_first(cleaned)
-    if len(entries) > 1:
+    entries = _composition_entries_from_numeric_tokens(cleaned)
+    if entries is not None:
         return entries
-    entry = _composition_entry_from_segment(cleaned)
-    if isinstance(entry, LoadIssue):
-        return entry
-    return [entry]
+    return LoadIssue(
+        row=None,
+        code="composition_percentage_missing",
+        message=f"Composition entry is missing a percentage: {cleaned!r}.",
+    )
 
 
 def _composition_entries_from_segments(
@@ -549,97 +550,100 @@ def _composition_entries_from_segments(
 ) -> list[tuple[Decimal, str]] | LoadIssue:
     entries: list[tuple[Decimal, str]] = []
     for segment in segments:
-        entry = _composition_entry_from_segment(segment)
-        if isinstance(entry, LoadIssue):
-            return entry
-        entries.append(entry)
+        segment_entries = _composition_entries_from_numeric_tokens(segment)
+        if isinstance(segment_entries, LoadIssue):
+            return segment_entries
+        if segment_entries is None:
+            return LoadIssue(
+                row=None,
+                code="composition_percentage_missing",
+                message=f"Composition entry is missing a percentage: {segment!r}.",
+            )
+        entries.extend(segment_entries)
     return entries
 
 
-def _composition_entries_from_percent_first(text: str) -> list[tuple[Decimal, str]]:
-    entries: list[tuple[Decimal, str]] = []
-    pattern = re.compile(
-        r"(?P<percentage>\d+(?:\.\d+)?)\s*%?\s*"
-        r"(?P<name>[^\d,;/+]+?)"
-        r"(?=(?:\s+\d+(?:\.\d+)?\s*%?)|[,;/+]|$)"
-    )
-    for match in pattern.finditer(text):
-        name = _clean_composition_name(match.group("name"))
-        if not name:
-            continue
-        percentage = _decimal_or_none(match.group("percentage"))
-        if percentage is None or percentage <= 0:
-            continue
-        entries.append((percentage, name))
-    return entries
+def _composition_entries_from_numeric_tokens(
+    text: str,
+) -> list[tuple[Decimal, str]] | LoadIssue | None:
+    numbers = list(re.finditer(r"\d+(?:\.\d+)?\s*%?", text))
+    if not numbers:
+        return None
 
+    percentages: list[Decimal] = []
+    for number in numbers:
+        percentage = _decimal_or_none(number.group().strip().rstrip("%"))
+        if percentage is None:
+            return LoadIssue(
+                row=None,
+                code="invalid_composition_percentage",
+                message=f"Composition percentage must be numeric: {number.group()!r}.",
+            )
+        if percentage <= 0:
+            return LoadIssue(
+                row=None,
+                code="invalid_composition_percentage",
+                message=f"Composition percentage must be greater than 0: {number.group()!r}.",
+            )
+        percentages.append(percentage)
 
-def _composition_entry_from_segment(segment: str) -> tuple[Decimal, str] | LoadIssue:
-    cleaned = segment.strip().strip(".")
-    percent_first = re.fullmatch(
-        r"(?P<percentage>\d+(?:\.\d+)?)\s*%?\s*(?P<name>.+)",
-        cleaned,
+    parts = [text[: numbers[0].start()]]
+    parts.extend(
+        text[current.end() : next_number.start()]
+        for current, next_number in zip(numbers, numbers[1:], strict=False)
     )
-    if percent_first:
-        return _composition_entry(
-            percent_first.group("percentage"),
-            percent_first.group("name"),
-            sample=segment,
-        )
-    name_first = re.fullmatch(
-        r"(?P<name>.+?)\s+(?P<percentage>\d+(?:\.\d+)?)\s*%?",
-        cleaned,
-    )
-    if name_first:
-        return _composition_entry(
-            name_first.group("percentage"),
-            name_first.group("name"),
-            sample=segment,
-        )
-    if re.search(r"\d", cleaned):
+    parts.append(text[numbers[-1].end() :])
+    names = [_clean_composition_name(part) for part in parts]
+    if not any(names):
         return LoadIssue(
             row=None,
             code="composition_name_missing",
-            message=f"Composition entry is missing a name: {segment!r}.",
+            message=f"Composition entry is missing a name: {text!r}.",
         )
-    return LoadIssue(
-        row=None,
-        code="composition_percentage_missing",
-        message=f"Composition entry is missing a percentage: {segment!r}.",
-    )
 
+    def assign(
+        index: int,
+        used_name_indexes: frozenset[int],
+        entries: tuple[tuple[Decimal, str], ...],
+    ) -> tuple[tuple[Decimal, str], ...] | None:
+        if index == len(percentages):
+            if all(
+                not name or part_index in used_name_indexes for part_index, name in enumerate(names)
+            ):
+                return entries
+            return None
 
-def _composition_entry(
-    percentage_text: str,
-    name_text: str,
-    *,
-    sample: str,
-) -> tuple[Decimal, str] | LoadIssue:
-    percentage = _decimal_or_none(percentage_text)
-    if percentage is None:
-        return LoadIssue(
-            row=None,
-            code="invalid_composition_percentage",
-            message=f"Composition percentage must be numeric: {sample!r}.",
-        )
-    if percentage <= 0:
-        return LoadIssue(
-            row=None,
-            code="invalid_composition_percentage",
-            message=f"Composition percentage must be greater than 0: {sample!r}.",
-        )
-    name = _clean_composition_name(name_text)
-    if not name:
+        options: list[int] = []
+        before_index = index
+        after_index = index + 1
+        if names[before_index] and before_index not in used_name_indexes:
+            options.append(before_index)
+        if names[after_index] and after_index not in used_name_indexes:
+            options.append(after_index)
+
+        for name_index in options:
+            result = assign(
+                index + 1,
+                used_name_indexes | frozenset({name_index}),
+                entries + ((percentages[index], names[name_index]),),
+            )
+            if result is not None:
+                return result
+        return None
+
+    assigned = assign(0, frozenset(), ())
+    if assigned is None:
         return LoadIssue(
             row=None,
             code="composition_name_missing",
-            message=f"Composition entry is missing a name: {sample!r}.",
+            message=f"Composition entry is missing a name: {text!r}.",
         )
-    return percentage, name
+    return list(assigned)
 
 
 def _clean_composition_name(value: str) -> str:
-    return value.strip().strip("%").strip().strip(".").strip()
+    cleaned = re.sub(r"^[\s,;/+._%-]+|[\s,;/+._%-]+$", "", value.strip())
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _decimal_or_none(value: str) -> Decimal | None:
@@ -757,7 +761,11 @@ def _resolve_composition_list(
         raise ConfigError(f"Column {column.key} is missing resolve config.")
     resolved_entries: dict[str, dict[str, Any]] = {}
     for percentage, name in entries:
-        matches = reference_indexes.get(_resolve_key(resolve), {}).get(_lookup_key(name), [])
+        matches = _composition_reference_matches(
+            reference_indexes.get(_resolve_key(resolve), {}),
+            resolve,
+            name,
+        )
         if not matches:
             return LoadIssue(
                 row=row_number,
@@ -799,6 +807,39 @@ def _resolve_composition_list(
                 Decimal(str(existing["percentage"])) + percentage
             )
     return list(resolved_entries.values())
+
+
+def _composition_reference_matches(
+    reference_index: dict[str, list[dict[str, Any]]],
+    resolve: LoadResolve,
+    name: str,
+) -> list[dict[str, Any]]:
+    matches = reference_index.get(_lookup_key(name), [])
+    if matches:
+        return matches
+
+    canonical_name = _composition_lookup_key(name)
+    if not canonical_name:
+        return []
+
+    canonical_matches: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for payloads in reference_index.values():
+        for payload in payloads:
+            value = _extract_path(payload, resolve.match)
+            if _is_blank(value) or _composition_lookup_key(str(value)) != canonical_name:
+                continue
+            dedupe_key = str(payload.get(resolve.output) or payload.get("id") or id(payload))
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            canonical_matches.append(payload)
+    return canonical_matches
+
+
+def _composition_lookup_key(value: str) -> str:
+    tokens = re.findall(r"[a-z0-9]+", value.casefold())
+    return " ".join(sorted(tokens))
 
 
 def _number_value(value: Decimal) -> int | float:

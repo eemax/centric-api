@@ -193,6 +193,124 @@ def test_material_composition_create_accepts_unseparated_percent_first_entries(
     ]
 
 
+def test_material_composition_create_accepts_flexible_recycled_polyester_names(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "compositions.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Code", "Content"],
+        rows=[
+            ["MAT-001", "polyester-recycled 95 5 elastane"],
+            ["MAT-002", "95% recycled polyester, 5% elastane"],
+            ["MAT-003", "Polyester / Recycled 95; Elastane 5"],
+            ["MAT-004", "95 polyester-recycled; elastane 5"],
+        ],
+    )
+    with connect(db_path) as conn:
+        for record_id, code in (
+            ("M1", "MAT-001"),
+            ("M2", "MAT-002"),
+            ("M3", "MAT-003"),
+            ("M4", "MAT-004"),
+        ):
+            _insert_record(
+                conn,
+                endpoint="materials",
+                record_id=record_id,
+                payload={"id": record_id, "code": code},
+            )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="C1",
+            payload={"id": "C1", "node_name": "Polyester - Recycled", "active": True},
+        )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="C2",
+            payload={"id": "C2", "node_name": "Elastane", "active": True},
+        )
+
+    config = load_load_config()
+    result = materialize_load(
+        db_path,
+        select_load_job(config, "material-composition-create"),
+        workbook_path,
+    )
+
+    assert result.issues == ()
+    assert [request.body for request in result.requests] == [
+        [
+            {"percentage": 95, "composition": "C1"},
+            {"percentage": 5, "composition": "C2"},
+        ],
+        [
+            {"percentage": 95, "composition": "C1"},
+            {"percentage": 5, "composition": "C2"},
+        ],
+        [
+            {"percentage": 95, "composition": "C1"},
+            {"percentage": 5, "composition": "C2"},
+        ],
+        [
+            {"percentage": 95, "composition": "C1"},
+            {"percentage": 5, "composition": "C2"},
+        ],
+    ]
+
+
+def test_material_composition_create_fails_ambiguous_canonical_composition(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "compositions.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Material", "Composition"],
+        rows=[["MAT-001", "100 recycled-polyester"]],
+    )
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="materials",
+            record_id="M1",
+            payload={"id": "M1", "code": "MAT-001"},
+        )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="C1",
+            payload={"id": "C1", "node_name": "Polyester - Recycled", "active": True},
+        )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="C2",
+            payload={"id": "C2", "node_name": "Recycled Polyester", "active": True},
+        )
+
+    config = load_load_config()
+    result = materialize_load(
+        db_path,
+        select_load_job(config, "material-composition-create"),
+        workbook_path,
+    )
+
+    assert result.requests == ()
+    assert [issue.code for issue in result.issues] == ["composition_ambiguous"]
+
+
 def test_material_composition_create_fails_duplicate_material_code(
     tmp_path,
     monkeypatch,
