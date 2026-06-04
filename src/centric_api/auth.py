@@ -117,12 +117,16 @@ def _write_cached_token(
         "created_at": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
     }
     temp_path = path.with_name(f".{path.name}.tmp")
-    fd = os.open(temp_path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, sort_keys=True)
-        fh.write("\n")
-    temp_path.replace(path)
-    path.chmod(0o600)
+    try:
+        fd = os.open(temp_path, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, sort_keys=True)
+            fh.write("\n")
+        temp_path.replace(path)
+        path.chmod(0o600)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _delete_cached_token(path: Path) -> None:
@@ -186,7 +190,10 @@ class AuthContext:
             raise AuthError(
                 f"Session auth failed with status {response.status_code}: {response.text}"
             )
-        payload = response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise AuthError("Session auth response was not valid JSON.") from exc
         if not isinstance(payload, dict) or "token" not in payload:
             raise AuthError("Session auth response missing token field.")
         token = _extract_token(str(payload["token"]))

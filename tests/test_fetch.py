@@ -128,6 +128,34 @@ def test_request_json_retries_transient_http_status(monkeypatch: pytest.MonkeyPa
     assert sleeps == [0.25]
 
 
+def test_request_json_retries_http_request_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("centric_api.fetch_common.time.sleep", sleeps.append)
+    auth = _RetryAuth(
+        [httpx.Response(408, json={"error": "timeout"}), httpx.Response(200, json={"ok": True})]
+    )
+    retries = [0]
+
+    payload = _request_json_with_retry(
+        auth,
+        method="GET",
+        url="https://centric.example.com/api/v2/styles",
+        params=None,
+        fetcher_cfg=FetcherConfig(
+            output_dir=Path("raw"),
+            checkpoint_dir=Path("checkpoints"),
+            retry_base_seconds=0.25,
+            retry_max_seconds=1,
+            retry_max_attempts=2,
+        ),
+        retries_used_ref=retries,
+    )
+
+    assert payload == {"ok": True}
+    assert retries == [1]
+    assert sleeps == [0.25]
+
+
 def test_request_json_does_not_retry_non_retryable_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

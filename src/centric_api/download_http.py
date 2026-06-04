@@ -121,6 +121,7 @@ def _download_revision_file_once(
         try:
             with temp_path.open("wb") as fh:
                 bytes_written = _write_response_body(response, fh, sha)
+            _verify_content_length(response, bytes_written)
             temp_path.replace(target_path)
         except Exception:
             temp_path.unlink(missing_ok=True)
@@ -195,6 +196,21 @@ def _write_response_body(response: httpx.Response, fh: BinaryIO, sha: Any) -> in
         sha.update(chunk)
         bytes_written += len(chunk)
     return bytes_written
+
+
+def _verify_content_length(response: httpx.Response, bytes_written: int) -> None:
+    raw_value = response.headers.get("content-length")
+    if raw_value is None:
+        return
+    try:
+        expected = int(raw_value)
+    except ValueError:
+        return
+    if expected != bytes_written:
+        raise RuntimeError(
+            f"download content length mismatch: expected {expected} bytes, "
+            f"wrote {bytes_written} bytes"
+        )
 
 
 def _filename_from_content_disposition(value: str | None) -> str | None:

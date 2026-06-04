@@ -55,3 +55,25 @@ def test_download_revision_file_retries_retryable_http(
 
     assert result.path.read_bytes() == b"ok"
     assert sleeps == [15]
+
+
+def test_download_revision_file_rejects_content_length_mismatch(tmp_path: Path) -> None:
+    auth = _Auth(
+        httpx.Response(
+            200,
+            headers={"content-length": "5"},
+            content=b"ok",
+        )
+    )
+    target_path = tmp_path / "fallback.pdf"
+
+    with pytest.raises(RuntimeError, match="content length mismatch"):
+        download_revision_file(
+            auth,
+            revision_id="R1",
+            target_path=target_path,
+            fallback_filename="fallback.pdf",
+        )
+
+    assert not target_path.exists()
+    assert not (tmp_path / ".fallback.pdf.tmp").exists()

@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+import centric_api.auth as auth_module
 from centric_api.auth import AuthContext, AuthError
 
 
@@ -141,6 +142,47 @@ def test_auth_context_rejects_session_response_without_token(tmp_path: Path) -> 
 
     with pytest.raises(AuthError, match="missing token"):
         auth.ensure_token()
+
+
+def test_auth_context_rejects_invalid_session_json(tmp_path: Path) -> None:
+    auth = AuthContext(
+        base_url="https://centric.example.com",
+        username="user",
+        password="pass",
+        timeout=30,
+        client=_PostClient(httpx.Response(200, content=b"not json")),
+        token_cache_path=tmp_path / "auth" / "token.json",
+    )
+
+    with pytest.raises(AuthError, match="not valid JSON"):
+        auth.ensure_token()
+
+
+def test_auth_context_removes_partial_token_cache_on_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token_path = tmp_path / "auth" / "token.json"
+    auth = AuthContext(
+        base_url="https://centric.example.com",
+        username="user",
+        password="pass",
+        timeout=30,
+        client=_Client(post_token="fresh-token"),
+        token_cache_path=token_path,
+    )
+
+    def fail_dump(_payload, fh, **_kwargs) -> None:
+        fh.write("partial")
+        raise RuntimeError("token cache write failed")
+
+    monkeypatch.setattr(auth_module.json, "dump", fail_dump)
+
+    with pytest.raises(RuntimeError, match="token cache write failed"):
+        auth.ensure_token()
+
+    assert not token_path.exists()
+    assert not (tmp_path / "auth" / ".token.json.tmp").exists()
 
 
 class _Client:

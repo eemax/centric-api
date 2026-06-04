@@ -16,7 +16,7 @@ class FetchError(RuntimeError):
     pass
 
 
-_TRANSIENT_STATUSES = {429}
+_TRANSIENT_STATUSES = {408, 429}
 _PATH_RE = re.compile(r"(?:\.([A-Za-z_][A-Za-z0-9_]*))|(?:\[(\d+)\])")
 _OPERATOR_SUFFIXES = {"!", "ge", "gt", "le", "lt"}
 
