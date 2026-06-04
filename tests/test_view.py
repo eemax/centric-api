@@ -9,6 +9,7 @@ from zipfile import ZipFile
 import pytest
 from openpyxl import load_workbook
 
+import centric_api.view_export as view_export_module
 from centric_api.cli import main
 from centric_api.config import ConfigError
 from centric_api.store import connect
@@ -505,6 +506,215 @@ views:
     assert sheet["A2"].value is None
     assert sheet["B2"].value == "'=SUM(1,1)"
     assert sheet["B2"].data_type == "s"
+
+
+def test_view_export_escapes_formula_like_csv_text(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "node_name": "=SUM(1,1)", "quantity": "-5"},
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: formula-csv
+    root:
+      endpoint: styles
+      as: style
+    columns:
+      - header: Name
+        path: style.node_name
+      - header: Quantity
+        path: style.quantity
+        type: number
+""",
+        encoding="utf-8",
+    )
+    config = load_view_config(config_path)
+    result = export_view(
+        db_path,
+        config,
+        select_view(config, "formula-csv"),
+        export_format="csv",
+        output_path=tmp_path / "formula-text.csv",
+    )
+
+    with result.output_path.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.reader(fh))
+
+    assert rows == [["Name", "Quantity"], ["'=SUM(1,1)", "-5"]]
+
+
+def test_view_integer_columns_do_not_truncate_decimals(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "whole": "2.0", "fractional": "1.9"},
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: integers
+    root:
+      endpoint: styles
+      as: style
+    columns:
+      - header: Whole
+        path: style.whole
+        type: integer
+      - header: Fractional
+        path: style.fractional
+        type: integer
+""",
+        encoding="utf-8",
+    )
+    config = load_view_config(config_path)
+    result = export_view(
+        db_path,
+        config,
+        select_view(config, "integers"),
+        export_format="xlsx",
+        output_path=tmp_path / "integers.xlsx",
+    )
+
+    sheet = load_workbook(result.output_path).active
+
+    assert sheet["A2"].value == 2
+    assert sheet["B2"].value == "1.9"
+
+
+def test_view_config_rejects_invalid_regex_filter(tmp_path: Path) -> None:
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: invalid-regex
+    root:
+      endpoint: styles
+      as: style
+    filters:
+      - path: style.node_name
+        matches: "["
+    columns:
+      - header: Style
+        path: style.node_name
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="valid regex"):
+        load_view_config(config_path)
+
+
+def test_view_csv_export_preserves_existing_file_when_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "node_name": "Linen Shirt"},
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: styles
+    root:
+      endpoint: styles
+      as: style
+    columns:
+      - header: Style
+        path: style.node_name
+""",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "styles.csv"
+    output_path.write_text("existing\n", encoding="utf-8")
+
+    class FailingWriter:
+        def writerow(self, _row) -> None:
+            raise RuntimeError("csv write failed")
+
+    monkeypatch.setattr(view_export_module.csv, "writer", lambda _fh: FailingWriter())
+
+    config = load_view_config(config_path)
+    with pytest.raises(RuntimeError, match="csv write failed"):
+        export_view(
+            db_path,
+            config,
+            select_view(config, "styles"),
+            export_format="csv",
+            output_path=output_path,
+        )
+
+    assert output_path.read_text(encoding="utf-8") == "existing\n"
+    assert not (tmp_path / ".styles.csv.tmp").exists()
+
+
+def test_view_xlsx_export_preserves_existing_file_when_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "node_name": "Linen Shirt"},
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: styles
+    root:
+      endpoint: styles
+      as: style
+    columns:
+      - header: Style
+        path: style.node_name
+""",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "styles.xlsx"
+    output_path.write_bytes(b"existing")
+
+    def fail_save(_workbook, filename) -> None:
+        Path(filename).write_bytes(b"partial")
+        raise RuntimeError("xlsx write failed")
+
+    monkeypatch.setattr("openpyxl.workbook.workbook.Workbook.save", fail_save)
+
+    config = load_view_config(config_path)
+    with pytest.raises(RuntimeError, match="xlsx write failed"):
+        export_view(
+            db_path,
+            config,
+            select_view(config, "styles"),
+            export_format="xlsx",
+            output_path=output_path,
+        )
+
+    assert output_path.read_bytes() == b"existing"
+    assert not (tmp_path / ".styles.xlsx.tmp").exists()
 
 
 def test_view_root_filter_runs_before_join_missing_counts(tmp_path: Path) -> None:

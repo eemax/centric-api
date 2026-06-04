@@ -542,11 +542,22 @@ def _unique_records(records: Any) -> list[dict[str, Any]]:
 
 def _write_csv(path: Path, materialized: ViewMaterialized) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(materialized.headers)
-        for row in materialized.rows:
-            writer.writerow([_cell_text(value) for value in row])
+    temp_path = _temp_output_path(path)
+    try:
+        with temp_path.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(materialized.headers)
+            for row in materialized.rows:
+                writer.writerow(
+                    [
+                        _csv_value(value, column)
+                        for value, column in zip(row, materialized.columns, strict=True)
+                    ]
+                )
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _write_xlsx(path: Path, materialized: ViewMaterialized, view: ViewDefinition) -> None:
@@ -559,6 +570,7 @@ def _write_xlsx(path: Path, materialized: ViewMaterialized, view: ViewDefinition
         raise ConfigError("XLSX export requires openpyxl.") from exc
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = _temp_output_path(path)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = _sheet_name(view)
@@ -616,7 +628,12 @@ def _write_xlsx(path: Path, materialized: ViewMaterialized, view: ViewDefinition
             showColumnStripes=False,
         )
         sheet.add_table(table)
-    workbook.save(path)
+    try:
+        workbook.save(temp_path)
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _xlsx_value(value: Any, column: ViewColumn) -> Any:
@@ -630,11 +647,25 @@ def _xlsx_value(value: Any, column: ViewColumn) -> Any:
     if column.type == "number":
         return _number_value(value)
     if column.type == "integer":
-        number = _number_value(value)
-        return int(number) if isinstance(number, int | float) else number
+        return _integer_value(value)
     if column.type == "boolean":
         return _bool_value(value)
     return _xlsx_text(value)
+
+
+def _csv_value(value: Any, column: ViewColumn) -> str:
+    if value is None:
+        return ""
+    if column.type == "number":
+        return _cell_text(_number_value(value))
+    if column.type == "integer":
+        return _cell_text(_integer_value(value))
+    if column.type == "boolean":
+        return _cell_text(_bool_value(value))
+    text = _cell_text(value)
+    if text and text[0] in {"=", "+", "-", "@"}:
+        return f"'{text}"
+    return text
 
 
 def _number_value(value: Any) -> int | float | str | None:
@@ -650,6 +681,17 @@ def _number_value(value: Any) -> int | float | str | None:
     except ValueError:
         return _xlsx_text(value)
     return int(number) if number.is_integer() else number
+
+
+def _integer_value(value: Any) -> int | str | None:
+    number = _number_value(value)
+    if isinstance(number, int):
+        return number
+    if isinstance(number, float) and number.is_integer():
+        return int(number)
+    if isinstance(number, float):
+        return _xlsx_text(value)
+    return number
 
 
 def _bool_value(value: Any) -> bool | str | None:
@@ -689,6 +731,10 @@ def _sheet_name(view: ViewDefinition) -> str:
 def _default_output_path(output_dir: Path, view: ViewDefinition, export_format: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
     return output_dir / f"{_safe_name(view.name)}-{timestamp}.{export_format}"
+
+
+def _temp_output_path(path: Path) -> Path:
+    return path.parent / f".{path.name}.tmp"
 
 
 def _safe_name(value: str) -> str:

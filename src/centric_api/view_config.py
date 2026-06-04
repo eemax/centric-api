@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -297,6 +298,11 @@ def _parse_filter(raw: Any, field_name: str) -> ViewFilter:
     matches = raw.get("matches")
     if matches is not None and not isinstance(matches, str):
         raise ConfigError(f"{field_name}.matches must be a string.")
+    if matches is not None:
+        try:
+            re.compile(matches)
+        except re.error as exc:
+            raise ConfigError(f"{field_name}.matches must be a valid regex: {exc}") from exc
     return ViewFilter(
         path=path,
         operator=operators[0],
