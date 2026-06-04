@@ -21,6 +21,17 @@ def _write_material_workbook(
         sheet.append(row)
     workbook.save(path)
 
+
+def _write_value_set_workbook(path: Path, values: list[object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Values"
+    for value in values:
+        sheet.append([value])
+    workbook.save(path)
+
+
 def _insert_record(
     conn: sqlite3.Connection,
     *,

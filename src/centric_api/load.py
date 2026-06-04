@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 import time
+import unicodedata
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from .load_config import LoadColumn, LoadConfig, LoadJob, LoadResolve
 from .store import connect_readonly, endpoint_has_cache_evidence, table_exists
 
 LOAD_RUNS_DIR = Path("load/runs")
+LOAD_VALUE_SETS_DIR = Path("load/value-sets")
 MAX_SAMPLES = 3
 REVIEW_WORKBOOK_NAME = "review.xlsx"
 REVIEW_COLUMN_HEADERS = (
@@ -100,6 +102,16 @@ class LoadRunResult:
     finished_at: str
 
 
+@dataclass(frozen=True)
+class LoadValueSetIndex:
+    name: str
+    path: Path
+    values: tuple[str, ...]
+    exact: dict[str, str]
+    normalized: dict[str, str]
+    loose: dict[str, str]
+
+
 def materialize_load(
     db_path: Path,
     job: LoadJob,
@@ -150,6 +162,10 @@ def materialize_load(
             job,
             progress_callback=progress_callback,
         )
+        value_set_indexes = _build_value_set_indexes(
+            job,
+            progress_callback=progress_callback,
+        )
         requests: list[LoadRequest] = []
         issues: list[LoadIssue] = list(header_issues)
         rows_scanned = 0
@@ -167,6 +183,7 @@ def materialize_load(
                     row_values=row_values,
                     header_map=header_map,
                     reference_indexes=reference_indexes,
+                    value_set_indexes=value_set_indexes,
                 )
                 if row_issues:
                     error_rows += 1
@@ -407,6 +424,7 @@ def _row_values(
     row_values: tuple[Any, ...],
     header_map: dict[str, int],
     reference_indexes: dict[str, dict[str, list[dict[str, Any]]]],
+    value_set_indexes: dict[str, LoadValueSetIndex],
 ) -> tuple[dict[str, Any], list[LoadIssue]]:
     values: dict[str, Any] = {}
     issues: list[LoadIssue] = []
@@ -456,6 +474,17 @@ def _row_values(
                 parsed,
                 row_number=row_number,
                 reference_indexes=reference_indexes,
+            )
+            if isinstance(resolved, LoadIssue):
+                issues.append(resolved)
+                continue
+            values[column.key] = resolved
+        elif column.value_set is not None:
+            resolved = _resolve_value_set(
+                column,
+                parsed,
+                row_number=row_number,
+                value_set_indexes=value_set_indexes,
             )
             if isinstance(resolved, LoadIssue):
                 issues.append(resolved)
@@ -844,6 +873,150 @@ def _composition_lookup_key(value: str) -> str:
 
 def _number_value(value: Decimal) -> int | float:
     return int(value) if value == value.to_integral_value() else float(value)
+
+
+def _resolve_value_set(
+    column: LoadColumn,
+    value: Any,
+    *,
+    row_number: int,
+    value_set_indexes: dict[str, LoadValueSetIndex],
+) -> str | LoadIssue:
+    value_set = column.value_set
+    if value_set is None:
+        raise ConfigError(f"Column {column.key} is missing value_set config.")
+    index = value_set_indexes[value_set.name]
+    text = str(value).strip()
+    resolved = (
+        index.exact.get(text)
+        or index.normalized.get(_normalize_value_set_key(text))
+        or index.loose.get(_loose_value_set_key(text))
+    )
+    if resolved is None:
+        return LoadIssue(
+            row=row_number,
+            code="value_set_not_found",
+            column=column.key,
+            message=f"{column.header} {text!r} was not found in value set {value_set.name}.",
+            sample=index.values[:MAX_SAMPLES],
+        )
+    return resolved
+
+
+def _build_value_set_indexes(
+    job: LoadJob,
+    *,
+    progress_callback: LoadProgressCallback | None = None,
+) -> dict[str, LoadValueSetIndex]:
+    value_set_names = {
+        column.value_set.name for column in job.columns if column.value_set is not None
+    }
+    indexes: dict[str, LoadValueSetIndex] = {}
+    for name in sorted(value_set_names):
+        path = runtime_path(LOAD_VALUE_SETS_DIR / f"{name}.xlsx")
+        indexes[name] = _load_value_set_index(name, path)
+        _emit_progress(
+            progress_callback,
+            {
+                "event": "load_values",
+                "name": name,
+                "path": str(path),
+                "values": len(indexes[name].values),
+            },
+        )
+    return indexes
+
+
+def _load_value_set_index(name: str, path: Path) -> LoadValueSetIndex:
+    if not path.is_file():
+        raise ConfigError(f"Load value set {name!r} not found: {path}")
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        worksheet = workbook.worksheets[0]
+        values: list[str] = []
+        seen_exact: set[str] = set()
+        for (raw_value,) in worksheet.iter_rows(min_col=1, max_col=1, values_only=True):
+            if _is_blank(raw_value):
+                continue
+            value = str(raw_value).strip()
+            if value in seen_exact:
+                continue
+            seen_exact.add(value)
+            values.append(value)
+    finally:
+        workbook.close()
+
+    if not values:
+        raise ConfigError(f"Load value set {name!r} has no values: {path}")
+    exact = {value: value for value in values}
+    normalized = _value_set_lookup(
+        name,
+        path,
+        values,
+        key_func=_normalize_value_set_key,
+        label="normalized",
+    )
+    loose = _value_set_lookup(
+        name,
+        path,
+        values,
+        key_func=_loose_value_set_key,
+        label="loose",
+    )
+    return LoadValueSetIndex(
+        name=name,
+        path=path,
+        values=tuple(values),
+        exact=exact,
+        normalized=normalized,
+        loose=loose,
+    )
+
+
+def _value_set_lookup(
+    name: str,
+    path: Path,
+    values: list[str],
+    *,
+    key_func: Callable[[str], str],
+    label: str,
+) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for value in values:
+        key = key_func(value)
+        if not key:
+            continue
+        existing = lookup.get(key)
+        if existing is not None and existing != value:
+            raise ConfigError(
+                f"Load value set {name!r} has ambiguous {label} values "
+                f"{existing!r} and {value!r}: {path}"
+            )
+        lookup[key] = value
+    return lookup
+
+
+def _normalize_value_set_key(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value).replace("\xa0", " ")
+    return " ".join(normalized.strip().casefold().split())
+
+
+def _loose_value_set_key(value: str) -> str:
+    normalized = _normalize_value_set_key(value)
+    tokens = re.findall(r"[a-z0-9]+", normalized)
+    return "".join(_singular_value_set_token(token) for token in tokens)
+
+
+def _singular_value_set_token(token: str) -> str:
+    if len(token) > 3 and token.endswith("ies"):
+        return f"{token[:-3]}y"
+    if len(token) > 4 and token.endswith(("ches", "shes")):
+        return token[:-2]
+    if len(token) > 3 and token.endswith(("ses", "xes", "zes")):
+        return token[:-2]
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
 
 
 def _build_reference_indexes(

@@ -157,6 +157,27 @@ then falls back to the configured `match` field. For the bundled material compos
 `Material` can contain either `materials.id` or `materials.code`. Duplicate code matches fail as row
 validation errors.
 
+## Value Sets
+
+`value_set` columns validate and canonicalize text values from private XLSX truth lists. Store value
+sets under `CENTRIC_API_HOME/load/value-sets/{name}.xlsx`. The first sheet's column A contains the
+allowed values with no header:
+
+```yaml
+fabric_type:
+  header: Fabric Type
+  type: text
+  required: true
+  value_set:
+    name: materials.fabric_type
+```
+
+The example above reads `CENTRIC_API_HOME/load/value-sets/materials.fabric_type.xlsx`. The workbook
+value is matched after trimming, Unicode normalization, case-folding, whitespace cleanup, separator
+cleanup, and conservative singular/plural normalization. The request body uses the exact canonical
+value from the value set workbook. If two allowed values normalize to the same lookup key, the value
+set fails before any rows are processed.
+
 ## Path Templates And Array Bodies
 
 Load paths can include `{column_key}` placeholders. Placeholders are replaced with the parsed row

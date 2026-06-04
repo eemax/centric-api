@@ -15,8 +15,9 @@ PRIVATE_LOAD_CONFIG_PATH = Path("load.yml")
 ROOT_CONFIG_KEYS = {"version", "jobs"}
 JOB_CONFIG_KEYS = {"name", "title", "method", "path", "input", "columns", "body"}
 INPUT_CONFIG_KEYS = {"header_row"}
-COLUMN_CONFIG_KEYS = {"header", "headers", "type", "required", "resolve"}
+COLUMN_CONFIG_KEYS = {"header", "headers", "type", "required", "resolve", "value_set"}
 RESOLVE_CONFIG_KEYS = {"endpoint", "match", "output", "filters"}
+VALUE_SET_CONFIG_KEYS = {"name"}
 LOAD_METHODS = {"POST", "PUT"}
 COLUMN_TYPES = {"text", "number", "boolean", "ref", "ref_or_id", "composition_list"}
 
@@ -39,6 +40,11 @@ class LoadResolve:
 
 
 @dataclass(frozen=True)
+class LoadValueSet:
+    name: str
+
+
+@dataclass(frozen=True)
 class LoadColumn:
     key: str
     header: str
@@ -46,6 +52,7 @@ class LoadColumn:
     type: ColumnType = "text"
     required: bool = False
     resolve: LoadResolve | None = None
+    value_set: LoadValueSet | None = None
 
     @property
     def accepted_headers(self) -> tuple[str, ...]:
@@ -189,12 +196,17 @@ def _parse_column(key: Any, raw: Any, field_name: str) -> LoadColumn:
     if not isinstance(headers, list):
         raise ConfigError(f"{field_name}.headers must be an array.")
     resolve = _parse_resolve(raw.get("resolve"), field_name)
+    value_set = _parse_value_set(raw.get("value_set"), field_name)
     if column_type in {"ref", "ref_or_id", "composition_list"} and resolve is None:
         raise ConfigError(f"{field_name}.resolve is required for {column_type} columns.")
     if column_type not in {"ref", "ref_or_id", "composition_list"} and resolve is not None:
         raise ConfigError(
             f"{field_name}.resolve is only valid for ref, ref_or_id, and composition_list columns."
         )
+    if value_set is not None and column_type != "text":
+        raise ConfigError(f"{field_name}.value_set is only valid for text columns.")
+    if value_set is not None and resolve is not None:
+        raise ConfigError(f"{field_name}.value_set cannot be combined with resolve.")
     required = raw.get("required", False)
     if not isinstance(required, bool):
         raise ConfigError(f"{field_name}.required must be true or false.")
@@ -205,6 +217,7 @@ def _parse_column(key: Any, raw: Any, field_name: str) -> LoadColumn:
         type=column_type,  # type: ignore[arg-type]
         required=required,
         resolve=resolve,
+        value_set=value_set,
     )
 
 
@@ -231,6 +244,21 @@ def _parse_resolve_filters(raw: Any, field_name: str) -> dict[str, Any] | None:
     for key, value in raw.items():
         filters[_required_string(key, f"{field_name}.resolve.filters key")] = value
     return filters
+
+
+def _parse_value_set(raw: Any, field_name: str) -> LoadValueSet | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{field_name}.value_set must be an object.")
+    _reject_unknown_keys(raw, VALUE_SET_CONFIG_KEYS, f"{field_name}.value_set")
+    name = _required_string(raw.get("name"), f"{field_name}.value_set.name")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
+        raise ConfigError(
+            f"{field_name}.value_set.name may only contain letters, numbers, dots, "
+            "underscores, and hyphens."
+        )
+    return LoadValueSet(name=name)
 
 
 def _parse_body(raw: Any, job_name: str, column_keys: set[str], *, path: str) -> LoadBody:

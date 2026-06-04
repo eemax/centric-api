@@ -6,7 +6,11 @@ from centric_api.config import ConfigError
 from centric_api.load import materialize_load
 from centric_api.load_config import load_load_config, parse_load_config, select_load_job
 from centric_api.store import connect
-from tests.helpers_load import _insert_record, _write_material_workbook
+from tests.helpers_load import (
+    _insert_record,
+    _write_material_workbook,
+    _write_value_set_workbook,
+)
 
 
 def test_load_check_resolves_material_create_refs_and_alias_headers(tmp_path, monkeypatch) -> None:
@@ -48,6 +52,119 @@ def test_load_check_resolves_material_create_refs_and_alias_headers(tmp_path, mo
         "product_type": "MT1",
         "description": "Main body fabric",
     }
+
+
+def _value_set_config(tmp_path):
+    return parse_load_config(
+        {
+            "version": 1,
+            "jobs": [
+                {
+                    "name": "material-value-set",
+                    "method": "POST",
+                    "path": "/v2/materials",
+                    "columns": {
+                        "code": {"header": "Code", "required": True},
+                        "fabric_type": {
+                            "header": "Fabric Type",
+                            "required": True,
+                            "value_set": {"name": "materials.fabric_type"},
+                        },
+                    },
+                    "body": {"code": "code", "fabric_type": "fabric_type"},
+                }
+            ],
+        },
+        path=tmp_path / "load.yml",
+    )
+
+
+def test_load_value_set_canonicalizes_private_xlsx_values(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Code", "Fabric Type"],
+        rows=[
+            ["MAT-001", " jersey "],
+            ["MAT-002", "mid layer"],
+            ["MAT-003", "MID-LAYERS"],
+        ],
+    )
+    _write_value_set_workbook(
+        home / "load" / "value-sets" / "materials.fabric_type.xlsx",
+        ["Jerseys", "Midlayers"],
+    )
+    config = _value_set_config(tmp_path)
+
+    result = materialize_load(
+        db_path,
+        select_load_job(config, "material-value-set"),
+        workbook_path,
+    )
+
+    assert result.issues == ()
+    assert [request.body["fabric_type"] for request in result.requests] == [
+        "Jerseys",
+        "Midlayers",
+        "Midlayers",
+    ]
+
+
+def test_load_value_set_fails_unknown_workbook_value(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Code", "Fabric Type"],
+        rows=[["MAT-001", "Outerwear"]],
+    )
+    _write_value_set_workbook(
+        home / "load" / "value-sets" / "materials.fabric_type.xlsx",
+        ["Jerseys", "Midlayers"],
+    )
+    config = _value_set_config(tmp_path)
+
+    result = materialize_load(
+        db_path,
+        select_load_job(config, "material-value-set"),
+        workbook_path,
+    )
+
+    assert result.requests == ()
+    assert [issue.code for issue in result.issues] == ["value_set_not_found"]
+    assert result.issues[0].sample == ("Jerseys", "Midlayers")
+
+
+def test_load_value_set_fails_ambiguous_private_xlsx_values(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Code", "Fabric Type"],
+        rows=[["MAT-001", "jersey"]],
+    )
+    _write_value_set_workbook(
+        home / "load" / "value-sets" / "materials.fabric_type.xlsx",
+        ["Jersey", "Jerseys"],
+    )
+    config = _value_set_config(tmp_path)
+
+    with pytest.raises(ConfigError, match="ambiguous loose values"):
+        materialize_load(
+            db_path,
+            select_load_job(config, "material-value-set"),
+            workbook_path,
+        )
 
 
 def test_load_reference_resolution_requires_cached_resolve_endpoints(

@@ -36,6 +36,9 @@ def load_job_record(job: LoadJob) -> dict[str, Any]:
                     if column.resolve
                     else None
                 ),
+                "value_set": (
+                    {"name": column.value_set.name} if column.value_set else None
+                ),
             }
             for column in job.columns
         ],
@@ -65,6 +68,13 @@ def write_load_progress_line(event: dict[str, Any]) -> None:
         print(
             f"[load] refs: {event.get('endpoint')} matched={event.get('matched')} "
             f"values={event.get('values')}{suffix}",
+            file=sys.stderr,
+        )
+        return
+    if event.get("event") == "load_values":
+        print(
+            f"[load] values: {event.get('name')} values={event.get('values')} "
+            f"file={event.get('path')}",
             file=sys.stderr,
         )
         return
@@ -139,6 +149,11 @@ def print_human_load_show(job: LoadJob) -> None:
                 f"  {'':<{key_width}}  {'':<{type_width}}  {'':<8}  "
                 f"resolves {column.resolve.endpoint}.{column.resolve.match} -> "
                 f"{column.resolve.output}{filters}"
+            )
+        if column.value_set:
+            print(
+                f"  {'':<{key_width}}  {'':<{type_width}}  {'':<8}  "
+                f"values {column.value_set.name}"
             )
     print()
     print("Body")

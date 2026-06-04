@@ -175,6 +175,39 @@ jobs:
     assert f"Config:     {explicit_config}" in show_output
 
 
+def test_load_show_includes_value_sets(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    explicit_config = tmp_path / "load.yml"
+    explicit_config.write_text(
+        """
+version: 1
+jobs:
+  - name: material-value-set
+    method: POST
+    path: /v2/materials
+    columns:
+      code:
+        header: Code
+        required: true
+      fabric_type:
+        header: Fabric Type
+        value_set:
+          name: materials.fabric_type
+    body:
+      code: code
+      fabric_type: fabric_type
+""",
+        encoding="utf-8",
+    )
+
+    assert main(["load", "--load-config", str(explicit_config), "show", "material-value-set"]) == 0
+    show_output = capsys.readouterr().out
+
+    assert "values materials.fabric_type" in show_output
+
+
 def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
