@@ -15,6 +15,7 @@ from .commands.model import run_model_command
 from .commands.rebuild_db import run_rebuild_db
 from .commands.status import run_status
 from .commands.units import run_units
+from .commands.validate import run_validate_command
 from .commands.view import run_view
 from .config import ConfigError
 from .fetcher import FetchError
@@ -45,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_load_command(args)
         if args.command == "model":
             return run_model_command(args)
+        if args.command == "validate":
+            return run_validate_command(args)
         if args.command == "units":
             return run_units(args)
         if args.command == "status":

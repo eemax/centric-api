@@ -11,17 +11,18 @@ command:
 - `fetch --json`, `changelog --json`, `changelog fields --json`, `changelog actors --json`,
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
   `bundle list --json`, `view list --json`, `load list --json`, and `model list --json` emit JSON
-  Lines.
+  Lines. `validate list --json` and `validate run all --json` also emit JSON Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `changelog update --json`, `bundle run --json`, `bundle show --json`,
   `bundle changelog --json`, `status --json`, `doctor --json`, `rebuild-db --json`,
   `view show --json`, `view check --json`, `view export --json`, `load show --json`,
   `load check --json`, `load run --json`, `load retry --json`, `model show --json`,
-  `model check --json`, `model run --json`, and units commands emit one JSON object.
+  `model check --json`, `model run --json`, `validate show --json`,
+  `validate run NAME --json`, and units commands emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used. Group config
-flags such as `--load-config`, `--models-dir`, and `--units-config` can be passed either before or
-after their action.
+flags such as `--load-config`, `--models-dir`, `--validators-dir`, and `--units-config` can be
+passed either before or after their action.
 
 ## Fetch
 
@@ -233,6 +234,31 @@ Options:
 - `--json`: machine-readable output.
 
 See [View exports](views.md) for the schema contract and authoring rules.
+
+## Validation
+
+```bash
+uv run centric-api validate list
+uv run centric-api validate show my-validator
+uv run centric-api validate run my-validator
+uv run centric-api validate run all
+```
+
+`validate` runs private cache validation modules and writes artifacts instead of database history
+tables. A run writes `report.xlsx`, `summary.json`, and `findings.json` under
+`CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/`.
+
+Useful options:
+
+- `--validators-dir PATH`: load private validators from a specific directory.
+- `--units-config PATH`: use an explicit unit registry.
+- `--db PATH`: use a non-default SQLite cache for `run`.
+- `--output-dir PATH`: choose the validation artifact root.
+- `--json`: emit machine-readable output.
+
+There are no bundled validators. Validator modules load from `CENTRIC_API_HOME/validators/*.py` by
+default, or from `--validators-dir PATH`. See [Validation](validation.md) for the validator contract,
+context helpers, artifact shape, and private authoring guidance.
 
 ## Load Jobs
 

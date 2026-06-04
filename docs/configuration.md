@@ -19,6 +19,7 @@ locks, raw evidence, downloads, bundles, and the default SQLite database.
 | Load config | `config/load.yml` plus private overlay when present | `CENTRIC_API_HOME/load.yml` | `--load-config` |
 | Units config | `config/units.yml` plus private overlay when present | `CENTRIC_API_HOME/units.yml` | `--units-config` |
 | Model modules | n/a | `CENTRIC_API_HOME/models/*.py` | `--models-dir` |
+| Validator modules | n/a | `CENTRIC_API_HOME/validators/*.py` | `--validators-dir` |
 
 Relative runtime paths inside configs resolve under `CENTRIC_API_HOME`. Absolute paths and `~` are
 respected.

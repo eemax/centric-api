@@ -16,6 +16,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "download" in output
     assert "bundle" in output
     assert "view" in output
+    assert "validate" in output
     assert "model" in output
     assert "units" in output
     assert "CENTRIC API" in output
@@ -25,6 +26,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "Good first commands:" in output
     assert "1. doctor" in output
     assert "centric-api load check material-create materials.xlsx" in output
+    assert "centric-api validate list" in output
 
 
 def test_top_level_help_can_render_color() -> None:
@@ -40,6 +42,7 @@ def test_top_level_help_can_render_color() -> None:
     assert "\033[35mcentric-api\033[0m \033[32mfetch\033[0m" in output
     assert "\033[36m--endpoint\033[0m \033[2mstyles\033[0m" in output
     assert "\033[32mload\033[0m \033[32mcheck\033[0m" in output
+    assert "\033[32mvalidate\033[0m \033[32mlist\033[0m" in output
     assert "\033[2mstyle-colorways-demo\033[0m" in output
     assert "\033[2mmaterial-create\033[0m" in output
     assert "\033[33mmaterials.xlsx\033[0m" in output

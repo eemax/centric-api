@@ -15,6 +15,7 @@ Docs:
 - [Modeling spec](docs/modeling.md)
 - [Operations](docs/operations.md)
 - [Units](docs/units.md)
+- [Validation](docs/validation.md)
 - [View exports](docs/views.md)
 
 ```bash
@@ -39,6 +40,8 @@ uv run centric-api load run material-create materials.xlsx --dry-run
 uv run centric-api load retry material-create review.xlsx --dry-run
 uv run centric-api model list
 uv run centric-api model check my-model
+uv run centric-api validate list
+uv run centric-api validate run my-validator
 uv run centric-api units convert 1500 g kg
 uv run centric-api units basis gsm
 uv run centric-api status
@@ -111,6 +114,11 @@ target.
 tables using configured view schemas. The repo includes `config/views.yml` as a demo; production
 schemas normally live in private `CENTRIC_API_HOME/views.yml` or are passed with `--view-config`.
 Views are read-only and local: they do not call the Centric API.
+
+`validate` runs private cache validation reports and writes timestamped artifacts under
+`CENTRIC_API_HOME/validation/runs`. The main repo provides the command, cache helpers, and standard
+`report.xlsx`, `summary.json`, and `findings.json` artifact writer. Validation logic lives in
+private `CENTRIC_API_HOME/validators` modules or a directory passed with `--validators-dir`.
 
 `load` validates workbook rows and can send API requests to Centric. The repo includes
 `material-create`, which posts material rows to `/v2/materials`, and

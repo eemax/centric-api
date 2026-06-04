@@ -380,6 +380,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     model_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Run cache validation reports",
+    )
+    validate_parser.add_argument(
+        "--validators-dir",
+        metavar="PATH",
+        default=None,
+        help="Private validators directory.",
+    )
+    validate_parser.add_argument(
+        "--units-config",
+        metavar="PATH",
+        default=None,
+        help="Units config path.",
+    )
+    validate_actions = validate_parser.add_subparsers(dest="action", required=True)
+
+    validate_list_parser = validate_actions.add_parser("list", help="List available validators")
+    _add_validate_config_overrides(validate_list_parser)
+    validate_list_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
+
+    validate_show_parser = validate_actions.add_parser("show", help="Show one validator")
+    validate_show_parser.add_argument("name", metavar="NAME", help="Validator name.")
+    _add_validate_config_overrides(validate_show_parser)
+    validate_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    validate_run_parser = validate_actions.add_parser("run", help="Run one validator or all")
+    validate_run_parser.add_argument(
+        "name",
+        metavar="NAME",
+        help="Validator name, or all.",
+    )
+    _add_validate_config_overrides(validate_run_parser)
+    validate_run_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    validate_run_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Validation artifact root directory.",
+    )
+    validate_run_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
+
     units_parser = subparsers.add_parser("units", help="Inspect and convert configured units")
     units_parser.add_argument(
         "--units-config", metavar="PATH", default=None, help="Units config path."
@@ -508,6 +553,21 @@ def _add_model_config_overrides(parser: argparse.ArgumentParser) -> None:
         metavar="PATH",
         default=argparse.SUPPRESS,
         help="Private models directory.",
+    )
+    parser.add_argument(
+        "--units-config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Units config path.",
+    )
+
+
+def _add_validate_config_overrides(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--validators-dir",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Private validators directory.",
     )
     parser.add_argument(
         "--units-config",

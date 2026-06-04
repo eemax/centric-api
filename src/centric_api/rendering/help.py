@@ -63,6 +63,7 @@ def top_level_help(*, color: bool = False) -> str:
             paint("Core workflows:", BOLD),
             command("fetch", "Pull Centric records into SQLite"),
             command("view", "Export cache data to Excel/CSV"),
+            command("validate", "Run private cache validation reports"),
             command("load", "Validate Excel rows and push data to Centric"),
             command("changelog", "Review changed records and actor activity"),
             command("download", "Download current document revisions"),
@@ -90,6 +91,11 @@ def top_level_help(*, color: bool = False) -> str:
                 ("command", "view"),
                 ("command", "export"),
                 ("value", "style-colorways-demo"),
+            ),
+            example(
+                ("binary", "centric-api"),
+                ("command", "validate"),
+                ("command", "list"),
             ),
             example(
                 ("binary", "centric-api"),
