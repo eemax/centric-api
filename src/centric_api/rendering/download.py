@@ -5,6 +5,7 @@ import sys
 from typing import Any
 
 from ..download import DownloadRunResult
+from .common import format_count
 from .logs import format_seconds
 
 
@@ -45,19 +46,21 @@ def print_human_download_summary(result: DownloadRunResult) -> None:
     print(f"Manifest: {result.manifest_path}")
     print()
     print("Summary")
-    print(f"Matched:         {result.matched_count}")
-    print(f"Selected:        {result.selected_count}")
-    print(f"Downloaded:      {result.downloaded_count}")
-    print(f"Already present: {result.already_present_count}")
-    print(f"Skipped total:   {result.skipped_count}")
-    print(f"Skipped current: {result.skipped_current_count}")
-    print(f"Dry run:         {result.dry_run_count}")
-    print(f"Superseded:      {result.superseded_count}")
-    print(f"Tombstoned:      {result.tombstoned_count}")
-    print(f"Failed:          {result.failed_count}")
+    print(f"Matched:         {format_count(result.matched_count)}")
+    print(f"Selected:        {format_count(result.selected_count)}")
+    print(f"Downloaded:      {format_count(result.downloaded_count)}")
+    print(f"Already present: {format_count(result.already_present_count)}")
+    print(f"Skipped total:   {format_count(result.skipped_count)}")
+    print(f"Skipped current: {format_count(result.skipped_current_count)}")
+    print(f"Dry run:         {format_count(result.dry_run_count)}")
+    print(f"Superseded:      {format_count(result.superseded_count)}")
+    print(f"Tombstoned:      {format_count(result.tombstoned_count)}")
+    print(f"Failed:          {format_count(result.failed_count)}")
     if result.items:
         rows = result.items[:10]
         width = max(len("Document"), *(len(str(row["document_id"])) for row in rows))
+        print()
+        print(f"Item Preview: first {format_count(len(rows))} of {format_count(len(result.items))}")
         print()
         print(f"{'Document':<{width}}  {'Revision':<12}  Status")
         print("-" * (width + 23))
@@ -67,7 +70,7 @@ def print_human_download_summary(result: DownloadRunResult) -> None:
                 f"{str(row['latest_revision_id']):<12}  {row['status']}"
             )
         if len(result.items) > len(rows):
-            print(f"... {len(result.items) - len(rows)} more")
+            print(f"... {format_count(len(result.items) - len(rows))} more")
 
 
 def download_record(result: DownloadRunResult) -> dict[str, Any]:

@@ -4,7 +4,7 @@ import json
 import sys
 from typing import Any
 
-from ..load import LoadMaterialized, LoadRunResult, materialized_record, run_record
+from ..load import MAX_SAMPLES, LoadMaterialized, LoadRunResult, materialized_record, run_record
 from ..load_config import LoadJob
 from .common import format_count
 from .logs import format_seconds
@@ -222,8 +222,11 @@ def _print_request_samples(requests: tuple[Any, ...]) -> None:
         return
     print()
     print("Request Samples")
-    for request in requests[:5]:
+    for request in requests[:MAX_SAMPLES]:
         print(f"  row {request.row}: {request.method} {request.path} {request.body}")
+    hidden_count = len(requests) - MAX_SAMPLES
+    if hidden_count > 0:
+        print(f"  ... {hidden_count} more request{'' if hidden_count == 1 else 's'}")
 
 
 def _format_filters(value: Any) -> str:

@@ -20,7 +20,7 @@ from .load_config import LoadColumn, LoadConfig, LoadJob, LoadResolve
 from .store import connect_readonly, endpoint_has_cache_evidence, table_exists
 
 LOAD_RUNS_DIR = Path("load/runs")
-MAX_SAMPLES = 5
+MAX_SAMPLES = 3
 REVIEW_WORKBOOK_NAME = "review.xlsx"
 REVIEW_COLUMN_HEADERS = (
     "_cent_load_run_id",
