@@ -7,6 +7,7 @@ from typing import Any
 
 from ..config import ConfigError, runtime_home
 from .contracts import ModelDefinition, ModelProtocol
+from .tables import validate_identifier
 
 PRIVATE_MODELS_DIR = Path("models")
 
@@ -69,10 +70,23 @@ def _validate_model(model: Any, path: Path) -> None:
     definition = getattr(model, "definition", None)
     if not isinstance(definition, ModelDefinition):
         raise ConfigError(f"Model {path} must expose a ModelDefinition as definition.")
-    if not definition.name.strip():
+    if not isinstance(definition.name, str) or not definition.name.strip():
         raise ConfigError(f"Model {path} has an empty name.")
-    if not definition.output_table.strip():
+    if not isinstance(definition.title, str) or not definition.title.strip():
+        raise ConfigError(f"Model {definition.name!r} has an empty title.")
+    if not isinstance(definition.output_table, str) or not definition.output_table.strip():
         raise ConfigError(f"Model {definition.name!r} has an empty output table.")
+    validate_identifier(definition.output_table, f"Model {definition.name!r} output table")
+    if not isinstance(definition.required_endpoints, (tuple, list)):
+        raise ConfigError(
+            f"Model {definition.name!r} required_endpoints must be a tuple or list."
+        )
+    for endpoint in definition.required_endpoints:
+        if not isinstance(endpoint, str) or not endpoint.strip():
+            raise ConfigError(
+                f"Model {definition.name!r} required_endpoints must contain "
+                "non-empty strings."
+            )
     for method in ("check", "run"):
         if not callable(getattr(model, method, None)):
             raise ConfigError(f"Model {definition.name!r} must define {method}().")

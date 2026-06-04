@@ -71,37 +71,47 @@ def replace_output_table(
     output: ModelOutput,
     run_id: str,
 ) -> None:
-    _validate_identifier(output_table, "model output table")
+    validate_identifier(output_table, "model output table")
     column_names = [column.name for column in output.columns]
     if not column_names:
         raise ConfigError("Model output must define at least one column.")
     if len(set(column_names)) != len(column_names):
         raise ConfigError("Model output column names must be unique.")
     for column in output.columns:
-        _validate_identifier(column.name, "model output column")
+        validate_identifier(column.name, "model output column")
+        if column.type not in SQL_TYPES:
+            choices = ", ".join(sorted(SQL_TYPES))
+            raise ConfigError(
+                f"Model output column {column.name!r} has unsupported type "
+                f"{column.type!r}. Use one of: {choices}."
+            )
 
     temp_table = f"__tmp_{output_table}_{_safe_suffix(run_id)}"
     columns_sql = ", ".join(
         f"{_quote(column.name)} {SQL_TYPES[column.type]}" for column in output.columns
     )
-    conn.execute(f"DROP TABLE IF EXISTS {_quote(temp_table)}")
-    conn.execute(f"CREATE TABLE {_quote(temp_table)} ({columns_sql})")
-    if output.rows:
-        placeholders = ", ".join("?" for _ in output.columns)
-        insert_sql = (
-            f"INSERT INTO {_quote(temp_table)} "
-            f"({', '.join(_quote(name) for name in column_names)}) "
-            f"VALUES ({placeholders})"
-        )
-        conn.executemany(
-            insert_sql,
-            [
-                [_sql_value(row.get(column.name), column) for column in output.columns]
-                for row in output.rows
-            ],
-        )
-    conn.execute(f"DROP TABLE IF EXISTS {_quote(output_table)}")
-    conn.execute(f"ALTER TABLE {_quote(temp_table)} RENAME TO {_quote(output_table)}")
+    try:
+        conn.execute(f"DROP TABLE IF EXISTS {_quote(temp_table)}")
+        conn.execute(f"CREATE TABLE {_quote(temp_table)} ({columns_sql})")
+        if output.rows:
+            placeholders = ", ".join("?" for _ in output.columns)
+            insert_sql = (
+                f"INSERT INTO {_quote(temp_table)} "
+                f"({', '.join(_quote(name) for name in column_names)}) "
+                f"VALUES ({placeholders})"
+            )
+            conn.executemany(
+                insert_sql,
+                [
+                    [_sql_value(row.get(column.name), column) for column in output.columns]
+                    for row in output.rows
+                ],
+            )
+        conn.execute(f"DROP TABLE IF EXISTS {_quote(output_table)}")
+        conn.execute(f"ALTER TABLE {_quote(temp_table)} RENAME TO {_quote(output_table)}")
+    except Exception:
+        conn.execute(f"DROP TABLE IF EXISTS {_quote(temp_table)}")
+        raise
 
 
 def record_model_run(conn: sqlite3.Connection, summary: ModelRunSummary) -> None:
@@ -184,8 +194,8 @@ def _sql_value(value: Any, column: ModelColumn) -> Any:
     return str(value)
 
 
-def _validate_identifier(value: str, label: str) -> None:
-    if not IDENTIFIER_PATTERN.match(value):
+def validate_identifier(value: str, label: str) -> None:
+    if not isinstance(value, str) or not IDENTIFIER_PATTERN.match(value):
         raise ConfigError(f"{label} must be a SQLite-safe identifier.")
 
 

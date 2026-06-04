@@ -102,6 +102,32 @@ dimensions:
     assert str(registry.convert("1", "lb", "g").output_value) == "453.59237"
 
 
+def test_unit_registry_private_overlay_replaces_basis_units(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    (home / "units.yml").write_text(
+        """
+version: 1
+dimensions:
+  areal_density:
+    units:
+      g_per_m2:
+        basis_units:
+          bom_quantity_unit: yd
+          width_unit: yd
+""",
+        encoding="utf-8",
+    )
+
+    registry = load_unit_registry()
+    basis = registry.basis("gsm")
+
+    assert basis.unit_context is not None
+    assert basis.unit_context.bom_quantity_unit == "yd"
+    assert basis.unit_context.width_unit == "yd"
+
+
 def test_unit_registry_rejects_alias_conflicts() -> None:
     payload = {
         "version": 1,

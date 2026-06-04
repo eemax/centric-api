@@ -156,8 +156,8 @@ easy to debug, and easy to export.
 - Make output column names SQLite-safe and stable. View configs and downstream exports will depend
   on them.
 - Use `ModelColumn(..., "json")` for structured lists or objects that should stay machine-readable.
-- Make private view configs consume model output tables with `table: model_name`, then join cached
-  endpoints for display labels and filters.
+- Make private view configs consume model output tables with `table: model_my_model`, then join
+  cached endpoints for display labels and filters.
 - Run `centric-api model check MODEL` before the first full run, then `centric-api model run MODEL`,
   then `centric-api view check VIEW` for any export that depends on the model table.
 - A clean model-backed view should ideally have no missing joins. If a view reports missing refs,

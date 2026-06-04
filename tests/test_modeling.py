@@ -8,7 +8,7 @@ import pytest
 
 from centric_api.cli import main
 from centric_api.config import ConfigError
-from centric_api.modeling import ModelDefinition, ModelOutput
+from centric_api.modeling import ModelColumn, ModelDefinition, ModelOutput
 from centric_api.modeling.registry import discover_models
 from centric_api.modeling.runner import run_model
 from centric_api.store import connect
@@ -123,6 +123,97 @@ def test_model_registry_rejects_duplicate_names(tmp_path: Path) -> None:
         discover_models(models_dir)
 
 
+def test_model_registry_rejects_bad_definition_shape(tmp_path: Path) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    _write_custom_model(
+        models_dir / "bad.py",
+        """
+from centric_api.modeling import ModelDefinition, ModelOutput
+
+
+class BadModel:
+    definition = ModelDefinition(
+        name="bad-model",
+        title="Bad Model",
+        output_table="bad model",
+        required_endpoints="styles",
+    )
+
+    def check(self, ctx):
+        return None
+
+    def run(self, ctx):
+        return ModelOutput(columns=(), rows=())
+
+
+MODEL = BadModel()
+""",
+    )
+
+    with pytest.raises(ConfigError, match="SQLite-safe identifier"):
+        discover_models(models_dir)
+
+
+def test_model_registry_rejects_string_required_endpoints(tmp_path: Path) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    _write_custom_model(
+        models_dir / "bad.py",
+        """
+from centric_api.modeling import ModelColumn, ModelDefinition, ModelOutput
+
+
+class BadModel:
+    definition = ModelDefinition(
+        name="bad-model",
+        title="Bad Model",
+        output_table="model_bad",
+        required_endpoints="styles",
+    )
+
+    def check(self, ctx):
+        return None
+
+    def run(self, ctx):
+        return ModelOutput(columns=(ModelColumn("value"),), rows=())
+
+
+MODEL = BadModel()
+""",
+    )
+
+    with pytest.raises(ConfigError, match="required_endpoints"):
+        discover_models(models_dir)
+
+
+def test_model_output_rejects_unsupported_column_type_cleanly(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+
+    with pytest.raises(ConfigError, match="unsupported type"):
+        run_model(db_path, _UnsupportedColumnTypeModel())
+
+
+def test_model_output_temp_table_is_removed_on_insert_failure(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with pytest.raises(TypeError):
+        run_model(db_path, _BadIntegerValueModel())
+
+    with sqlite3.connect(db_path) as conn:
+        temp_rows = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE '__tmp_model_bad_integer_%'
+            """
+        ).fetchall()
+        output_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_bad_integer'"
+        ).fetchone()
+    assert temp_rows == []
+    assert output_exists is None
+
+
 def _write_demo_model(path: Path) -> None:
     path.write_text(
         """
@@ -183,6 +274,10 @@ MODEL = TestModel()
     )
 
 
+def _write_custom_model(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+
+
 class _RequiresMissingEndpointModel:
     definition = ModelDefinition(
         name="requires-missing",
@@ -210,6 +305,40 @@ class _EmptyOutputModel:
 
     def run(self, _ctx) -> ModelOutput:
         return ModelOutput(columns=(), rows=())
+
+
+class _UnsupportedColumnTypeModel:
+    definition = ModelDefinition(
+        name="unsupported-column-type",
+        title="Unsupported Column Type",
+        output_table="model_unsupported_column_type",
+    )
+
+    def check(self, _ctx) -> None:
+        return None
+
+    def run(self, _ctx) -> ModelOutput:
+        return ModelOutput(
+            columns=(ModelColumn("value", "float"),),  # type: ignore[arg-type]
+            rows=({"value": 1.5},),
+        )
+
+
+class _BadIntegerValueModel:
+    definition = ModelDefinition(
+        name="bad-integer-value",
+        title="Bad Integer Value",
+        output_table="model_bad_integer",
+    )
+
+    def check(self, _ctx) -> None:
+        return None
+
+    def run(self, _ctx) -> ModelOutput:
+        return ModelOutput(
+            columns=(ModelColumn("value", "integer"),),
+            rows=({"value": object()},),
+        )
 
 
 def _insert_endpoint_record(

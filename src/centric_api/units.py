@@ -289,6 +289,8 @@ def _merge_payloads(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, 
                 if not isinstance(existing_aliases, list) or not isinstance(overlay_aliases, list):
                     raise ConfigError(f"units[{unit_name}].aliases must be an array.")
                 unit["aliases"] = [*existing_aliases, *overlay_aliases]
+            if "basis_units" in raw_overlay_unit:
+                unit["basis_units"] = raw_overlay_unit["basis_units"]
             units[unit_name] = unit
         raw_base_dimension["units"] = units
     merged["dimensions"] = dimensions
