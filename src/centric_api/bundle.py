@@ -201,13 +201,10 @@ def _build_bundle_items(
     used_paths: set[str] = set()
     for row in rows:
         source_path = Path(str(row["file_path"] or ""))
-        file_exists = source_path.is_file()
-        sha256 = str(row["sha256"] or _sha256(source_path)) if file_exists else None
-        size = (
-            int(row["bytes"])
-            if row["bytes"] is not None
-            else (source_path.stat().st_size if file_exists else None)
-        )
+        file_metadata = _verified_current_file(row)
+        file_exists = file_metadata is not None
+        sha256 = file_metadata[0] if file_metadata is not None else None
+        size = file_metadata[1] if file_metadata is not None else None
         filename = source_path.name or str(row["document_name"] or row["document_id"])
         source_refs = _json_list(row["source_refs_json"])
         for ref in source_refs:
@@ -422,6 +419,19 @@ def _safe_filename(value: str) -> str:
     safe = re.sub(r"[/:\\]+", "_", value.strip())
     safe = safe.strip(". ")
     return safe or "download.bin"
+
+
+def _verified_current_file(row: sqlite3.Row) -> tuple[str, int] | None:
+    source_path = Path(str(row["file_path"] or ""))
+    if not source_path.is_file():
+        return None
+    size = source_path.stat().st_size
+    if row["bytes"] is not None and int(row["bytes"]) != size:
+        return None
+    sha256 = _sha256(source_path)
+    if row["sha256"] and str(row["sha256"]) != sha256:
+        return None
+    return sha256, size
 
 
 def _sha256(path: Path) -> str:

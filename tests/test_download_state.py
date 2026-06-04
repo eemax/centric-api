@@ -112,6 +112,51 @@ def test_download_delta_skips_current_revision_present_on_disk(tmp_path: Path) -
         ).fetchall()
     assert rows == [("D1", "R1", "current", str(existing_file))]
 
+
+def test_download_delta_redownloads_current_revision_when_file_hash_mismatches(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
+        )
+
+    config = _download_config(tmp_path)
+    existing_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    existing_file.parent.mkdir(parents=True)
+    existing_file.write_bytes(b"original")
+    sync_result = run_download_job(
+        db_path=db_path,
+        auth_ctx=None,
+        config=config,
+        mode="sync",
+    )
+    assert sync_result.already_present_count == 1
+
+    existing_file.write_bytes(b"tampered")
+    delta_result = run_download_job(
+        db_path=db_path,
+        auth_ctx=_Auth(httpx.Response(200, content=b"fixed")),
+        config=config,
+        mode="delta",
+    )
+
+    assert delta_result.selected_count == 1
+    assert delta_result.downloaded_count == 1
+    assert delta_result.skipped_current_count == 0
+    assert existing_file.read_bytes() == b"fixed"
+
+
 def test_download_rebuild_redownloads_and_tombstones_unselected(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -179,6 +224,64 @@ def test_download_rebuild_redownloads_and_tombstones_unselected(tmp_path: Path) 
             """
         ).fetchall()
     assert rows == [("D1", "R1", "tombstoned", "no_longer_selected")]
+
+
+def test_download_rebuild_does_not_tombstone_when_manifest_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D1",
+            payload={"id": "D1", "node_name": "spec.pdf", "latest_revision": "R1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="document_revisions",
+            record_id="R1",
+            payload={"id": "R1", "file_name": "spec.pdf"},
+        )
+
+    config = _download_config(tmp_path)
+    existing_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    existing_file.parent.mkdir(parents=True)
+    existing_file.write_bytes(b"old")
+    run_download_job(db_path=db_path, auth_ctx=None, config=config, mode="sync")
+
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM endpoint_records WHERE endpoint = 'documents'")
+        _insert_record(
+            conn,
+            endpoint="documents",
+            record_id="D2",
+            payload={"id": "D2", "node_name": "art.ai", "latest_revision": "R2"},
+        )
+
+    def fail_manifest(*_args, **_kwargs):
+        raise RuntimeError("manifest write failed")
+
+    monkeypatch.setattr("centric_api.download.write_manifest", fail_manifest)
+
+    with pytest.raises(RuntimeError, match="manifest write failed"):
+        run_download_job(
+            db_path=db_path,
+            auth_ctx=None,
+            config=config,
+            mode="rebuild",
+        )
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT document_id, revision_id, status, tombstone_reason
+            FROM download_current
+            """
+        ).fetchall()
+    assert rows == [("D1", "R1", "current", None)]
+
 
 def test_download_sync_uses_stored_content_disposition_path(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"

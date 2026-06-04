@@ -75,10 +75,12 @@ operator for single reference IDs, such as filtering styles by the referenced se
 Download preflight fails before selection if a job's source endpoints, `document_revisions`
 dependency, or lookup endpoints have not been fetched into the local cache yet. The default mode is
 delta: documents already marked current in SQLite and present on disk are
-skipped. `--sync` verifies all selected latest revisions exist without overwriting existing files.
-`--rebuild` redownloads selected latest revisions and tombstones current download rows that are no
-longer selected, while preserving the last known good current revision if a replacement download
-fails. Non-dry-run download runs are serialized with
+skipped. Delta and sync modes trust already-present files only when their on-disk metadata still
+matches the recorded current download state. `--sync` verifies all selected latest revisions exist
+without overwriting files that still match recorded state. `--rebuild` redownloads selected latest
+revisions and tombstones current download rows that are no longer selected, while preserving the last
+known good current revision if a replacement download fails. Non-dry-run download runs are
+serialized with
 `CENTRIC_API_HOME/download.lock`, and binary downloads retry transient HTTP/server hiccups with a
 simple 15s/30s backoff. The default config is `config/download.yml`, with a fuller multi-job example
 in `config/download.example.yml`; place `download.yml` in `CENTRIC_API_HOME` for private jobs, or

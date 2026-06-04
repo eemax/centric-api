@@ -38,7 +38,7 @@ def test_download_revision_file_retries_retryable_http(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sleeps: list[int] = []
-    monkeypatch.setattr("centric_api.download.time.sleep", sleeps.append)
+    monkeypatch.setattr("centric_api.download_http.time.sleep", sleeps.append)
     auth = _Auth(
         [
             httpx.Response(503, content=b"reload"),

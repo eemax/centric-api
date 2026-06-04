@@ -99,8 +99,8 @@ State and artifacts:
 
 Modes:
 
-- Delta skips current revisions already present on disk.
-- Sync verifies selected latest revisions exist.
+- Delta skips current revisions already present on disk with matching recorded metadata.
+- Sync verifies selected latest revisions exist with matching recorded metadata.
 - Rebuild redownloads selected latest revisions and tombstones current rows that are no longer
   selected.
 
@@ -109,7 +109,8 @@ Binary downloads retry transient HTTP/server failures with a 15s/30s backoff.
 
 ## Bundles
 
-Bundle runs package current downloaded files. Non-dry-run runs write:
+Bundle runs package current downloaded files whose on-disk metadata still matches download state.
+Non-dry-run runs write:
 
 - `manifest.json`
 - `changelog.json`

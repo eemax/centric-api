@@ -172,6 +172,23 @@ def update_download_current(conn: sqlite3.Connection, *, manifest: dict[str, Any
             )
 
 
+def count_unselected_current(
+    conn: sqlite3.Connection,
+    *,
+    job_name: str,
+    desired_documents: dict[str, ResolvedDocument],
+) -> int:
+    rows = conn.execute(
+        """
+        SELECT document_id
+        FROM download_current
+        WHERE job_name = ? AND status = 'current'
+        """,
+        [job_name],
+    ).fetchall()
+    return sum(1 for row in rows if str(row["document_id"]) not in desired_documents)
+
+
 def tombstone_unselected_current(
     conn: sqlite3.Connection,
     *,

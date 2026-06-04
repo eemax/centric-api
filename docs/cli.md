@@ -151,8 +151,10 @@ through `document_revisions/{revision_id}/download`.
 
 Modes:
 
-- Default delta mode skips revisions already marked current and present on disk.
-- `--sync` verifies selected latest revisions exist without overwriting present files.
+- Default delta mode skips revisions already marked current and present on disk with matching
+  recorded metadata.
+- `--sync` verifies selected latest revisions exist without overwriting files that still match
+  recorded metadata.
 - `--rebuild` redownloads selected latest revisions and tombstones current rows no longer selected.
 - `--dry-run` performs selection only, skips the download lock, and writes no download state.
 

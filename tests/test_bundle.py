@@ -384,6 +384,39 @@ def test_bundle_fails_when_current_download_file_is_missing(tmp_path: Path) -> N
         )
 
 
+def test_bundle_fails_when_current_download_file_hash_mismatches(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    source_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_bytes(b"expected")
+    with connect(db_path) as conn:
+        ensure_download_tables(conn)
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "style_code": "STY-001", "node_name": "Linen Shirt"},
+        )
+        _insert_download_current(
+            conn,
+            job_name="style-docs",
+            document_id="D1",
+            revision_id="R1",
+            file_path=source_file,
+            source_refs=[
+                {"endpoint": "styles", "record_id": "S1", "document_path": "documents"},
+            ],
+        )
+    source_file.write_bytes(b"tampered")
+
+    with pytest.raises(ConfigError, match="missing downloaded files"):
+        run_bundle_job(
+            db_path=db_path,
+            config=_bundle_config(tmp_path),
+            job_name="style-bundle",
+        )
+
+
 def _bundle_config(tmp_path: Path):
     config_path = tmp_path / "bundle.yml"
     config_path.write_text(

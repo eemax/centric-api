@@ -27,6 +27,7 @@ from .download_selection import (
     string_value,
 )
 from .download_state import (
+    count_unselected_current,
     record_download_run,
     tombstone_unselected_current,
     update_download_current,
@@ -116,6 +117,16 @@ def run_download_job(
         candidates = collect_candidate_documents(conn, job, log_callback=log_callback)
         documents = resolve_documents(conn, job, candidates, log_callback=log_callback)
         current_downloads = _load_current_downloads(conn, job.name)
+        desired_documents = {document.document_id: document for document in documents}
+        tombstoned_count = (
+            count_unselected_current(
+                conn,
+                job_name=job.name,
+                desired_documents=desired_documents,
+            )
+            if mode == "rebuild" and not dry_run
+            else 0
+        )
 
     matched_count = len(documents)
     selected_documents, skipped_current_items = _select_documents_for_mode(
@@ -146,8 +157,6 @@ def run_download_job(
     skipped_current_count = len(skipped_current_items)
     dry_run_count = 0
     superseded_count = 0
-    tombstoned_count = 0
-
     for skipped_item in skipped_current_items:
         items.append(skipped_item)
 
@@ -225,17 +234,6 @@ def run_download_job(
             },
         )
 
-    if mode == "rebuild" and not dry_run:
-        with connect(db_path) as conn:
-            ensure_download_tables(conn)
-            tombstoned_count = tombstone_unselected_current(
-                conn,
-                job_name=job.name,
-                desired_documents={document.document_id: document for document in documents},
-                run_id=run_id,
-                tombstoned_at=_datetime_to_db(datetime.now(UTC)),
-            )
-
     superseded_count = _count_superseded_current(
         items=items,
         current_downloads=current_downloads,
@@ -289,9 +287,16 @@ def run_download_job(
 
     with connect(db_path) as conn:
         ensure_download_tables(conn)
+        if mode == "rebuild":
+            tombstone_unselected_current(
+                conn,
+                job_name=job.name,
+                desired_documents=desired_documents,
+                run_id=run_id,
+                tombstoned_at=manifest["finished_at"],
+            )
         record_download_run(conn, manifest_path=manifest_path, manifest=manifest)
-        if not dry_run:
-            update_download_current(conn, manifest=manifest)
+        update_download_current(conn, manifest=manifest)
 
     status = "failed" if failed_count and failed_count == len(selected_documents) else "ok"
     if failed_count and failed_count < len(selected_documents):
@@ -466,19 +471,30 @@ def _existing_latest_file(
 ) -> ExistingDownloadFile | None:
     if current is not None and current.revision_id == document.latest_revision_id:
         current_path = Path(current.file_path) if current.file_path else target_path
+        existing = _verified_existing_file(current_path, current=current)
+        if existing is not None:
+            return existing
         if current_path.is_file():
-            return ExistingDownloadFile(
-                path=current_path,
-                sha256=current.sha256 or _sha256(current_path),
-                bytes=current.bytes if current.bytes is not None else current_path.stat().st_size,
-            )
+            return None
     if target_path.is_file():
-        return ExistingDownloadFile(
-            path=target_path,
-            sha256=_sha256(target_path),
-            bytes=target_path.stat().st_size,
-        )
+        return _verified_existing_file(target_path)
     return None
+
+
+def _verified_existing_file(
+    path: Path,
+    *,
+    current: CurrentDownload | None = None,
+) -> ExistingDownloadFile | None:
+    if not path.is_file():
+        return None
+    size = path.stat().st_size
+    if current is not None and current.bytes is not None and current.bytes != size:
+        return None
+    sha256 = _sha256(path)
+    if current is not None and current.sha256 and current.sha256 != sha256:
+        return None
+    return ExistingDownloadFile(path=path, sha256=sha256, bytes=size)
 
 
 def _count_superseded_current(
