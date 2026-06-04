@@ -198,6 +198,7 @@ def _build_bundle_items(
     files_dir: Path,
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
+    used_identities: set[str] = set()
     used_paths: set[str] = set()
     for row in rows:
         source_path = Path(str(row["file_path"] or ""))
@@ -210,6 +211,14 @@ def _build_bundle_items(
         for ref in source_refs:
             source_endpoint = str(ref.get("endpoint") or "")
             source_record_id = str(ref.get("record_id") or "")
+            identity = _bundle_identity(
+                source_endpoint=source_endpoint,
+                source_record_id=source_record_id,
+                document_id=str(row["document_id"]),
+            )
+            if identity in used_identities:
+                continue
+            used_identities.add(identity)
             source_payload = _load_endpoint_payload(
                 conn,
                 endpoint=source_endpoint,
@@ -231,11 +240,7 @@ def _build_bundle_items(
             target_path = files_dir / Path(archive_path).relative_to("files")
             items.append(
                 {
-                    "identity": _bundle_identity(
-                        source_endpoint=source_endpoint,
-                        source_record_id=source_record_id,
-                        document_id=str(row["document_id"]),
-                    ),
+                    "identity": identity,
                     "archive_path": archive_path,
                     "target_path": str(target_path),
                     "source_file_path": str(source_path),

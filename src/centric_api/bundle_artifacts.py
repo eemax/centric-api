@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import zipfile
@@ -74,6 +75,9 @@ def write_bundle_artifacts(
     changelog: dict[str, Any],
     items: list[dict[str, Any]],
 ) -> None:
+    shutil.rmtree(temp_run_dir, ignore_errors=True)
+    if temp_zip_path is not None:
+        temp_zip_path.unlink(missing_ok=True)
     write_json(temp_run_dir / "manifest.json", manifest)
     write_json(temp_run_dir / "changelog.json", changelog)
     write_text(temp_run_dir / "changelog.md", render_changelog_md(changelog))
@@ -107,6 +111,7 @@ def copy_bundle_files(items: list[dict[str, Any]]) -> None:
         target_path = Path(str(item["target_path"]))
         target_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(item["source_file_path"]), target_path)
+        _verify_copied_file(item, target_path)
 
 
 def write_zip(zip_path: Path, run_dir: Path) -> None:
@@ -117,6 +122,23 @@ def write_zip(zip_path: Path, run_dir: Path) -> None:
             if path.is_file():
                 archive.write(path, path.relative_to(run_dir).as_posix())
     temp_path.replace(zip_path)
+
+
+def _verify_copied_file(item: dict[str, Any], target_path: Path) -> None:
+    expected_bytes = item.get("bytes")
+    expected_sha256 = item.get("sha256")
+    if expected_bytes is not None and target_path.stat().st_size != int(expected_bytes):
+        raise RuntimeError(f"copied bundle file size mismatch: {item['archive_path']}")
+    if expected_sha256 is not None and _sha256(target_path) != str(expected_sha256):
+        raise RuntimeError(f"copied bundle file hash mismatch: {item['archive_path']}")
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def render_changelog_md(changelog: dict[str, Any]) -> str:

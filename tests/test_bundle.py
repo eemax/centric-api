@@ -106,6 +106,49 @@ def test_bundle_duplicates_shared_file_under_each_source_label(tmp_path: Path) -
     ]
 
 
+def test_bundle_dedupes_duplicate_source_document_refs(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    source_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_bytes(b"tech pack")
+
+    with connect(db_path) as conn:
+        ensure_download_tables(conn)
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "style_code": "STY-001", "node_name": "Linen Shirt"},
+        )
+        _insert_download_current(
+            conn,
+            job_name="style-docs",
+            document_id="D1",
+            revision_id="R1",
+            file_path=source_file,
+            source_refs=[
+                {"endpoint": "styles", "record_id": "S1", "document_path": "documents"},
+                {
+                    "endpoint": "styles",
+                    "record_id": "S1",
+                    "document_path": "referenced_documents",
+                },
+            ],
+        )
+
+    result = run_bundle_job(
+        db_path=db_path,
+        config=_bundle_config(tmp_path),
+        job_name="style-bundle",
+    )
+
+    assert result.item_count == 1
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert [item["archive_path"] for item in manifest["items"]] == [
+        "files/styles/STY-001 - Linen Shirt/spec.pdf"
+    ]
+
+
 def test_bundle_changelog_tracks_changed_and_removed_files(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     first_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
@@ -410,6 +453,104 @@ def test_bundle_fails_when_current_download_file_hash_mismatches(tmp_path: Path)
     source_file.write_bytes(b"tampered")
 
     with pytest.raises(ConfigError, match="missing downloaded files"):
+        run_bundle_job(
+            db_path=db_path,
+            config=_bundle_config(tmp_path),
+            job_name="style-bundle",
+        )
+
+
+def test_bundle_cleans_stale_temp_dir_before_writing_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 1, 1, tzinfo=UTC)
+            return value if tz is None else value.astimezone(tz)
+
+    monkeypatch.setattr(bundle_module, "datetime", FixedDateTime)
+    db_path = tmp_path / "centric.db"
+    source_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_bytes(b"tech pack")
+    stale_file = (
+        tmp_path
+        / "bundles"
+        / "runs"
+        / ".2026-01-01T000000Z-style-bundle.tmp"
+        / "files"
+        / "stale.txt"
+    )
+    stale_file.parent.mkdir(parents=True)
+    stale_file.write_text("stale", encoding="utf-8")
+
+    with connect(db_path) as conn:
+        ensure_download_tables(conn)
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "style_code": "STY-001", "node_name": "Linen Shirt"},
+        )
+        _insert_download_current(
+            conn,
+            job_name="style-docs",
+            document_id="D1",
+            revision_id="R1",
+            file_path=source_file,
+            source_refs=[
+                {"endpoint": "styles", "record_id": "S1", "document_path": "documents"},
+            ],
+        )
+
+    result = run_bundle_job(
+        db_path=db_path,
+        config=_bundle_config(tmp_path),
+        job_name="style-bundle",
+    )
+
+    assert not (result.manifest_path.parent / "files" / "stale.txt").exists()
+    assert result.zip_path is not None
+    with zipfile.ZipFile(result.zip_path) as archive:
+        assert "files/stale.txt" not in archive.namelist()
+
+
+def test_bundle_fails_when_copied_file_does_not_match_manifest_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    source_file = tmp_path / "downloads" / "files" / "D1" / "R1" / "spec.pdf"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_bytes(b"expected")
+
+    with connect(db_path) as conn:
+        ensure_download_tables(conn)
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "style_code": "STY-001", "node_name": "Linen Shirt"},
+        )
+        _insert_download_current(
+            conn,
+            job_name="style-docs",
+            document_id="D1",
+            revision_id="R1",
+            file_path=source_file,
+            source_refs=[
+                {"endpoint": "styles", "record_id": "S1", "document_path": "documents"},
+            ],
+        )
+
+    def corrupt_copy(_source: str, target: Path | str) -> None:
+        Path(target).write_bytes(b"corrupt")
+
+    monkeypatch.setattr("centric_api.bundle_artifacts.shutil.copy2", corrupt_copy)
+
+    with pytest.raises(RuntimeError, match="copied bundle file .* mismatch"):
         run_bundle_job(
             db_path=db_path,
             config=_bundle_config(tmp_path),
