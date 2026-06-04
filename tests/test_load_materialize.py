@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from centric_api.config import ConfigError
 from centric_api.load import materialize_load
 from centric_api.load_config import load_load_config, parse_load_config, select_load_job
 from centric_api.store import connect
@@ -45,6 +48,38 @@ def test_load_check_resolves_material_create_refs_and_alias_headers(tmp_path, mo
         "product_type": "MT1",
         "description": "Main body fabric",
     }
+
+
+def test_load_reference_resolution_requires_cached_resolve_endpoints(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Code", "Material Type"],
+        rows=[["MAT-001", "Fabric"]],
+    )
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="materials",
+            record_id="M1",
+            payload={"id": "M1", "code": "OTHER"},
+        )
+
+    config = load_load_config()
+
+    with pytest.raises(ConfigError, match="material_types"):
+        materialize_load(
+            db_path,
+            select_load_job(config, "material-create"),
+            workbook_path,
+        )
 
 
 def test_material_composition_create_resolves_code_and_parses_compositions(
@@ -369,6 +404,12 @@ def test_material_composition_create_fails_total_not_100(tmp_path, monkeypatch) 
             record_id="M1",
             payload={"id": "M1", "code": "MAT-001"},
         )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="C1",
+            payload={"id": "C1", "node_name": "Cotton", "active": True},
+        )
 
     config = load_load_config()
     result = materialize_load(
@@ -399,6 +440,12 @@ def test_material_composition_create_fails_unknown_composition(tmp_path, monkeyp
             endpoint="materials",
             record_id="M1",
             payload={"id": "M1", "code": "MAT-001"},
+        )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="C1",
+            payload={"id": "C1", "node_name": "Cotton", "active": True},
         )
 
     config = load_load_config()

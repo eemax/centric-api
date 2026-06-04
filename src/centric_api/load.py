@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 from .auth import AuthContext
 from .config import ConfigError, runtime_path
 from .load_config import LoadColumn, LoadConfig, LoadJob, LoadResolve
-from .store import connect_readonly, table_exists
+from .store import connect_readonly, endpoint_has_cache_evidence, table_exists
 
 LOAD_RUNS_DIR = Path("load/runs")
 MAX_SAMPLES = 5
@@ -861,6 +861,18 @@ def _build_reference_indexes(
             raise ConfigError(
                 "Load reference resolution requires endpoint_records. Run fetch first."
             )
+        missing_endpoints = sorted(
+            {
+                resolve.endpoint
+                for resolve in refs
+                if not endpoint_has_cache_evidence(conn, resolve.endpoint)
+            }
+        )
+        if missing_endpoints:
+            raise ConfigError(
+                "Load reference resolution requires cached endpoint records for: "
+                f"{', '.join(missing_endpoints)}. Run centric-api fetch for those endpoints first."
+            )
         indexes: dict[str, dict[str, list[dict[str, Any]]]] = {}
         for resolve in refs:
             key = _resolve_key(resolve)
@@ -1054,7 +1066,13 @@ def _write_review_workbook(
                 processed_at=processed_at,
             )
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        workbook.save(output_path)
+        temp_path = _temp_output_path(output_path)
+        try:
+            workbook.save(temp_path)
+            temp_path.replace(output_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
         return output_path
     finally:
         workbook.close()
@@ -1104,9 +1122,9 @@ def _write_review_row(
         "_cent_load_run_id": run_id,
         "_cent_load_status": status,
         "_cent_load_status_code": status_code,
-        "_cent_load_message": message,
-        "_cent_load_request_path": request_path,
-        "_cent_load_response_id": response_id,
+        "_cent_load_message": _safe_review_text(message),
+        "_cent_load_request_path": _safe_review_text(request_path),
+        "_cent_load_response_id": _safe_review_text(response_id),
         "_cent_load_processed_at": processed_at,
     }
     for header, value in values.items():
@@ -1200,14 +1218,40 @@ def _write_responses(path: Path, responses: tuple[LoadResponse, ...]) -> None:
 def _write_summary(path: Path, result: LoadRunResult, config: LoadConfig) -> None:
     payload = run_record(result)
     payload["config"] = [str(path) for path in config.paths]
-    path.write_text(json.dumps(payload, default=str, indent=2, sort_keys=True) + "\n")
+    _write_text_atomic(path, json.dumps(payload, default=str, indent=2, sort_keys=True) + "\n")
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
-    with path.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, default=str, sort_keys=True))
-            fh.write("\n")
+    temp_path = _temp_output_path(path)
+    try:
+        with temp_path.open("w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row, default=str, sort_keys=True))
+                fh.write("\n")
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    temp_path = _temp_output_path(path)
+    try:
+        temp_path.write_text(text, encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _temp_output_path(path: Path) -> Path:
+    return path.parent / f".{path.name}.tmp"
+
+
+def _safe_review_text(value: str) -> str:
+    if not value:
+        return value
+    return f"'{value}" if value[0] in {"=", "+", "-", "@"} else value
 
 
 def materialized_record(result: LoadMaterialized) -> dict[str, Any]:
