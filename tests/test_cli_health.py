@@ -172,6 +172,24 @@ def test_doctor_human_output_is_grouped_with_repair(tmp_path, monkeypatch, capsy
     assert "repair: centric-api rebuild-db --yes" in output
     assert "db_schema_shape" not in output
 
+def test_doctor_reports_stale_dashboard_view_shape(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+    db_path = tmp_path / "centric.db"
+    with connect(db_path):
+        pass
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP VIEW dashboard_recent_changes")
+
+    exit_code = main(["doctor", "--db", str(db_path), "--json"])
+
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    schema_check = next(check for check in checks if check["name"] == "db_schema_shape")
+    assert exit_code == 1
+    assert schema_check["status"] == "FAIL"
+    assert "missing view dashboard_recent_changes" in schema_check["message"]
+
 def test_rebuild_db_requires_yes(tmp_path, capsys) -> None:
     exit_code = main(["rebuild-db", "--db", str(tmp_path / "centric.db")])
 
@@ -212,6 +230,51 @@ def test_rebuild_db_replays_raw_evidence(tmp_path, capsys) -> None:
     with sqlite3.connect(db_path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
     assert count == 1
+
+def test_failed_rebuild_keeps_existing_db_active(tmp_path, monkeypatch, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S-old",
+            payload={"id": "S-old", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="old",
+        )
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S-new", "_modified_at": "2026-01-02T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-02T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fail_changelog(*_args, **_kwargs):
+        raise ValueError("forced changelog failure")
+
+    monkeypatch.setattr("centric_api.commands.rebuild_db.record_changelog", fail_changelog)
+
+    exit_code = main(["rebuild-db", "--db", str(db_path), "--raw-dir", str(raw_dir), "--yes"])
+
+    assert exit_code == 1
+    assert "forced changelog failure" in capsys.readouterr().err
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT record_id FROM endpoint_records WHERE endpoint = ? ORDER BY record_id",
+            ["styles"],
+        ).fetchall()
+    assert [row[0] for row in rows] == ["S-old"]
 
 def test_rebuild_db_reports_human_progress(tmp_path, capsys) -> None:
     raw_dir = tmp_path / "raw"

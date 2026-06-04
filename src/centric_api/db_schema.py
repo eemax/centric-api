@@ -275,6 +275,98 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "created_at",
     },
 }
+REQUIRED_DASHBOARD_VIEW_COLUMNS: dict[str, set[str]] = {
+    "dashboard_latest_fetch_runs": {
+        "run_id",
+        "run_mode",
+        "first_ingested_at",
+        "last_ingested_at",
+        "file_count",
+        "record_count",
+        "invalid_record_count",
+    },
+    "dashboard_endpoint_state": {
+        "endpoint",
+        "current_count",
+        "tombstone_count",
+        "latest_modified_at",
+        "latest_ingested_at",
+    },
+    "dashboard_recent_changes": {
+        "run_id",
+        "endpoint",
+        "record_id",
+        "changed_at",
+        "change_type",
+        "delete_type",
+        "modified_at",
+        "modified_by_id",
+        "modified_by_name",
+        "changed_fields_json",
+    },
+    "dashboard_actor_activity": {
+        "changed_date",
+        "endpoint",
+        "modified_by_id",
+        "modified_by_name",
+        "change_type",
+        "delete_type",
+        "change_count",
+    },
+    "dashboard_download_jobs": {
+        "run_id",
+        "job_name",
+        "mode",
+        "started_at",
+        "finished_at",
+        "matched_count",
+        "selected_count",
+        "downloaded_count",
+        "already_present_count",
+        "failed_count",
+        "skipped_count",
+        "skipped_current_count",
+        "superseded_count",
+        "tombstoned_count",
+        "dry_run",
+    },
+    "dashboard_bundle_runs": {
+        "run_id",
+        "bundle_name",
+        "download_job",
+        "started_at",
+        "finished_at",
+        "zip_path",
+        "item_count",
+        "added_count",
+        "changed_count",
+        "renamed_count",
+        "removed_count",
+        "unchanged_count",
+        "missing_count",
+        "dry_run",
+    },
+    "dashboard_bundle_file_changes": {
+        "run_id",
+        "bundle_name",
+        "archive_path",
+        "identity",
+        "source_endpoint",
+        "source_record_id",
+        "source_label",
+        "document_id",
+        "revision_id",
+        "file_path",
+        "sha256",
+        "bytes",
+        "status",
+        "change_type",
+        "previous_archive_path",
+        "previous_revision_id",
+        "previous_sha256",
+        "created_at",
+    },
+}
 
 
 def validate_schema_shape(conn: sqlite3.Connection) -> list[str]:
@@ -294,6 +386,25 @@ def validate_schema_shape(conn: sqlite3.Connection) -> list[str]:
         missing_columns = sorted(required_columns - columns)
         if missing_columns:
             failures.append(f"{table} missing columns: {', '.join(missing_columns)}")
+    for view, required_columns in sorted(REQUIRED_DASHBOARD_VIEW_COLUMNS.items()):
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'view' AND name = ?",
+            [view],
+        ).fetchone()
+        if row is None:
+            failures.append(f"missing view {view}")
+            continue
+        try:
+            columns = {
+                str(column["name"] if isinstance(column, sqlite3.Row) else column[1])
+                for column in conn.execute(f"PRAGMA table_info({view})").fetchall()
+            }
+        except sqlite3.DatabaseError as exc:
+            failures.append(f"{view} invalid: {exc}")
+            continue
+        missing_columns = sorted(required_columns - columns)
+        if missing_columns:
+            failures.append(f"{view} missing columns: {', '.join(missing_columns)}")
     return failures
 
 

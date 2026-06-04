@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import shutil
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -358,18 +356,6 @@ def _all_rows(conn: sqlite3.Connection, table: str, query: str) -> list[dict[str
 
 def _lock_record(path: Path) -> dict[str, Any]:
     return {"path": str(path), "exists": path.exists()}
-
-
-def _backup_existing_db_files(target_db_path: Path) -> list[Path]:
-    backups: list[Path] = []
-    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
-    for path in (target_db_path, Path(f"{target_db_path}-wal"), Path(f"{target_db_path}-shm")):
-        if not path.exists():
-            continue
-        backup = path.with_name(f"{path.name}.backup-{timestamp}")
-        shutil.move(str(path), str(backup))
-        backups.append(backup)
-    return backups
 
 
 def _print_human_status(payload: dict[str, Any]) -> None:

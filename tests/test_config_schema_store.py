@@ -451,6 +451,85 @@ endpoints:
     assert tombstones == 1
 
 
+def test_ingest_rejects_manifest_drift_for_applied_raw_file(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    manifest_path = run_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "delta",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": True}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+    first = ingest_raw_dir(raw_dir, db_path, schemas={})
+    assert first.applied_files == 1
+
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Raw manifest changed after ingest"):
+        ingest_raw_dir(raw_dir, db_path, schemas={})
+
+
+def test_manifest_scoped_ingest_ignores_unlisted_jsonl_files(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "materials.jsonl").write_text(
+        json.dumps({"id": "M1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    result = ingest_raw_dir(raw_dir, db_path, schemas={})
+
+    assert result.records_read == 1
+    assert result.endpoints == {"styles": 1}
+    with sqlite3.connect(db_path) as conn:
+        endpoints = [
+            row[0]
+            for row in conn.execute(
+                "SELECT DISTINCT endpoint FROM endpoint_records ORDER BY endpoint"
+            ).fetchall()
+        ]
+    assert endpoints == ["styles"]
+
+
 def test_full_ingest_hard_deletes_missing_current_records(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:

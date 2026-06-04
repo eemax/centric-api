@@ -66,6 +66,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     initialize_store(conn)
@@ -80,6 +81,7 @@ def connect_readonly(db_path: Path) -> sqlite3.Connection:
     uri = f"file:{db_path.resolve()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
@@ -203,14 +205,19 @@ def ingest_raw_dir(
     with connect(db_path) as conn:
         for raw_file in raw_files:
             content_hash = _sha256(raw_file.path)
-            applied_hash = _applied_hash(conn, raw_file.path)
-            if applied_hash == content_hash:
+            applied_hash, applied_manifest_hash = _applied_hashes(conn, raw_file.path)
+            if applied_hash == content_hash and applied_manifest_hash == raw_file.manifest_sha256:
                 skipped_files += 1
                 continue
             if applied_hash is not None and applied_hash != content_hash:
                 raise ValueError(
                     f"Raw file changed after ingest: {raw_file.path}. "
                     "Raw evidence files are expected to be immutable."
+                )
+            if applied_hash == content_hash and applied_manifest_hash != raw_file.manifest_sha256:
+                raise ValueError(
+                    f"Raw manifest changed after ingest: {raw_file.manifest_path}. "
+                    "Raw evidence manifests are expected to be immutable."
                 )
 
             schema = schemas.get(raw_file.endpoint, EndpointSchema(name=raw_file.endpoint))
@@ -287,6 +294,13 @@ def discover_raw_files(raw_dir: Path) -> list[RawFile]:
         if endpoint is None:
             continue
         manifest = _load_manifest(path.parent)
+        manifest_endpoint = _manifest_endpoint_for_file(manifest, path.name)
+        if _manifest_has_endpoint_records(manifest) and manifest_endpoint is None:
+            continue
+        if manifest_endpoint is not None:
+            endpoint, endpoint_manifest = manifest_endpoint
+        else:
+            endpoint_manifest = None
         source_run_id = _manifest_run_id(manifest) or (
             path.parent.name if path.parent != raw_dir else "root"
         )
@@ -296,7 +310,7 @@ def discover_raw_files(raw_dir: Path) -> list[RawFile]:
             RawFile(
                 path=path,
                 endpoint=endpoint,
-                is_delta=_manifest_file_is_delta(manifest, path.name, default=is_delta),
+                is_delta=_manifest_file_is_delta(endpoint_manifest, default=is_delta),
                 source_run_id=source_run_id,
                 run_mode=run_mode,
                 manifest_path=manifest_path,
@@ -656,12 +670,16 @@ def _insert_warning(
     )
 
 
-def _applied_hash(conn: sqlite3.Connection, path: Path) -> str | None:
+def _applied_hashes(conn: sqlite3.Connection, path: Path) -> tuple[str | None, str | None]:
     row = conn.execute(
-        "SELECT content_sha256 FROM applied_raw_files WHERE file_path = ?",
+        "SELECT content_sha256, manifest_sha256 FROM applied_raw_files WHERE file_path = ?",
         [str(path)],
     ).fetchone()
-    return str(row[0]) if row else None
+    if row is None:
+        return None, None
+    content_sha = str(row["content_sha256"])
+    manifest_sha = row["manifest_sha256"]
+    return content_sha, str(manifest_sha) if manifest_sha is not None else None
 
 
 def _endpoint_from_filename(filename: str) -> tuple[str | None, bool]:
@@ -693,23 +711,36 @@ def _manifest_mode(manifest: dict[str, Any] | None) -> str | None:
     return str(value) if value else None
 
 
-def _manifest_file_is_delta(
+def _manifest_endpoint_for_file(
     manifest: dict[str, Any] | None,
     filename: str,
+) -> tuple[str, dict[str, Any]] | None:
+    if manifest is None:
+        return None
+    endpoints = manifest.get("endpoints")
+    if not isinstance(endpoints, dict):
+        return None
+    for endpoint_name, endpoint in endpoints.items():
+        if not isinstance(endpoint, dict) or endpoint.get("file") != filename:
+            continue
+        return str(endpoint_name), endpoint
+    return None
+
+
+def _manifest_has_endpoint_records(manifest: dict[str, Any] | None) -> bool:
+    endpoints = manifest.get("endpoints") if manifest else None
+    return isinstance(endpoints, dict) and bool(endpoints)
+
+
+def _manifest_file_is_delta(
+    endpoint_manifest: dict[str, Any] | None,
     *,
     default: bool,
 ) -> bool:
-    if manifest is None:
+    if endpoint_manifest is None:
         return default
-    endpoints = manifest.get("endpoints")
-    if not isinstance(endpoints, dict):
-        return default
-    for endpoint in endpoints.values():
-        if not isinstance(endpoint, dict) or endpoint.get("file") != filename:
-            continue
-        is_delta = endpoint.get("is_delta")
-        return bool(is_delta) if isinstance(is_delta, bool) else default
-    return default
+    is_delta = endpoint_manifest.get("is_delta")
+    return bool(is_delta) if isinstance(is_delta, bool) else default
 
 
 def _run_sort_key(raw_file: RawFile) -> tuple[int, str]:
