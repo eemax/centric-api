@@ -14,6 +14,7 @@ from .fetch_checkpoint import (
     read_checkpoint,
     seed_resume_window_id_state,
     track_item_id,
+    truncate_file_lines,
     write_checkpoint,
 )
 from .fetch_common import (
@@ -439,6 +440,17 @@ def run_endpoint(
                 "seeded_items": seeded_items,
                 "window_start_line": window_start_line,
                 "window_item_count": items_fetched,
+            },
+        )
+        truncate_file_lines(output_path, window_start_line + items_fetched)
+        _emit_api_log(
+            api_log_callback,
+            {
+                "level": "debug",
+                "event": "resume_output_truncated",
+                "endpoint": spec.name,
+                "output_file": str(output_path),
+                "line_count": window_start_line + items_fetched,
             },
         )
 

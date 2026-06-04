@@ -45,8 +45,12 @@ def write_run_manifest(
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "manifest.json"
     temp_path = output_dir / ".manifest.json.tmp"
-    temp_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
-    temp_path.replace(manifest_path)
+    try:
+        temp_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        temp_path.replace(manifest_path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
     return manifest_path
 
 

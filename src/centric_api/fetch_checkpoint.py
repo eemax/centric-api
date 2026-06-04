@@ -161,8 +161,12 @@ def write_checkpoint(
     if output_file is not None:
         payload["output_file"] = str(output_file)
     temp_path = path.parent / f".{path.name}.tmp"
-    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temp_path.replace(path)
+    try:
+        temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def count_file_lines(path: Path) -> int:
@@ -173,6 +177,36 @@ def count_file_lines(path: Path) -> int:
         for _ in fh:
             count += 1
     return count
+
+
+def truncate_file_lines(path: Path, line_count: int) -> None:
+    if line_count < 0:
+        raise ValueError("line_count must be non-negative.")
+    if not path.is_file():
+        return
+    if line_count == 0:
+        with path.open("r+b") as fh:
+            fh.truncate(0)
+        return
+
+    seen_lines = 0
+    offset = 0
+    truncate_at: int | None = None
+    with path.open("rb") as fh:
+        while chunk := fh.read(1024 * 1024):
+            for index, byte in enumerate(chunk):
+                if byte != 0x0A:
+                    continue
+                seen_lines += 1
+                if seen_lines == line_count:
+                    truncate_at = offset + index + 1
+                    break
+            if truncate_at is not None:
+                break
+            offset += len(chunk)
+    if truncate_at is not None:
+        with path.open("r+b") as fh:
+            fh.truncate(truncate_at)
 
 
 def track_item_id(

@@ -82,8 +82,12 @@ def load_delta_state(path: Path) -> dict[str, Any]:
 def write_delta_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.parent / f".{path.name}.tmp"
-    temp_path.write_text(yaml.safe_dump(state, sort_keys=False), encoding="utf-8")
-    temp_path.replace(path)
+    try:
+        temp_path.write_text(yaml.safe_dump(state, sort_keys=False), encoding="utf-8")
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def parse_utc_iso(value: Any) -> datetime | None:

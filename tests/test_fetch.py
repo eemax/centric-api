@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from centric_api.fetch_checkpoint import write_checkpoint
 from centric_api.fetch_common import (
     FetchError,
     _compile_query_params,
     _request_json_with_retry,
     _with_pagination_params,
 )
+from centric_api.fetch_delta_state import write_delta_state
+from centric_api.fetch_manifest import write_run_manifest
 from centric_api.fetcher import run_endpoint
 from centric_api.models import CountSpec, EndpointSpec, FetcherConfig
 
@@ -67,6 +71,40 @@ def test_fetcher_resume_seeds_existing_window_and_appends_remaining_page(tmp_pat
     result = run_endpoint(_endpoint(limit=2), auth, cfg, resume=True)
 
     assert result.start_skip == 2
+    assert result.items_fetched == 4
+    assert [json.loads(line) for line in output_path.read_text().splitlines()] == [
+        {"id": "S1"},
+        {"id": "S2"},
+        {"id": "S3"},
+        {"id": "S4"},
+    ]
+
+
+def test_fetcher_resume_truncates_uncheckpointed_output_tail(tmp_path: Path) -> None:
+    cfg = _fetcher_config(tmp_path)
+    output_path = cfg.output_dir / "styles.jsonl"
+    checkpoint_path = cfg.checkpoint_dir / "styles.json"
+    output_path.parent.mkdir(parents=True)
+    checkpoint_path.parent.mkdir(parents=True)
+    output_path.write_text('{"id":"S1"}\n{"id":"S2"}\n{"id":"STALE"}\n', encoding="utf-8")
+    checkpoint_path.write_text(
+        json.dumps(
+            {
+                "endpoint": "styles",
+                "next_skip": 2,
+                "fetched_count": 2,
+                "completed": False,
+                "restart_from_zero": False,
+                "window_start_line": 0,
+                "output_file": str(output_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    auth = _PagedAuth(count=4, pages={2: [{"id": "S3"}, {"id": "S4"}]})
+
+    result = run_endpoint(_endpoint(limit=2), auth, cfg, resume=True)
+
     assert result.items_fetched == 4
     assert [json.loads(line) for line in output_path.read_text().splitlines()] == [
         {"id": "S1"},
@@ -277,6 +315,71 @@ def test_pagination_params_replace_existing_skip_and_limit() -> None:
     )
 
     assert params == [("active", True), ("decoded", True), ("skip", 50), ("limit", 25)]
+
+
+def test_write_checkpoint_cleans_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_replace(self: Path, _target: Path) -> None:
+        raise RuntimeError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    checkpoint_path = tmp_path / "checkpoints" / "styles.json"
+
+    with pytest.raises(RuntimeError, match="replace failed"):
+        write_checkpoint(checkpoint_path, "styles", 0, 0)
+
+    assert not checkpoint_path.exists()
+    assert not (checkpoint_path.parent / ".styles.json.tmp").exists()
+
+
+def test_write_delta_state_cleans_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_replace(self: Path, _target: Path) -> None:
+        raise RuntimeError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    state_path = tmp_path / "state" / "delta.yml"
+
+    with pytest.raises(RuntimeError, match="replace failed"):
+        write_delta_state(state_path, {"version": 1, "endpoints": {}})
+
+    assert not state_path.exists()
+    assert not (state_path.parent / ".delta.yml.tmp").exists()
+
+
+def test_write_run_manifest_cleans_temp_file_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_replace(self: Path, _target: Path) -> None:
+        raise RuntimeError("replace failed")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    output_dir = tmp_path / "raw" / "runs" / "run1"
+    started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    finished_at = datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC)
+
+    with pytest.raises(RuntimeError, match="replace failed"):
+        write_run_manifest(
+            output_dir=output_dir,
+            run_id="run1",
+            mode="delta",
+            run_started_at=started_at,
+            run_finished_at=finished_at,
+            selected_specs=[],
+            results=[],
+            failures=[],
+            endpoint_records=[],
+            modified_since=None,
+            utc_iso=lambda value: value.isoformat(),
+        )
+
+    assert not (output_dir / "manifest.json").exists()
+    assert not (output_dir / ".manifest.json.tmp").exists()
 
 
 def _endpoint(*, limit: int) -> EndpointSpec:
