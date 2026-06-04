@@ -5,7 +5,7 @@ import calendar
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TextIO
@@ -47,6 +47,13 @@ from .common import release_fetch_lock, try_acquire_fetch_lock, utc_iso, utc_now
 PipelineProgressCallback = Callable[[str], None]
 
 
+@dataclass(frozen=True)
+class _DeltaStateUpdate:
+    endpoint_name: str
+    attempt_start: str
+    attempt_end: str
+
+
 def run_fetch(args: argparse.Namespace) -> int:
     if args.delta_dry_run:
         return _run_fetch_unlocked(args)
@@ -69,8 +76,9 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     mode, modified_since = _resolve_fetch_mode(args, run_started_dt)
     fetcher_cfg, auth_settings, endpoint_specs = load_fetcher_settings(args.fetch_config)
 
-    run_id = _run_id(run_started_dt, mode, args.days or args.months)
-    fetcher_cfg.output_dir = fetcher_cfg.output_dir / "runs" / run_id
+    raw_root_dir = fetcher_cfg.output_dir
+    run_id = _allocate_run_id(raw_root_dir, run_started_dt, mode, args.days or args.months)
+    fetcher_cfg.output_dir = raw_root_dir / "runs" / run_id
     selected_specs = _select_endpoints(endpoint_specs, args.endpoint)
     delta_state_file = resolve_private_config_path(DEFAULT_DELTA_STATE_PATH, args.delta_state_file)
     delta_state = load_delta_state(delta_state_file)
@@ -132,6 +140,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     results: list[FetchRunResult] = []
     failures: list[tuple[str, str]] = []
     endpoint_records: list[dict[str, Any]] = []
+    pending_successful_delta_updates: list[_DeltaStateUpdate] = []
     pipeline_progress = None if args.quiet or args.json else _write_pipeline_progress
     fetch_progress = None if args.quiet else _fetch_progress_writer()
     if not args.quiet and not args.json:
@@ -231,15 +240,13 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         )
                     )
                     if mode in {"delta", "full"}:
-                        update_delta_state_for_endpoint(
-                            delta_state,
-                            endpoint_name=spec.name,
-                            status=status,
-                            attempt_start=attempt_start,
-                            attempt_end=attempt_end,
-                            error=None,
+                        pending_successful_delta_updates.append(
+                            _DeltaStateUpdate(
+                                endpoint_name=spec.name,
+                                attempt_start=attempt_start,
+                                attempt_end=attempt_end,
+                            )
                         )
-                        write_delta_state(delta_state_file, delta_state)
                 except (AuthError, FetchError) as exc:
                     message = str(exc)
                     failures.append((spec.name, message))
@@ -454,6 +461,15 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     "reason": skipped_reason,
                 }
             )
+
+    if mode in {"delta", "full"}:
+        _apply_successful_delta_updates(
+            delta_state,
+            delta_state_file=delta_state_file,
+            updates=pending_successful_delta_updates,
+            pipeline_error=pipeline_error,
+        )
+
     _emit_pipeline_progress(
         pipeline_progress,
         (
@@ -618,6 +634,45 @@ def _run_id(value: datetime, mode: str, amount: int | None) -> str:
     if mode in {"days", "months"} and amount is not None:
         return f"{base}-{mode}{amount}"
     return f"{base}-{mode}"
+
+
+def _allocate_run_id(
+    raw_root_dir: Path,
+    value: datetime,
+    mode: str,
+    amount: int | None,
+) -> str:
+    base = _run_id(value, mode, amount)
+    runs_dir = raw_root_dir / "runs"
+    for index in range(100):
+        suffix = "" if index == 0 else f"-{index + 1}"
+        run_id = f"{base}{suffix}"
+        if (runs_dir / run_id).exists():
+            continue
+        return run_id
+    raise RuntimeError("Could not allocate fetch run id.")
+
+
+def _apply_successful_delta_updates(
+    delta_state: dict[str, Any],
+    *,
+    delta_state_file: Path,
+    updates: list[_DeltaStateUpdate],
+    pipeline_error: str | None,
+) -> None:
+    if not updates:
+        return
+    status = "OK" if pipeline_error is None else "PIPELINE_FAILED"
+    for update in updates:
+        update_delta_state_for_endpoint(
+            delta_state,
+            endpoint_name=update.endpoint_name,
+            status=status,
+            attempt_start=update.attempt_start,
+            attempt_end=update.attempt_end,
+            error=pipeline_error,
+        )
+    write_delta_state(delta_state_file, delta_state)
 
 
 def _write_pipeline_progress(message: str) -> None:

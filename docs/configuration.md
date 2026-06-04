@@ -79,8 +79,9 @@ Delta, day, and month fetches force sorting by `_modified_at` and replace any ex
 
 ## Delta State
 
-If `CENTRIC_API_HOME/delta.yml` does not exist, the first delta fetch starts with no floor and then
-writes state after each successful endpoint. A typical file looks like:
+If `CENTRIC_API_HOME/delta.yml` does not exist, the first delta fetch starts with no floor. Successful
+endpoint fetches advance `last_successful_fetch_*` only after the run manifest, SQLite ingest, and
+changelog pipeline complete cleanly. A typical file looks like:
 
 ```yaml
 overlap_minutes: 10

@@ -7,7 +7,12 @@ from typing import Any
 import httpx
 import pytest
 
-from centric_api.fetch_common import FetchError, _request_json_with_retry
+from centric_api.fetch_common import (
+    FetchError,
+    _compile_query_params,
+    _request_json_with_retry,
+    _with_pagination_params,
+)
 from centric_api.fetcher import run_endpoint
 from centric_api.models import CountSpec, EndpointSpec, FetcherConfig
 
@@ -212,6 +217,38 @@ def test_request_json_rejects_invalid_json_response() -> None:
             fetcher_cfg=FetcherConfig(output_dir=Path("raw"), checkpoint_dir=Path("checkpoints")),
             retries_used_ref=[0],
         )
+
+
+def test_compile_query_params_normalizes_operators_and_decoded() -> None:
+    params = _compile_query_params(
+        {
+            "_modified_at=ge": "2026-01-01T00:00:00Z",
+            "active=": True,
+            "decoded": False,
+            "node_name": "Style One",
+        }
+    )
+
+    assert params == [
+        ("_modified_at", "ge2026-01-01T00:00:00Z"),
+        ("active", True),
+        ("decoded", False),
+        ("node_name", "Style One"),
+    ]
+
+
+def test_compile_query_params_adds_decoded_when_missing() -> None:
+    assert _compile_query_params({"active": True}) == [("active", True), ("decoded", True)]
+
+
+def test_pagination_params_replace_existing_skip_and_limit() -> None:
+    params = _with_pagination_params(
+        [("active", True), ("skip", 999), ("limit", 999), ("decoded", True)],
+        skip=50,
+        limit=25,
+    )
+
+    assert params == [("active", True), ("decoded", True), ("skip", 50), ("limit", 25)]
 
 
 def _endpoint(*, limit: int) -> EndpointSpec:

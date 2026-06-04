@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 
 import pytest
+import yaml
 
 from centric_api.changelog import ChangelogRun
 from centric_api.cli import main
@@ -15,7 +17,7 @@ from centric_api.commands.common import (
     try_acquire_fetch_lock,
 )
 from centric_api.commands.cron import run_cron_fetch_once
-from centric_api.commands.fetch import run_fetch
+from centric_api.commands.fetch import _allocate_run_id, run_fetch
 from centric_api.fetch_common import FetchError
 from centric_api.models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
 from centric_api.rendering.logs import render_log_line
@@ -134,6 +136,11 @@ def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsy
     assert "changelog=running" in captured.err
     assert "changelog=ok events=1 scoped=1" in captured.err
     assert "pipeline=done ingest=ok changelog=ok elapsed=" in captured.err
+    delta_state = yaml.safe_load((tmp_path / "delta.yml").read_text(encoding="utf-8"))
+    endpoint_state = delta_state["endpoints"]["styles"]
+    assert endpoint_state["last_attempted_status"] == "OK"
+    assert "last_successful_fetch_start" in endpoint_state
+    assert "last_successful_fetch_end" in endpoint_state
 
 def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     tmp_path,
@@ -151,6 +158,29 @@ def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     assert "Fetch run" not in captured.err
     assert "Pipeline" not in captured.err
     assert "changelog=running" not in captured.err
+
+def test_fetch_does_not_advance_delta_success_on_pipeline_failure(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    def fail_ingest(*_args, **_kwargs):
+        raise ValueError("store is unavailable")
+
+    monkeypatch.setattr("centric_api.commands.fetch.ingest_raw_dir", fail_ingest)
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db")])
+
+    assert exit_code == 1
+    assert "ingest failed: store is unavailable" in capsys.readouterr().out
+    delta_state = yaml.safe_load((tmp_path / "delta.yml").read_text(encoding="utf-8"))
+    endpoint_state = delta_state["endpoints"]["styles"]
+    assert endpoint_state["last_attempted_status"] == "PIPELINE_FAILED"
+    assert endpoint_state["last_attempted_error"] == "ingest failed: store is unavailable"
+    assert "last_successful_fetch_start" not in endpoint_state
+    assert "last_successful_fetch_end" not in endpoint_state
 
 def test_fetch_failure_reports_elapsed_and_log_path(tmp_path, monkeypatch, capsys) -> None:
     _patch_fetch_pipeline(monkeypatch, tmp_path)
@@ -292,6 +322,20 @@ def test_fetch_partial_result_reports_partial_status(
     assert "status=partial endpoints=1/2 records=100 pages=2 retries=0 elapsed=" in captured.err
     assert "Fetch finished with failures" in captured.out
     assert "- boms: HTTP 400 Bad Request" in captured.out
+
+def test_fetch_run_id_suffixes_existing_run_dirs(tmp_path) -> None:
+    raw_root = tmp_path / "raw"
+    existing = raw_root / "runs" / "2026-01-01T000000Z-delta"
+    existing.mkdir(parents=True)
+
+    run_id = _allocate_run_id(
+        raw_root,
+        datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC),
+        "delta",
+        None,
+    )
+
+    assert run_id == "2026-01-01T000000Z-delta-2"
 
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     lock_path = tmp_path / "fetch.lock"
