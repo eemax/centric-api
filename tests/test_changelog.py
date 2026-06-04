@@ -203,6 +203,58 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     )
 
 
+def test_changelog_scoped_refresh_falls_back_when_index_source_is_stale(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "styles",
+                "S1",
+                json.dumps({"id": "S1", "code": "A"}, sort_keys=True),
+                "hash-before",
+                "2026-01-01T00:00:00Z",
+                "raw.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+    record_changelog(db_path, endpoints={"styles"}, full=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE endpoint_changelog_index_current
+            SET changelog_source_sha256 = ?
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            ["stale-source", "styles", "S1"],
+        )
+        conn.execute(
+            """
+            UPDATE endpoint_records
+            SET payload_json = ?, payload_sha256 = ?
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            [
+                json.dumps({"id": "S1", "code": "B"}, sort_keys=True),
+                "hash-after",
+                "styles",
+                "S1",
+            ],
+        )
+
+    run = record_changelog(db_path, record_ids_by_endpoint={"styles": {"S1"}})
+
+    assert run.full_refresh is True
+    assert run.event_count == 1
+
+
 def test_changelog_actor_leaderboard_rolls_up_endpoint_footprint(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:

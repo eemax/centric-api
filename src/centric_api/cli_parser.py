@@ -114,7 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Relative window like 7d/24h/10m or an ISO timestamp.",
     )
-    changelog_parser.add_argument("--limit", metavar="N", type=int, default=50, help="Row limit.")
+    changelog_parser.add_argument(
+        "--limit",
+        metavar="N",
+        type=_parse_positive_int,
+        default=50,
+        help="Row limit.",
+    )
     changelog_parser.add_argument("--json", action="store_true", help="Emit JSON output.")
 
     download_parser = subparsers.add_parser("download", help="Download latest document revisions")

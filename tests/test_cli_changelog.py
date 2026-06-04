@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from centric_api.changelog import record_changelog
 from centric_api.cli import main
 from centric_api.rendering.changelog import print_human_changelog_changes
@@ -198,6 +200,17 @@ def test_changelog_runs_rejects_endpoint_filter(tmp_path, capsys) -> None:
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "changelog runs does not support --endpoint" in captured.err
+
+
+def test_changelog_rejects_negative_limit(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["changelog", "--db", str(db_path), "--limit", "-1"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 2
+    assert "value must be a positive integer" in captured.err
 
 
 def test_changelog_detail_actions_use_human_tables(tmp_path, capsys) -> None:

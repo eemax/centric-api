@@ -152,9 +152,9 @@ def record_changelog(
                     scoped_record_count,
                 ],
             )
-            event_ids = _insert_change_events_and_fields(conn, events) if events else []
+            inserted_event_rows = _insert_change_events_and_fields(conn, events) if events else []
             if events:
-                _insert_rollups(conn, events, event_ids)
+                _insert_rollups(conn, events, inserted_event_rows)
             _replace_current_index(
                 conn,
                 full_refresh=full_refresh,
@@ -557,14 +557,21 @@ def _index_has_all_endpoints(conn: sqlite3.Connection, endpoint_names: set[str])
         return True
     rows = conn.execute(
         f"""
-        SELECT endpoint, COUNT(*) AS rows
+        SELECT endpoint,
+               COUNT(*) AS rows,
+               SUM(CASE WHEN changelog_source_sha256 = ? THEN 1 ELSE 0 END) AS compatible_rows
         FROM endpoint_changelog_index_current
         WHERE endpoint IN ({",".join("?" for _ in endpoint_names)})
         GROUP BY endpoint
         """,
-        sorted(endpoint_names),
+        [CHANGELOG_SOURCE_SHA, *sorted(endpoint_names)],
     ).fetchall()
-    indexed = {row["endpoint"] for row in rows if int(row["rows"] or 0) > 0}
+    indexed = {
+        row["endpoint"]
+        for row in rows
+        if int(row["rows"] or 0) > 0
+        and int(row["rows"] or 0) == int(row["compatible_rows"] or 0)
+    }
     return endpoint_names <= indexed
 
 
@@ -734,8 +741,8 @@ def _diff_indexes(
 def _insert_change_events_and_fields(
     conn: sqlite3.Connection,
     events: list[_ChangeEvent],
-) -> list[int]:
-    event_ids: list[int] = []
+) -> list[tuple[int, list[list[Any]]]]:
+    inserted_event_rows: list[tuple[int, list[list[Any]]]] = []
     for event in events:
         cursor = conn.execute(
             """
@@ -765,7 +772,6 @@ def _insert_change_events_and_fields(
             ],
         )
         event_id = int(cursor.lastrowid)
-        event_ids.append(event_id)
         field_rows = _field_change_rows(event_id, event)
         if field_rows:
             conn.executemany(
@@ -780,7 +786,8 @@ def _insert_change_events_and_fields(
                 """,
                 field_rows,
             )
-    return event_ids
+        inserted_event_rows.append((event_id, field_rows))
+    return inserted_event_rows
 
 
 def _field_change_rows(event_id: int, event: _ChangeEvent) -> list[list[Any]]:
@@ -824,14 +831,14 @@ def _field_change_rows(event_id: int, event: _ChangeEvent) -> list[list[Any]]:
 def _insert_rollups(
     conn: sqlite3.Connection,
     events: list[_ChangeEvent],
-    event_ids: list[int],
+    inserted_event_rows: list[tuple[int, list[list[Any]]]],
 ) -> None:
     change_counts: dict[tuple[str, str, str, str | None], int] = {}
     actor_counts: dict[tuple[str, str, str | None, str | None, str, str | None], int] = {}
     field_counts: dict[tuple[str, str, str, str, str], int] = {}
     actor_field_counts: dict[tuple[str, str, str | None, str | None, str, str, str], int] = {}
 
-    for event_id, event in zip(event_ids, events, strict=True):
+    for (_event_id, field_rows), event in zip(inserted_event_rows, events, strict=True):
         change_key = (event.run_id, event.endpoint, event.change_type, event.delete_type)
         change_counts[change_key] = change_counts.get(change_key, 0) + 1
         actor_key = (
@@ -843,7 +850,7 @@ def _insert_rollups(
             event.delete_type,
         )
         actor_counts[actor_key] = actor_counts.get(actor_key, 0) + 1
-        for field_row in _field_change_rows(event_id, event):
+        for field_row in field_rows:
             field = field_row[5]
             field_change_type = field_row[6]
             event_change_type = field_row[7]
