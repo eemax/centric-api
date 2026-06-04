@@ -104,6 +104,40 @@ dimensions:
     output = capsys.readouterr().out
     assert "500 ml = 0.5 l (volume)" in output
 
+    assert main(["units", "list", "--units-config", str(config), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dimensions"][0]["dimension"] == "volume"
+
+
+def test_grouped_command_config_flags_work_after_action(tmp_path, capsys) -> None:
+    load_config = tmp_path / "load.yml"
+    load_config.write_text(
+        """
+version: 1
+jobs:
+  - name: explicit-job
+    method: POST
+    path: /v2/explicit
+    columns:
+      code:
+        header: Code
+        required: true
+    body:
+      code: code
+""",
+        encoding="utf-8",
+    )
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+
+    assert main(["load", "list", "--load-config", str(load_config), "--json"]) == 0
+    load_rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [row["name"] for row in load_rows] == ["explicit-job"]
+
+    assert main(["model", "list", "--models-dir", str(models_dir), "--json"]) == 0
+    assert capsys.readouterr().out == ""
+
 
 def test_cli_keyboard_interrupt_returns_clean_130(monkeypatch, capsys) -> None:
     def interrupt(_args):

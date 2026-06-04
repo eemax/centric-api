@@ -10,14 +10,18 @@ command:
 
 - `fetch --json`, `changelog --json`, `changelog fields --json`, `changelog actors --json`,
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
-  `bundle list --json`, and `view list --json` emit JSON Lines.
+  `bundle list --json`, `view list --json`, `load list --json`, and `model list --json` emit JSON
+  Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `changelog update --json`, `bundle run --json`, `bundle show --json`,
   `bundle changelog --json`, `status --json`, `doctor --json`, `rebuild-db --json`,
-  `view show --json`, `view check --json`, `view export --json`, `model show --json`,
+  `view show --json`, `view check --json`, `view export --json`, `load show --json`,
+  `load check --json`, `load run --json`, `load retry --json`, `model show --json`,
   `model check --json`, `model run --json`, and units commands emit one JSON object.
 
-Progress lines for fetch and download are written to stderr unless `--quiet` is used.
+Progress lines for fetch and download are written to stderr unless `--quiet` is used. Group config
+flags such as `--load-config`, `--models-dir`, and `--units-config` can be passed either before or
+after their action.
 
 ## Fetch
 
@@ -108,6 +112,7 @@ Common options:
 
 - `--since VALUE`: relative `10m`, `24h`, `7d`, or an ISO timestamp.
 - `--endpoint NAME`: filters to one endpoint for read views; `update` accepts repeatable endpoints.
+  `runs` does not support endpoint filtering.
 - `--limit N`: limits displayed rows or actors, depending on the action.
 - `--json`: emits JSON Lines for read views; `update --json` emits one JSON object.
 
@@ -231,6 +236,7 @@ See [View exports](views.md) for the schema contract and authoring rules.
 
 ```bash
 uv run centric-api load list
+uv run centric-api load list --load-config ./load.yml
 uv run centric-api load show material-create
 uv run centric-api load check material-create materials.xlsx
 uv run centric-api load check material-create materials.xlsx --sheet Materials
@@ -298,6 +304,7 @@ See [Modeling](modeling.md) for the private model interface.
 
 ```bash
 uv run centric-api units list
+uv run centric-api units list --units-config ./units.yml
 uv run centric-api units show mass
 uv run centric-api units normalize "sq m"
 uv run centric-api units convert 1500 g kg

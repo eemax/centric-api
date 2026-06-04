@@ -17,6 +17,7 @@ def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
     assert "No changelog events found." in capsys.readouterr().out
     assert not db_path.exists()
 
+
 def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -41,6 +42,7 @@ def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
     assert "Writing changelog tables..." in output
     assert "Changelog updated:" in output
 
+
 def test_changelog_update_json_suppresses_progress(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -62,6 +64,7 @@ def test_changelog_update_json_suppresses_progress(tmp_path, capsys) -> None:
     assert payload["endpoint_count"] == 1
     assert payload["record_count"] == 1
     assert payload["event_count"] == 1
+
 
 def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
@@ -137,6 +140,7 @@ def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
     assert "endpoint=" not in output
     assert "delete_type=" not in output
 
+
 def test_changelog_summary_human_digest_honors_endpoint_filter(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -163,6 +167,38 @@ def test_changelog_summary_human_digest_honors_endpoint_filter(tmp_path, capsys)
     assert "Endpoint: styles" in output
     assert "styles" in output
     assert "boms" not in output
+
+
+def test_changelog_read_views_reject_repeated_endpoint_filters(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+
+    exit_code = main(
+        [
+            "changelog",
+            "fields",
+            "--db",
+            str(db_path),
+            "--endpoint",
+            "styles",
+            "--endpoint",
+            "boms",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "accept only one --endpoint" in captured.err
+
+
+def test_changelog_runs_rejects_endpoint_filter(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+
+    exit_code = main(["changelog", "runs", "--db", str(db_path), "--endpoint", "styles"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "changelog runs does not support --endpoint" in captured.err
+
 
 def test_changelog_detail_actions_use_human_tables(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
@@ -221,6 +257,7 @@ def test_changelog_detail_actions_use_human_tables(tmp_path, capsys) -> None:
     assert "Modified" in changes_output
     assert "styles" in changes_output
     assert "changed_fields_json=" not in changes_output
+
 
 def test_changelog_leaderboard_limits_actors_not_endpoints(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
@@ -325,6 +362,7 @@ def test_changelog_leaderboard_limits_actors_not_endpoints(tmp_path, capsys) -> 
     boms = next(endpoint for endpoint in payloads[0]["endpoints"] if endpoint["endpoint"] == "boms")
     assert boms["removed"] == 1
     assert boms["tombstone"] == 1
+
 
 def test_changelog_changes_summarizes_added_payload_fields(capsys) -> None:
     print_human_changelog_changes(

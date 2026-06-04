@@ -31,20 +31,64 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     fetch_parser = subparsers.add_parser("fetch", help="Fetch Centric API records")
-    fetch_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
-    fetch_parser.add_argument("--endpoint", action="append", default=[])
+    fetch_parser.add_argument(
+        "--fetch-config",
+        metavar="PATH",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Fetcher config path.",
+    )
+    fetch_parser.add_argument(
+        "--endpoint",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="Endpoint to fetch; repeat for multiple endpoints.",
+    )
     fetch_parser.add_argument("--full", action="store_true", help="Refetch all records.")
-    fetch_parser.add_argument("--days", type=_parse_days_back, default=None)
-    fetch_parser.add_argument("--months", type=_parse_months_back, default=None)
-    fetch_parser.add_argument("--resume", action="store_true")
-    fetch_parser.add_argument("--db", default=None)
-    fetch_parser.add_argument("--schema", default=None)
-    fetch_parser.add_argument("--delta-state-file", default=None)
-    fetch_parser.add_argument("--delta-dry-run", action="store_true")
-    fetch_parser.add_argument("--env-file", default=None)
-    fetch_parser.add_argument("--quiet", action="store_true")
-    fetch_parser.add_argument("--json", action="store_true")
-    fetch_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
+    fetch_parser.add_argument(
+        "--days",
+        metavar="N",
+        type=_parse_days_back,
+        default=None,
+        help="Fetch records modified in the last N days.",
+    )
+    fetch_parser.add_argument(
+        "--months",
+        metavar="N",
+        type=_parse_months_back,
+        default=None,
+        help="Fetch records modified in the last N calendar months.",
+    )
+    fetch_parser.add_argument("--resume", action="store_true", help="Resume from checkpoints.")
+    fetch_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    fetch_parser.add_argument(
+        "--schema",
+        metavar="PATH",
+        default=None,
+        help="Endpoint schema config path.",
+    )
+    fetch_parser.add_argument(
+        "--delta-state-file",
+        metavar="PATH",
+        default=None,
+        help="Delta state file path.",
+    )
+    fetch_parser.add_argument(
+        "--delta-dry-run",
+        action="store_true",
+        help="Print derived delta filters without fetching.",
+    )
+    fetch_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
+    fetch_parser.add_argument("--quiet", action="store_true", help="Suppress human progress.")
+    fetch_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
+    fetch_parser.add_argument(
+        "--log-level",
+        choices=list(LOG_LEVEL_RANKS),
+        default="summary",
+        help="Fetch log verbosity.",
+    )
 
     changelog_parser = subparsers.add_parser("changelog", help="Inspect or update changelog")
     changelog_parser.add_argument(
@@ -52,215 +96,428 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         choices=["summary", "fields", "actors", "leaderboard", "runs", "changes", "update"],
         default="summary",
+        help="Changelog action to run.",
     )
-    changelog_parser.add_argument("--db", default=None)
-    changelog_parser.add_argument("--endpoint", action="append", default=[])
-    changelog_parser.add_argument("--since", default=None)
-    changelog_parser.add_argument("--limit", type=int, default=50)
-    changelog_parser.add_argument("--json", action="store_true")
+    changelog_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    changelog_parser.add_argument(
+        "--endpoint",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="Endpoint filter. Repeatable for update; read views accept one endpoint.",
+    )
+    changelog_parser.add_argument(
+        "--since",
+        metavar="VALUE",
+        default=None,
+        help="Relative window like 7d/24h/10m or an ISO timestamp.",
+    )
+    changelog_parser.add_argument("--limit", metavar="N", type=int, default=50, help="Row limit.")
+    changelog_parser.add_argument("--json", action="store_true", help="Emit JSON output.")
 
     download_parser = subparsers.add_parser("download", help="Download latest document revisions")
-    download_parser.add_argument("--download-config", default=None)
-    download_parser.add_argument("--job", default=None)
-    download_parser.add_argument("--db", default=None)
-    download_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
-    download_parser.add_argument("--env-file", default=None)
-    download_parser.add_argument("--dry-run", action="store_true")
+    download_parser.add_argument(
+        "--download-config",
+        metavar="PATH",
+        default=None,
+        help="Download config path.",
+    )
+    download_parser.add_argument("--job", metavar="NAME", default=None, help="Download job name.")
+    download_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    download_parser.add_argument(
+        "--fetch-config",
+        metavar="PATH",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Fetcher config path for credentials.",
+    )
+    download_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
+    download_parser.add_argument("--dry-run", action="store_true", help="Plan without downloading.")
     download_mode = download_parser.add_mutually_exclusive_group()
-    download_mode.add_argument("--sync", action="store_true")
-    download_mode.add_argument("--rebuild", action="store_true")
-    download_parser.add_argument("--quiet", action="store_true")
-    download_parser.add_argument("--json", action="store_true")
-    download_parser.add_argument("--log-level", choices=list(LOG_LEVEL_RANKS), default="summary")
+    download_mode.add_argument("--sync", action="store_true", help="Verify selected current files.")
+    download_mode.add_argument("--rebuild", action="store_true", help="Redownload selected files.")
+    download_parser.add_argument("--quiet", action="store_true", help="Suppress human output.")
+    download_parser.add_argument("--json", action="store_true", help="Emit JSON output.")
+    download_parser.add_argument(
+        "--log-level",
+        choices=list(LOG_LEVEL_RANKS),
+        default="summary",
+        help="Download log verbosity.",
+    )
 
     bundle_parser = subparsers.add_parser("bundle", help="Package downloaded files into a bundle")
     bundle_actions = bundle_parser.add_subparsers(dest="action", required=True)
 
     bundle_run_parser = bundle_actions.add_parser("run", help="Package downloaded files")
-    bundle_run_parser.add_argument("--bundle-config", default=None)
-    bundle_run_parser.add_argument("--job", default=None)
-    bundle_run_parser.add_argument("--db", default=None)
-    bundle_run_parser.add_argument("--dry-run", action="store_true")
-    bundle_run_parser.add_argument("--no-zip", action="store_true")
-    bundle_run_parser.add_argument("--quiet", action="store_true")
-    bundle_run_parser.add_argument("--json", action="store_true")
+    bundle_run_parser.add_argument(
+        "--bundle-config", metavar="PATH", default=None, help="Bundle config path."
+    )
+    bundle_run_parser.add_argument("--job", metavar="NAME", default=None, help="Bundle job name.")
+    bundle_run_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    bundle_run_parser.add_argument(
+        "--dry-run", action="store_true", help="Plan without writing bundle state."
+    )
+    bundle_run_parser.add_argument(
+        "--no-zip", action="store_true", help="Skip ZIP archive creation."
+    )
+    bundle_run_parser.add_argument("--quiet", action="store_true", help="Suppress human output.")
+    bundle_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     bundle_list_parser = bundle_actions.add_parser("list", help="List bundle runs")
-    bundle_list_parser.add_argument("--job", default=None)
-    bundle_list_parser.add_argument("--db", default=None)
-    bundle_list_parser.add_argument("--limit", type=int, default=50)
-    bundle_list_parser.add_argument("--json", action="store_true")
+    bundle_list_parser.add_argument(
+        "--job", metavar="NAME", default=None, help="Bundle job filter."
+    )
+    bundle_list_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    bundle_list_parser.add_argument("--limit", metavar="N", type=int, default=50, help="Run limit.")
+    bundle_list_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
     bundle_show_parser = bundle_actions.add_parser("show", help="Show one bundle run")
-    bundle_show_parser.add_argument("bundle_run_id")
-    bundle_show_parser.add_argument("--db", default=None)
-    bundle_show_parser.add_argument("--json", action="store_true")
+    bundle_show_parser.add_argument("bundle_run_id", metavar="RUN_ID", help="Bundle run id.")
+    bundle_show_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    bundle_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     bundle_changelog_parser = bundle_actions.add_parser(
         "changelog",
         help="Compare a received bundle run with a later run",
     )
-    bundle_changelog_parser.add_argument("bundle_run_id")
-    bundle_changelog_parser.add_argument("--to", default="latest")
-    bundle_changelog_parser.add_argument("--db", default=None)
-    bundle_changelog_parser.add_argument("--json", action="store_true")
+    bundle_changelog_parser.add_argument(
+        "bundle_run_id", metavar="RUN_ID", help="Source bundle run id."
+    )
+    bundle_changelog_parser.add_argument(
+        "--to", metavar="RUN_ID", default="latest", help="Comparison target run."
+    )
+    bundle_changelog_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    bundle_changelog_parser.add_argument(
+        "--json", action="store_true", help="Emit one JSON object."
+    )
 
     view_parser = subparsers.add_parser("view", help="Export configured tabular cache views")
     view_actions = view_parser.add_subparsers(dest="action", required=True)
 
     view_list_parser = view_actions.add_parser("list", help="List configured views")
-    view_list_parser.add_argument("--view-config", default=None)
-    view_list_parser.add_argument("--json", action="store_true")
+    view_list_parser.add_argument(
+        "--view-config", metavar="PATH", default=None, help="View config path."
+    )
+    view_list_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
     view_show_parser = view_actions.add_parser("show", help="Show one configured view")
-    view_show_parser.add_argument("name")
-    view_show_parser.add_argument("--view-config", default=None)
-    view_show_parser.add_argument("--json", action="store_true")
+    view_show_parser.add_argument("name", metavar="NAME", help="View name.")
+    view_show_parser.add_argument(
+        "--view-config", metavar="PATH", default=None, help="View config path."
+    )
+    view_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     view_check_parser = view_actions.add_parser("check", help="Check a configured view")
-    view_check_parser.add_argument("name")
-    view_check_parser.add_argument("--view-config", default=None)
-    view_check_parser.add_argument("--db", default=None)
-    view_check_parser.add_argument("--json", action="store_true")
+    view_check_parser.add_argument("name", metavar="NAME", help="View name.")
+    view_check_parser.add_argument(
+        "--view-config", metavar="PATH", default=None, help="View config path."
+    )
+    view_check_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    view_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     view_export_parser = view_actions.add_parser("export", help="Export a configured view")
-    view_export_parser.add_argument("name")
-    view_export_parser.add_argument("--view-config", default=None)
-    view_export_parser.add_argument("--db", default=None)
-    view_export_parser.add_argument("--format", choices=["xlsx", "csv"], default=None)
-    view_export_parser.add_argument("--output", default=None)
-    view_export_parser.add_argument("--json", action="store_true")
+    view_export_parser.add_argument("name", metavar="NAME", help="View name.")
+    view_export_parser.add_argument(
+        "--view-config", metavar="PATH", default=None, help="View config path."
+    )
+    view_export_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    view_export_parser.add_argument(
+        "--format",
+        choices=["xlsx", "csv"],
+        default=None,
+        help="Export format; inferred from --output when omitted.",
+    )
+    view_export_parser.add_argument(
+        "--output", metavar="PATH", default=None, help="Output file path."
+    )
+    view_export_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     load_parser = subparsers.add_parser("load", help="Load spreadsheet rows into Centric API")
-    load_parser.add_argument("--load-config", default=None)
+    load_parser.add_argument(
+        "--load-config", metavar="PATH", default=None, help="Load config path."
+    )
     load_actions = load_parser.add_subparsers(dest="action", required=True)
 
     load_list_parser = load_actions.add_parser("list", help="List configured load jobs")
-    load_list_parser.add_argument("--json", action="store_true")
+    _add_load_config_override(load_list_parser)
+    load_list_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
     load_show_parser = load_actions.add_parser("show", help="Show one load job")
-    load_show_parser.add_argument("name")
-    load_show_parser.add_argument("--json", action="store_true")
+    load_show_parser.add_argument("name", metavar="NAME", help="Load job name.")
+    _add_load_config_override(load_show_parser)
+    load_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     load_check_parser = load_actions.add_parser("check", help="Validate a load workbook")
-    load_check_parser.add_argument("name")
-    load_check_parser.add_argument("workbook")
-    load_check_parser.add_argument("--sheet", default=None)
-    load_check_parser.add_argument("--limit", type=_parse_positive_int, default=None)
-    load_check_parser.add_argument("--db", default=None)
-    load_check_parser.add_argument("--quiet", action="store_true")
-    load_check_parser.add_argument("--json", action="store_true")
+    load_check_parser.add_argument("name", metavar="NAME", help="Load job name.")
+    load_check_parser.add_argument("workbook", metavar="WORKBOOK", help="Input workbook path.")
+    _add_load_config_override(load_check_parser)
+    load_check_parser.add_argument("--sheet", metavar="NAME", default=None, help="Worksheet name.")
+    load_check_parser.add_argument(
+        "--limit",
+        metavar="N",
+        type=_parse_positive_int,
+        default=None,
+        help="Process only the first N data rows.",
+    )
+    load_check_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    load_check_parser.add_argument("--quiet", action="store_true", help="Suppress human progress.")
+    load_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     load_run_parser = load_actions.add_parser("run", help="Run a load job")
-    load_run_parser.add_argument("name")
-    load_run_parser.add_argument("workbook")
-    load_run_parser.add_argument("--sheet", default=None)
-    load_run_parser.add_argument("--limit", type=_parse_positive_int, default=None)
-    load_run_parser.add_argument("--db", default=None)
-    load_run_parser.add_argument("--env-file", default=None)
-    load_run_parser.add_argument("--dry-run", action="store_true")
-    load_run_parser.add_argument("--yes", action="store_true")
-    load_run_parser.add_argument("--quiet", action="store_true")
-    load_run_parser.add_argument("--json", action="store_true")
+    load_run_parser.add_argument("name", metavar="NAME", help="Load job name.")
+    load_run_parser.add_argument("workbook", metavar="WORKBOOK", help="Input workbook path.")
+    _add_load_config_override(load_run_parser)
+    load_run_parser.add_argument("--sheet", metavar="NAME", default=None, help="Worksheet name.")
+    load_run_parser.add_argument(
+        "--limit",
+        metavar="N",
+        type=_parse_positive_int,
+        default=None,
+        help="Process only the first N data rows.",
+    )
+    load_run_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    load_run_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
+    load_run_parser.add_argument(
+        "--dry-run", action="store_true", help="Write artifacts without API calls."
+    )
+    load_run_parser.add_argument("--yes", action="store_true", help="Confirm real API writes.")
+    load_run_parser.add_argument("--quiet", action="store_true", help="Suppress human progress.")
+    load_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     load_retry_parser = load_actions.add_parser(
         "retry", help="Retry failed rows from a review workbook"
     )
-    load_retry_parser.add_argument("name")
-    load_retry_parser.add_argument("workbook")
-    load_retry_parser.add_argument("--sheet", default=None)
-    load_retry_parser.add_argument("--statuses", default=None)
-    load_retry_parser.add_argument("--limit", type=_parse_positive_int, default=None)
-    load_retry_parser.add_argument("--db", default=None)
-    load_retry_parser.add_argument("--env-file", default=None)
-    load_retry_parser.add_argument("--dry-run", action="store_true")
-    load_retry_parser.add_argument("--yes", action="store_true")
-    load_retry_parser.add_argument("--quiet", action="store_true")
-    load_retry_parser.add_argument("--json", action="store_true")
+    load_retry_parser.add_argument("name", metavar="NAME", help="Load job name.")
+    load_retry_parser.add_argument(
+        "workbook",
+        metavar="REVIEW_WORKBOOK",
+        help="Review workbook path.",
+    )
+    _add_load_config_override(load_retry_parser)
+    load_retry_parser.add_argument("--sheet", metavar="NAME", default=None, help="Worksheet name.")
+    load_retry_parser.add_argument(
+        "--statuses",
+        metavar="LIST",
+        default=None,
+        help="Comma-separated review statuses to retry.",
+    )
+    load_retry_parser.add_argument(
+        "--limit",
+        metavar="N",
+        type=_parse_positive_int,
+        default=None,
+        help="Process only the first N matching data rows.",
+    )
+    load_retry_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    load_retry_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
+    load_retry_parser.add_argument(
+        "--dry-run", action="store_true", help="Write artifacts without API calls."
+    )
+    load_retry_parser.add_argument("--yes", action="store_true", help="Confirm real API writes.")
+    load_retry_parser.add_argument("--quiet", action="store_true", help="Suppress human progress.")
+    load_retry_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     model_parser = subparsers.add_parser("model", help="Run private calculated data models")
-    model_parser.add_argument("--models-dir", default=None)
-    model_parser.add_argument("--units-config", default=None)
+    model_parser.add_argument(
+        "--models-dir", metavar="PATH", default=None, help="Private models directory."
+    )
+    model_parser.add_argument(
+        "--units-config", metavar="PATH", default=None, help="Units config path."
+    )
     model_actions = model_parser.add_subparsers(dest="action", required=True)
 
     model_list_parser = model_actions.add_parser("list", help="List available models")
-    model_list_parser.add_argument("--json", action="store_true")
+    _add_model_config_overrides(model_list_parser)
+    model_list_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
     model_show_parser = model_actions.add_parser("show", help="Show one model")
-    model_show_parser.add_argument("name")
-    model_show_parser.add_argument("--json", action="store_true")
+    model_show_parser.add_argument("name", metavar="NAME", help="Model name.")
+    _add_model_config_overrides(model_show_parser)
+    model_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     model_check_parser = model_actions.add_parser("check", help="Check one model")
-    model_check_parser.add_argument("name")
-    model_check_parser.add_argument("--db", default=None)
-    model_check_parser.add_argument("--json", action="store_true")
+    model_check_parser.add_argument("name", metavar="NAME", help="Model name.")
+    _add_model_config_overrides(model_check_parser)
+    model_check_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    model_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     model_run_parser = model_actions.add_parser("run", help="Run one model")
-    model_run_parser.add_argument("name")
-    model_run_parser.add_argument("--db", default=None)
-    model_run_parser.add_argument("--json", action="store_true")
+    model_run_parser.add_argument("name", metavar="NAME", help="Model name.")
+    _add_model_config_overrides(model_run_parser)
+    model_run_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    model_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     units_parser = subparsers.add_parser("units", help="Inspect and convert configured units")
-    units_parser.add_argument("--units-config", default=None)
+    units_parser.add_argument(
+        "--units-config", metavar="PATH", default=None, help="Units config path."
+    )
     units_actions = units_parser.add_subparsers(dest="action", required=True)
 
     units_list_parser = units_actions.add_parser("list", help="List unit dimensions")
-    units_list_parser.add_argument("--json", action="store_true")
+    _add_units_config_override(units_list_parser)
+    units_list_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     units_show_parser = units_actions.add_parser("show", help="Show one unit dimension")
-    units_show_parser.add_argument("dimension")
-    units_show_parser.add_argument("--json", action="store_true")
+    units_show_parser.add_argument("dimension", metavar="DIMENSION", help="Unit dimension.")
+    _add_units_config_override(units_show_parser)
+    units_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     units_normalize_parser = units_actions.add_parser("normalize", help="Normalize a unit label")
-    units_normalize_parser.add_argument("unit")
-    units_normalize_parser.add_argument("--json", action="store_true")
+    units_normalize_parser.add_argument("unit", metavar="UNIT", help="Unit label or alias.")
+    _add_units_config_override(units_normalize_parser)
+    units_normalize_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     units_convert_parser = units_actions.add_parser("convert", help="Convert a value between units")
-    units_convert_parser.add_argument("value")
-    units_convert_parser.add_argument("from_unit")
-    units_convert_parser.add_argument("to_unit")
-    units_convert_parser.add_argument("--json", action="store_true")
+    units_convert_parser.add_argument("value", metavar="VALUE", help="Numeric value.")
+    units_convert_parser.add_argument("from_unit", metavar="FROM_UNIT", help="Source unit.")
+    units_convert_parser.add_argument("to_unit", metavar="TO_UNIT", help="Target unit.")
+    _add_units_config_override(units_convert_parser)
+    units_convert_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     units_basis_parser = units_actions.add_parser(
         "basis",
         help="Show how a material unit drives consumption math",
     )
-    units_basis_parser.add_argument("unit")
-    units_basis_parser.add_argument("--json", action="store_true")
+    units_basis_parser.add_argument("unit", metavar="UNIT", help="Material unit label or alias.")
+    _add_units_config_override(units_basis_parser)
+    units_basis_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     units_check_parser = units_actions.add_parser("check", help="Validate unit registry")
-    units_check_parser.add_argument("--json", action="store_true")
+    _add_units_config_override(units_check_parser)
+    units_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
-    cron_parser.add_argument("schedule", nargs="?", default="0 * * * *")
-    cron_parser.add_argument("--run-now", action="store_true")
-    cron_parser.add_argument("--endpoint", action="append", default=[])
-    cron_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
-    cron_parser.add_argument("--db", default=None)
-    cron_parser.add_argument("--schema", default=None)
-    cron_parser.add_argument("--delta-state-file", default=None)
-    cron_parser.add_argument("--env-file", default=None)
+    cron_parser.add_argument(
+        "schedule",
+        nargs="?",
+        default="0 * * * *",
+        help="Five-field cron schedule.",
+    )
+    cron_parser.add_argument("--run-now", action="store_true", help="Run one fetch immediately.")
+    cron_parser.add_argument(
+        "--endpoint",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="Endpoint to fetch; repeat for multiple endpoints.",
+    )
+    cron_parser.add_argument(
+        "--fetch-config",
+        metavar="PATH",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Fetcher config path.",
+    )
+    cron_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    cron_parser.add_argument(
+        "--schema", metavar="PATH", default=None, help="Endpoint schema config path."
+    )
+    cron_parser.add_argument(
+        "--delta-state-file",
+        metavar="PATH",
+        default=None,
+        help="Delta state file path.",
+    )
+    cron_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
 
     status_parser = subparsers.add_parser("status", help="Show local Centric API status")
-    status_parser.add_argument("--db", default=None)
-    status_parser.add_argument("--json", action="store_true")
+    status_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    status_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local Centric API setup")
-    doctor_parser.add_argument("--fetch-config", default=str(DEFAULT_CONFIG_PATH))
-    doctor_parser.add_argument("--download-config", default=None)
-    doctor_parser.add_argument("--bundle-config", default=None)
-    doctor_parser.add_argument("--schema", default=None)
-    doctor_parser.add_argument("--db", default=None)
-    doctor_parser.add_argument("--env-file", default=None)
-    doctor_parser.add_argument("--json", action="store_true")
+    doctor_parser.add_argument(
+        "--fetch-config",
+        metavar="PATH",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Fetcher config path.",
+    )
+    doctor_parser.add_argument(
+        "--download-config", metavar="PATH", default=None, help="Download config path."
+    )
+    doctor_parser.add_argument(
+        "--bundle-config", metavar="PATH", default=None, help="Bundle config path."
+    )
+    doctor_parser.add_argument(
+        "--schema", metavar="PATH", default=None, help="Endpoint schema config path."
+    )
+    doctor_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    doctor_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
+    doctor_parser.add_argument("--json", action="store_true", help="Emit JSON Lines checks.")
 
     rebuild_parser = subparsers.add_parser("rebuild-db", help="Rebuild SQLite from raw evidence")
-    rebuild_parser.add_argument("--db", default=None)
-    rebuild_parser.add_argument("--raw-dir", default=None)
-    rebuild_parser.add_argument("--schema", default=None)
-    rebuild_parser.add_argument("--yes", action="store_true")
-    rebuild_parser.add_argument("--json", action="store_true")
+    rebuild_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
+    rebuild_parser.add_argument(
+        "--raw-dir", metavar="PATH", default=None, help="Raw evidence directory."
+    )
+    rebuild_parser.add_argument(
+        "--schema", metavar="PATH", default=None, help="Endpoint schema config path."
+    )
+    rebuild_parser.add_argument("--yes", action="store_true", help="Confirm destructive rebuild.")
+    rebuild_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
     return parser
+
+
+def _add_load_config_override(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--load-config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Load config path.",
+    )
+
+
+def _add_model_config_overrides(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--models-dir",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Private models directory.",
+    )
+    parser.add_argument(
+        "--units-config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Units config path.",
+    )
+
+
+def _add_units_config_override(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--units-config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Units config path.",
+    )
 
 
 def _parse_days_back(value: str) -> int:

@@ -13,6 +13,7 @@ from ..changelog import (
     parse_since,
     record_changelog,
 )
+from ..config import ConfigError
 from ..defaults import db_path as resolve_db_path
 from ..rendering.changelog import (
     print_human_changelog_actor_summary,
@@ -58,7 +59,10 @@ def run_changelog(args: argparse.Namespace) -> int:
             ),
         )
         return 0
+    endpoint = _read_endpoint_filter(args)
     if args.action == "runs":
+        if endpoint is not None:
+            raise ConfigError("changelog runs does not support --endpoint.")
         rows = list_changelog_runs(db_path, since=since, limit=args.limit)
         if args.json:
             return print_rows(rows, True, empty_message="No changelog runs found.")
@@ -70,7 +74,7 @@ def run_changelog(args: argparse.Namespace) -> int:
     if args.action == "changes":
         rows = list_changes(
             db_path,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
             since=since,
             limit=args.limit,
         )
@@ -82,13 +86,13 @@ def run_changelog(args: argparse.Namespace) -> int:
         print_human_changelog_changes(
             rows,
             since=args.since,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
         )
         return 0
     if args.action == "fields":
         rows = list_field_summary(
             db_path,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
             since=since,
             limit=args.limit if args.json or args.endpoint else 10000,
         )
@@ -99,7 +103,7 @@ def run_changelog(args: argparse.Namespace) -> int:
             return 0
         change_rows = list_change_summary(
             db_path,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
             since=since,
             limit=10000,
         )
@@ -107,13 +111,13 @@ def run_changelog(args: argparse.Namespace) -> int:
             rows,
             change_rows,
             since=args.since,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
         )
         return 0
     if args.action == "actors":
         rows = list_actor_summary(
             db_path,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
             since=since,
             limit=args.limit,
         )
@@ -125,13 +129,13 @@ def run_changelog(args: argparse.Namespace) -> int:
         print_human_changelog_actor_summary(
             rows,
             since=args.since,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
         )
         return 0
     if args.action == "leaderboard":
         rows = list_actor_leaderboard(
             db_path,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
             since=since,
         )
         displayed_rows = rows[: max(args.limit, 0)]
@@ -147,11 +151,10 @@ def run_changelog(args: argparse.Namespace) -> int:
         print_human_changelog_leaderboard(
             rows,
             since=args.since,
-            endpoint=args.endpoint[0] if args.endpoint else None,
+            endpoint=endpoint,
             limit=args.limit,
         )
         return 0
-    endpoint = args.endpoint[0] if args.endpoint else None
     rows = list_change_summary(
         db_path,
         endpoint=endpoint,
@@ -183,3 +186,12 @@ def _format_update_scope(endpoints: list[str]) -> str:
     if not endpoints:
         return "all endpoints"
     return ", ".join(endpoints)
+
+
+def _read_endpoint_filter(args: argparse.Namespace) -> str | None:
+    if len(args.endpoint) > 1:
+        raise ConfigError(
+            "Changelog read views accept only one --endpoint. "
+            "Use changelog update for repeatable endpoint scopes."
+        )
+    return args.endpoint[0] if args.endpoint else None
