@@ -531,6 +531,51 @@ jobs:
         load_download_config(config_path)
 
 
+def test_download_config_rejects_invalid_filter_regex(tmp_path: Path) -> None:
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: docs
+    sources:
+      - endpoint: documents
+    document_filters:
+      - path: node_name
+        matches: "["
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="matches must be a valid regex"):
+        load_download_config(config_path)
+
+
+def test_download_config_rejects_invalid_lookup_regex(tmp_path: Path) -> None:
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+output_dir: downloads
+jobs:
+  - name: style-docs
+    sources:
+      - endpoint: styles
+        filters:
+          - path: season
+            lookup:
+              endpoint: seasons
+              path: node_name
+              matches: "["
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="matches must be a valid regex"):
+        load_download_config(config_path)
+
+
 def test_download_config_requires_non_empty_sources(tmp_path: Path) -> None:
     config_path = tmp_path / "download.yml"
     config_path.write_text(

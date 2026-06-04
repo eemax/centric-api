@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -175,6 +176,7 @@ def _parse_filter(raw: Any, field_name: str) -> DownloadFilter:
     matches = raw.get("matches")
     if matches is not None and not isinstance(matches, str):
         raise ConfigError(f"download {field_name}.matches must be a string.")
+    _validate_regex(matches, f"download {field_name}.matches")
     lookup = None
     if "lookup" in raw:
         lookup = _parse_lookup_filter(raw["lookup"], f"{field_name}.lookup")
@@ -215,6 +217,7 @@ def _parse_lookup_filter(raw: Any, field_name: str) -> DownloadLookupFilter:
     matches = raw.get("matches")
     if matches is not None and not isinstance(matches, str):
         raise ConfigError(f"download {field_name}.matches must be a string.")
+    _validate_regex(matches, f"download {field_name}.matches")
     return DownloadLookupFilter(
         endpoint=endpoint.strip(),
         path=path.strip(),
@@ -224,6 +227,15 @@ def _parse_lookup_filter(raw: Any, field_name: str) -> DownloadLookupFilter:
         matches=matches,
         exists=exists,
     )
+
+
+def _validate_regex(pattern: str | None, field_name: str) -> None:
+    if pattern is None:
+        return
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        raise ConfigError(f"{field_name} must be a valid regex: {exc}") from exc
 
 
 def _list(value: Any, field_name: str) -> list[Any]:

@@ -175,7 +175,7 @@ def _build_auth_settings(raw: dict[str, Any], fetcher_cfg: FetcherConfig) -> Aut
         )
     if not isinstance(env_file, str) or not env_file.strip():
         raise ConfigError("env_file must be a non-empty string when provided.")
-    env_path = Path(env_file.strip())
+    env_path = Path(env_file.strip()).expanduser()
     if env_path.is_absolute() or env_path.parent != Path("."):
         return AuthSettings(timeout=fetcher_cfg.timeout, env_file=env_path)
     return AuthSettings(timeout=fetcher_cfg.timeout, env_file=resolve_private_config_path(env_path))
@@ -226,7 +226,7 @@ def _default_config_text(path: Path) -> str | None:
 
 def resolve_private_config_path(relative_path: str | Path, path: str | Path | None = None) -> Path:
     if path is not None:
-        return Path(path)
+        return Path(path).expanduser()
 
     relative = Path(relative_path)
     if relative.is_absolute():
@@ -260,7 +260,7 @@ def resolve_optional_private_config_path(
     path: str | Path | None = None,
 ) -> Path | None:
     if path is not None:
-        return Path(path)
+        return Path(path).expanduser()
 
     resolved_path = resolve_private_config_path(relative_path)
     if resolved_path.is_file():

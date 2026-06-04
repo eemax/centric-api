@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from centric_api.bundle_config import load_bundle_config
-from centric_api.config import ConfigError, load_fetcher_settings, runtime_home, runtime_path
+from centric_api.config import (
+    ConfigError,
+    load_fetcher_settings,
+    resolve_optional_private_config_path,
+    resolve_private_config_path,
+    runtime_home,
+    runtime_path,
+)
 from centric_api.db_schema import SCHEMA_VERSION
 from centric_api.download_config import load_download_config
 from centric_api.fetch_common import FetchError
@@ -42,6 +49,21 @@ def test_runtime_paths_use_centric_api_home(
 
     assert runtime_home() == tmp_path / "home"
     assert runtime_path("raw") == tmp_path / "home" / "raw"
+
+
+def test_explicit_private_config_paths_expand_user(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "user-home"
+    monkeypatch.setenv("HOME", str(home))
+
+    assert resolve_private_config_path("delta/state.json", "~/custom-state.json") == (
+        home / "custom-state.json"
+    )
+    assert resolve_optional_private_config_path("load.yml", "~/custom-load.yml") == (
+        home / "custom-load.yml"
+    )
 
 
 def test_connect_installs_dashboard_views(tmp_path: Path) -> None:
@@ -152,6 +174,33 @@ endpoints:
 
     assert fetcher_cfg.timeout == 5
     assert [endpoint.name for endpoint in endpoints] == ["styles"]
+
+
+def test_load_fetcher_settings_expands_user_env_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    config = tmp_path / "fetcher.yml"
+    config.write_text(
+        """
+timeout: 5
+env_file: ~/centric.env
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+    count_spec:
+      path: count/Style
+""",
+        encoding="utf-8",
+    )
+
+    _fetcher_cfg, auth_settings, _endpoints = load_fetcher_settings(config)
+
+    assert auth_settings.env_file == home / "centric.env"
 
 
 def test_load_fetcher_settings_requires_count_spec(tmp_path: Path) -> None:
