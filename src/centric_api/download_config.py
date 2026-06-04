@@ -114,6 +114,8 @@ def _parse_job(raw: Any, index: int) -> DownloadJob:
     if not isinstance(name, str) or not name.strip():
         raise ConfigError(f"download jobs[{index}].name must be a non-empty string.")
     sources_raw = _list(raw.get("sources"), f"job[{name}].sources")
+    if not sources_raw:
+        raise ConfigError(f"download job[{name}].sources must be a non-empty array.")
     sources = tuple(_parse_source(item, i, name) for i, item in enumerate(sources_raw))
     document_filters = tuple(
         _parse_filter(item, f"job[{name}].document_filters[{i}]")

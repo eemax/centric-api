@@ -37,7 +37,8 @@ Fetch config intentionally rejects `base_url` and `auth`; keep secrets outside s
 
 ## Fetcher Config
 
-`config/fetcher.yml` defines endpoint fetch behavior:
+`config/fetcher.yml` defines endpoint fetch behavior. Fetcher configs reject unknown keys so typos
+fail before a fetch starts.
 
 ```yaml
 timeout: 30
@@ -96,9 +97,12 @@ or clock skew.
 ## Endpoint Schema
 
 Endpoint schema only describes tombstone rules. Identity is always `id`, and freshness is always
-`_modified_at`.
+`_modified_at`. Endpoint schema files reject unknown keys and use version `1` when a version is
+provided.
 
 ```yaml
+version: 1
+
 endpoints:
   styles:
     delete_when_any:
@@ -153,6 +157,8 @@ Sources require:
 
 - `endpoint`
 - optional `filters`
+
+Each job must define at least one source.
 
 Filter operators:
 
@@ -295,3 +301,49 @@ jobs:
 Use `docs/load.md` as the full schema reference. Bundled load jobs include `material-create` and
 `material-composition-create`; both can be extended or replaced by private
 `CENTRIC_API_HOME/load.yml`.
+
+## Units Config
+
+Units configs use version `1` and reject unknown keys. The default registry in `config/units.yml`
+defines common metric, US customary, and trade units. A private `CENTRIC_API_HOME/units.yml` extends
+the defaults with extra dimensions, units, or aliases; `--units-config PATH` loads one explicit
+registry instead.
+
+```yaml
+version: 1
+
+dimensions:
+  mass:
+    base: kg
+    consumption:
+      basis: direct_mass
+      bom_quantity: mass
+      material_value: ignored
+      output_unit: kg
+      requires: [bom_quantity, material_uom]
+      formula: unit_convert(bom_quantity, material_uom, "kg")
+    units:
+      g:
+        factor: 0.001
+        aliases: [gram, grams]
+      kg:
+        factor: 1
+        aliases: [kilogram, kilograms]
+```
+
+Dimensions require:
+
+- `base`: unit name defined under `units`.
+- `units`: non-empty object of unit definitions.
+
+Units require:
+
+- `factor`: numeric multiplier from that unit into the dimension base.
+- optional `aliases`: user-facing labels resolved by `centric-api units`.
+- optional `basis_units`: implied BOM quantity and width units for material-consumption math.
+
+Consumption sections are optional and describe how material UOMs drive modeling. Unit references in
+`output_unit`, `material_value_unit`, and `basis_units` must resolve to known units so modeling
+errors fail during config load instead of during a private calculation.
+
+Use `docs/units.md` as the full unit registry reference.

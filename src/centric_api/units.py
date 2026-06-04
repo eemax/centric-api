@@ -192,6 +192,7 @@ def parse_unit_registry(payload: dict[str, Any], *, path: Path) -> UnitRegistry:
             for alias in unit.aliases:
                 _register_alias(aliases, alias, unit.unit, unit.dimension)
 
+    _validate_consumption_references(dimensions, aliases)
     return UnitRegistry(path=path, dimensions=dimensions, aliases=aliases)
 
 
@@ -439,6 +440,50 @@ def _register_alias(
             f"and {dimension}.{unit}."
         )
     aliases[key] = NormalizedUnit(input=alias, unit=unit, dimension=dimension)
+
+
+def _validate_consumption_references(
+    dimensions: dict[str, UnitDimension],
+    aliases: dict[str, NormalizedUnit],
+) -> None:
+    for dimension in dimensions.values():
+        if dimension.consumption is not None:
+            _require_known_unit(
+                aliases,
+                dimension.consumption.output_unit,
+                f"units dimension[{dimension.name}].consumption.output_unit",
+            )
+            if dimension.consumption.material_value_unit is not None:
+                _require_known_unit(
+                    aliases,
+                    dimension.consumption.material_value_unit,
+                    f"units dimension[{dimension.name}].consumption.material_value_unit",
+                )
+        for unit in dimension.units.values():
+            if unit.basis_units is None:
+                continue
+            if unit.basis_units.bom_quantity_unit is not None:
+                _require_known_unit(
+                    aliases,
+                    unit.basis_units.bom_quantity_unit,
+                    f"units dimension[{dimension.name}].units[{unit.unit}]"
+                    ".basis_units.bom_quantity_unit",
+                )
+            if unit.basis_units.width_unit is not None:
+                _require_known_unit(
+                    aliases,
+                    unit.basis_units.width_unit,
+                    f"units dimension[{dimension.name}].units[{unit.unit}].basis_units.width_unit",
+                )
+
+
+def _require_known_unit(
+    aliases: dict[str, NormalizedUnit],
+    value: str,
+    field_name: str,
+) -> None:
+    if _alias_key(value) not in aliases:
+        raise ConfigError(f"{field_name} references unknown unit {value!r}.")
 
 
 def _alias_key(value: str) -> str:

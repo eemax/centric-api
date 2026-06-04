@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from centric_api.config import load_fetcher_settings, runtime_home, runtime_path
+from centric_api.config import ConfigError, load_fetcher_settings, runtime_home, runtime_path
 from centric_api.db_schema import SCHEMA_VERSION
 from centric_api.fetch_common import FetchError
 from centric_api.fetch_pagination import get_expected_count
@@ -138,6 +138,58 @@ endpoints:
 
     with pytest.raises(ValueError, match="count_spec"):
         load_fetcher_settings(config)
+
+
+def test_load_fetcher_settings_rejects_unknown_keys(tmp_path: Path) -> None:
+    root_config = tmp_path / "fetcher-root.yml"
+    root_config.write_text(
+        """
+timeout: 5
+typo: nope
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+    count_spec:
+      path: count/Style
+""",
+        encoding="utf-8",
+    )
+    endpoint_config = tmp_path / "fetcher-endpoint.yml"
+    endpoint_config.write_text(
+        """
+timeout: 5
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+    typo_endpoint: nope
+    count_spec:
+      path: count/Style
+""",
+        encoding="utf-8",
+    )
+    count_config = tmp_path / "fetcher-count.yml"
+    count_config.write_text(
+        """
+timeout: 5
+endpoints:
+  - name: styles
+    api_version: v2
+    path: styles
+    count_spec:
+      path: count/Style
+      typo_count: nope
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="fetcher config has unknown keys: typo"):
+        load_fetcher_settings(root_config)
+    with pytest.raises(ConfigError, match="endpoint has unknown keys: typo_endpoint"):
+        load_fetcher_settings(endpoint_config)
+    with pytest.raises(ConfigError, match="count_spec has unknown keys: typo_count"):
+        load_fetcher_settings(count_config)
 
 
 def test_count_preflight_rejects_fractional_counts(tmp_path: Path) -> None:
@@ -295,6 +347,58 @@ styles:
 
     with pytest.raises(ValueError, match="endpoints"):
         load_endpoint_schemas(schema)
+
+
+def test_endpoint_schema_rejects_unknown_keys_and_versions(tmp_path: Path) -> None:
+    root_schema = tmp_path / "root-schema.yml"
+    root_schema.write_text(
+        """
+version: 1
+unknown: nope
+endpoints: {}
+""",
+        encoding="utf-8",
+    )
+    version_schema = tmp_path / "version-schema.yml"
+    version_schema.write_text(
+        """
+version: 2
+endpoints: {}
+""",
+        encoding="utf-8",
+    )
+    endpoint_schema = tmp_path / "endpoint-schema.yml"
+    endpoint_schema.write_text(
+        """
+version: 1
+endpoints:
+  styles:
+    typo: nope
+""",
+        encoding="utf-8",
+    )
+    condition_schema = tmp_path / "condition-schema.yml"
+    condition_schema.write_text(
+        """
+version: 1
+endpoints:
+  styles:
+    delete_when_any:
+      - field: active
+        equals: false
+        typo: nope
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="unknown keys: unknown"):
+        load_endpoint_schemas(root_schema)
+    with pytest.raises(ConfigError, match="version must be 1"):
+        load_endpoint_schemas(version_schema)
+    with pytest.raises(ConfigError, match="unknown keys: typo"):
+        load_endpoint_schemas(endpoint_schema)
+    with pytest.raises(ConfigError, match="unknown keys: typo"):
+        load_endpoint_schemas(condition_schema)
 
 
 def test_ingest_applies_endpoint_tombstone_rules(tmp_path: Path) -> None:

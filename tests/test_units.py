@@ -123,3 +123,57 @@ def test_unit_registry_rejects_alias_conflicts() -> None:
 
     with pytest.raises(ConfigError, match="Unit alias"):
         parse_unit_registry(payload, path=Path("units.yml"))
+
+
+def test_unit_registry_rejects_unknown_consumption_unit_references() -> None:
+    payload = {
+        "version": 1,
+        "dimensions": {
+            "mass": {
+                "base": "kg",
+                "consumption": {
+                    "basis": "direct_mass",
+                    "bom_quantity": "mass",
+                    "material_value": "ignored",
+                    "output_unit": "stone",
+                    "requires": [],
+                    "formula": "qty",
+                },
+                "units": {
+                    "kg": {"factor": 1},
+                },
+            },
+        },
+    }
+
+    with pytest.raises(ConfigError, match="consumption.output_unit references unknown unit"):
+        parse_unit_registry(payload, path=Path("units.yml"))
+
+
+def test_unit_registry_rejects_unknown_basis_unit_references() -> None:
+    payload = {
+        "version": 1,
+        "dimensions": {
+            "areal_density": {
+                "base": "kg_per_m2",
+                "units": {
+                    "kg_per_m2": {
+                        "factor": 1,
+                        "basis_units": {
+                            "bom_quantity_unit": "furlong",
+                            "width_unit": "m",
+                        },
+                    },
+                },
+            },
+            "length": {
+                "base": "m",
+                "units": {
+                    "m": {"factor": 1},
+                },
+            },
+        },
+    }
+
+    with pytest.raises(ConfigError, match="basis_units.bom_quantity_unit"):
+        parse_unit_registry(payload, path=Path("units.yml"))

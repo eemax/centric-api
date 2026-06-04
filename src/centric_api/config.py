@@ -11,6 +11,18 @@ from .models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig
 HOME_ENV_VAR = "CENTRIC_API_HOME"
 DEFAULT_HOME = Path.home() / ".centric-api"
 LOCAL_ENV_CONFIG_PATH = Path("local.env")
+FETCHER_CONFIG_KEYS = {
+    "timeout",
+    "retry_max_attempts",
+    "retry_base_seconds",
+    "retry_max_seconds",
+    "output_dir",
+    "checkpoint_dir",
+    "env_file",
+    "endpoints",
+}
+ENDPOINT_CONFIG_KEYS = {"name", "api_version", "path", "query_params", "limit", "count_spec"}
+COUNT_SPEC_CONFIG_KEYS = {"path", "query_params"}
 
 
 class ConfigError(ValueError):
@@ -82,6 +94,7 @@ def _as_positive_int(value: Any, *, field_name: str, default: int) -> int:
 
 
 def _build_count_spec(raw: dict[str, Any]) -> CountSpec:
+    _reject_unknown_keys(raw, COUNT_SPEC_CONFIG_KEYS, "count_spec")
     path = _as_path(raw.get("path"), field_name="count_spec.path")
     query_params = _as_dict(raw.get("query_params"), field_name="count_spec.query_params")
     return CountSpec(
@@ -91,6 +104,7 @@ def _build_count_spec(raw: dict[str, Any]) -> CountSpec:
 
 
 def _build_endpoint_spec(raw: dict[str, Any]) -> EndpointSpec:
+    _reject_unknown_keys(raw, ENDPOINT_CONFIG_KEYS, "endpoint")
     name = raw.get("name")
     if not isinstance(name, str) or not name.strip():
         raise ConfigError("endpoint.name must be a non-empty string.")
@@ -117,6 +131,7 @@ def _build_endpoint_spec(raw: dict[str, Any]) -> EndpointSpec:
 
 
 def _build_fetcher_config(raw: dict[str, Any]) -> FetcherConfig:
+    _reject_unknown_keys(raw, FETCHER_CONFIG_KEYS | {"base_url", "auth"}, "fetcher config")
     if "base_url" in raw:
         raise ConfigError("base_url belongs in CENTRIC_BASE_URL or .env, not fetcher config.")
     if "auth" in raw:
@@ -172,6 +187,12 @@ def _ensure_unique_names(specs: Iterable[EndpointSpec]) -> None:
         if spec.name in seen:
             raise ConfigError(f"Duplicate endpoint name: {spec.name}")
         seen.add(spec.name)
+
+
+def _reject_unknown_keys(payload: dict[str, Any], allowed: set[str], field_name: str) -> None:
+    unknown = sorted(set(payload) - allowed)
+    if unknown:
+        raise ConfigError(f"{field_name} has unknown keys: {', '.join(unknown)}.")
 
 
 def resolve_private_config_path(relative_path: str | Path, path: str | Path | None = None) -> Path:

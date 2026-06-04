@@ -118,6 +118,7 @@ jobs:
     assert download_item_count == 0
     assert download_current_count == 0
 
+
 def test_download_requires_cached_source_endpoint(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path):
@@ -132,6 +133,7 @@ def test_download_requires_cached_source_endpoint(tmp_path: Path) -> None:
             config=config,
             mode="rebuild",
         )
+
 
 def test_download_preflight_accepts_fetched_empty_endpoints(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
@@ -148,6 +150,7 @@ def test_download_preflight_accepts_fetched_empty_endpoints(tmp_path: Path) -> N
 
     assert result.matched_count == 0
     assert result.selected_count == 0
+
 
 def test_download_requires_cached_revisions_without_revision_filters(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
@@ -166,6 +169,7 @@ def test_download_requires_cached_revisions_without_revision_filters(tmp_path: P
             config=_download_config(tmp_path),
             mode="rebuild",
         )
+
 
 def test_download_uses_revision_filters_and_filename(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
@@ -224,6 +228,7 @@ jobs:
     assert result.items[0]["document_name"] == "actual.pdf"
     assert result.items[0]["file_path"].endswith("/actual.pdf")
 
+
 def test_download_revision_filters_require_cached_revisions(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -263,6 +268,7 @@ jobs:
         current_count = conn.execute("SELECT COUNT(*) FROM download_current").fetchone()[0]
     assert current_count == 0
 
+
 def test_download_skips_documents_missing_cached_latest_revision(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -293,6 +299,7 @@ def test_download_skips_documents_missing_cached_latest_revision(tmp_path: Path)
     assert {
         (event["event"], event.get("document_id"), event.get("revision_id")) for event in events
     } >= {("download_revision_record_missing", "D1", "R1")}
+
 
 def test_download_source_filter_lookup_matches_referenced_record(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
@@ -391,6 +398,7 @@ jobs:
     assert result.selected_count == 1
     assert result.items[0]["document_id"] == "D1"
 
+
 def test_download_lookup_filters_require_cached_lookup_endpoint(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -439,6 +447,7 @@ jobs:
             config=config,
             mode="rebuild",
         )
+
 
 def test_download_lookup_filter_rejects_source_arrays(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
@@ -502,6 +511,7 @@ jobs:
 
     assert result.matched_count == 0
 
+
 def test_download_config_rejects_unknown_keys(tmp_path: Path) -> None:
     config_path = tmp_path / "download.yml"
     config_path.write_text(
@@ -518,4 +528,20 @@ jobs:
     )
 
     with pytest.raises(ConfigError, match="unknown keys: max_documents"):
+        load_download_config(config_path)
+
+
+def test_download_config_requires_non_empty_sources(tmp_path: Path) -> None:
+    config_path = tmp_path / "download.yml"
+    config_path.write_text(
+        """
+version: 1
+jobs:
+  - name: docs
+    sources: []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="sources must be a non-empty array"):
         load_download_config(config_path)
