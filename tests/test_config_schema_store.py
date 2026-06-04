@@ -6,14 +6,19 @@ from pathlib import Path
 
 import pytest
 
+from centric_api.bundle_config import load_bundle_config
 from centric_api.config import ConfigError, load_fetcher_settings, runtime_home, runtime_path
 from centric_api.db_schema import SCHEMA_VERSION
+from centric_api.download_config import load_download_config
 from centric_api.fetch_common import FetchError
 from centric_api.fetch_pagination import get_expected_count
 from centric_api.fetcher import run_endpoint
+from centric_api.load_config import load_load_config
 from centric_api.models import CountSpec, EndpointSpec, FetcherConfig
 from centric_api.schema import load_endpoint_schemas
 from centric_api.store import connect, ingest_raw_dir
+from centric_api.units import load_unit_registry
+from centric_api.view_config import load_view_config
 
 
 class _JsonResponse:
@@ -66,6 +71,32 @@ def test_connect_installs_dashboard_views(tmp_path: Path) -> None:
         "dashboard_bundle_runs",
         "dashboard_bundle_file_changes",
     } <= views
+
+
+def test_default_configs_load_outside_repo_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path / "home"))
+
+    fetcher_cfg, auth_settings, endpoints = load_fetcher_settings(Path("config/fetcher.yml"))
+    download_config = load_download_config()
+    bundle_config = load_bundle_config()
+    view_config = load_view_config()
+    load_config = load_load_config()
+    units = load_unit_registry()
+    endpoint_schemas = load_endpoint_schemas()
+
+    assert fetcher_cfg.output_dir == tmp_path / "home" / "raw"
+    assert auth_settings.env_file == tmp_path / "home" / "local.env"
+    assert endpoints
+    assert download_config.jobs
+    assert bundle_config.bundles
+    assert view_config.views
+    assert load_config.jobs
+    assert units.dimensions
+    assert "styles" in endpoint_schemas
 
 
 def test_load_fetcher_settings_runtime_defaults(

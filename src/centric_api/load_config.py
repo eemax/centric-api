@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import yaml
 
-from .config import ConfigError, runtime_home
+from .config import ConfigError, read_config_text, runtime_home
 
 DEFAULT_LOAD_CONFIG_PATH = Path("config/load.yml")
 PRIVATE_LOAD_CONFIG_PATH = Path("load.yml")
@@ -276,9 +276,8 @@ def _merge_configs(base: LoadConfig, overlay: LoadConfig) -> LoadConfig:
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"Load config not found: {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = read_config_text(path, missing_message="Load config not found: {path}")
+    payload = yaml.safe_load(text)
     if not isinstance(payload, dict):
         raise ConfigError("Load config root must be an object.")
     return payload

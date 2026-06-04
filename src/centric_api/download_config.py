@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from .config import ConfigError, runtime_home, runtime_path
+from .config import ConfigError, read_config_text, runtime_home, runtime_path
 
 DEFAULT_DOWNLOAD_CONFIG_PATH = Path("config/download.yml")
 PRIVATE_DOWNLOAD_CONFIG_PATH = Path("download.yml")
@@ -89,9 +89,8 @@ def load_download_config(path: str | Path | None = None) -> DownloadConfig:
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"Download config not found: {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = read_config_text(path, missing_message="Download config not found: {path}")
+    payload = yaml.safe_load(text)
     if not isinstance(payload, dict):
         raise ConfigError("Download config root must be an object.")
     return payload

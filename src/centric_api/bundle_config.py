@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from .config import ConfigError, runtime_home, runtime_path
+from .config import ConfigError, read_config_text, runtime_home, runtime_path
 
 DEFAULT_BUNDLE_CONFIG_PATH = Path("config/bundle.yml")
 PRIVATE_BUNDLE_CONFIG_PATH = Path("bundle.yml")
@@ -71,9 +71,8 @@ def load_bundle_config(path: str | Path | None = None) -> BundleConfig:
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"Bundle config not found: {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = read_config_text(path, missing_message="Bundle config not found: {path}")
+    payload = yaml.safe_load(text)
     if not isinstance(payload, dict):
         raise ConfigError("Bundle config root must be an object.")
     return payload

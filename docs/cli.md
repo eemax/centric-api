@@ -140,7 +140,7 @@ Removal breakdowns are always present in `leaderboard --json` as `tombstone`, `h
 
 ```bash
 uv run centric-api download
-uv run centric-api download --job ss26-style-techpacks
+uv run centric-api download --job basic
 uv run centric-api download --dry-run
 uv run centric-api download --sync
 uv run centric-api download --rebuild
@@ -173,7 +173,7 @@ Non-dry-run downloads use `CENTRIC_API_HOME/download.lock`. They write files und
 
 ```bash
 uv run centric-api bundle
-uv run centric-api bundle run --job ss26-style-techpacks
+uv run centric-api bundle run --job basic
 uv run centric-api bundle run --dry-run
 uv run centric-api bundle run --no-zip
 uv run centric-api bundle list
@@ -298,7 +298,8 @@ Options:
 - `--db PATH`: SQLite cache for `check` or `run`.
 - `--json`: machine-readable output.
 
-Pass `--models-dir` and `--units-config` before the model action.
+Group config flags such as `--models-dir` and `--units-config` may be passed before or after the
+model action.
 
 See [Modeling](modeling.md) for the private model interface.
 

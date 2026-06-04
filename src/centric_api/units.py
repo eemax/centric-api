@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from .config import ConfigError, runtime_home
+from .config import ConfigError, read_config_text, runtime_home
 
 DEFAULT_UNITS_CONFIG_PATH = Path("config/units.yml")
 PRIVATE_UNITS_CONFIG_PATH = Path("units.yml")
@@ -219,9 +219,8 @@ def decimal_json_value(value: Decimal) -> int | float:
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"Units config not found: {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = read_config_text(path, missing_message="Units config not found: {path}")
+    payload = yaml.safe_load(text)
     if not isinstance(payload, dict):
         raise ConfigError("Units config root must be an object.")
     return payload

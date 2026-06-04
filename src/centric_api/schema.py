@@ -6,7 +6,12 @@ from typing import Any
 
 import yaml
 
-from .config import ConfigError, resolve_optional_private_config_path
+from .config import (
+    ConfigError,
+    default_config_exists,
+    read_config_text,
+    resolve_optional_private_config_path,
+)
 
 DEFAULT_ENDPOINT_SCHEMA_PATH = Path("config/endpoint-schema.yml")
 PRIVATE_ENDPOINT_SCHEMA_PATH = Path("endpoint-schema.yml")
@@ -65,7 +70,7 @@ DEFAULT_ENDPOINT_SCHEMAS: dict[str, EndpointSchema] = {
 
 def load_endpoint_schemas(path: Path | None = None) -> dict[str, EndpointSchema]:
     schemas = dict(DEFAULT_ENDPOINT_SCHEMAS)
-    if DEFAULT_ENDPOINT_SCHEMA_PATH.is_file():
+    if default_config_exists(DEFAULT_ENDPOINT_SCHEMA_PATH):
         schemas = _apply_endpoint_schema_file(schemas, DEFAULT_ENDPOINT_SCHEMA_PATH)
 
     overlay_path = (
@@ -84,7 +89,11 @@ def _apply_endpoint_schema_file(
     schemas: dict[str, EndpointSchema],
     resolved_path: Path,
 ) -> dict[str, EndpointSchema]:
-    payload = yaml.safe_load(resolved_path.read_text(encoding="utf-8")) or {}
+    text = read_config_text(
+        resolved_path,
+        missing_message="Endpoint schema file not found: {path}",
+    )
+    payload = yaml.safe_load(text) or {}
     if not isinstance(payload, dict):
         raise ConfigError(f"Endpoint schema root must be an object: {resolved_path}")
     _reject_unknown_keys(payload, ROOT_CONFIG_KEYS, f"Endpoint schema {resolved_path}")

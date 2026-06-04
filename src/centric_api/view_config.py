@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 import yaml
 
-from .config import ConfigError, runtime_home, runtime_path
+from .config import ConfigError, read_config_text, runtime_home, runtime_path
 
 DEFAULT_VIEW_CONFIG_PATH = Path("config/views.yml")
 PRIVATE_VIEW_CONFIG_PATH = Path("views.yml")
@@ -169,9 +169,8 @@ def select_view(config: ViewConfig, name: str) -> ViewDefinition:
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"View config not found: {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = read_config_text(path, missing_message="View config not found: {path}")
+    payload = yaml.safe_load(text)
     if not isinstance(payload, dict):
         raise ConfigError("View config root must be an object.")
     return payload

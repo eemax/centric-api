@@ -27,6 +27,15 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/centric_api"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"config/bundle.yml" = "centric_api/default_config/bundle.yml"
+"config/download.yml" = "centric_api/default_config/download.yml"
+"config/endpoint-schema.yml" = "centric_api/default_config/endpoint-schema.yml"
+"config/fetcher.yml" = "centric_api/default_config/fetcher.yml"
+"config/load.yml" = "centric_api/default_config/load.yml"
+"config/units.yml" = "centric_api/default_config/units.yml"
+"config/views.yml" = "centric_api/default_config/views.yml"
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterable
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from .models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig
 HOME_ENV_VAR = "CENTRIC_API_HOME"
 DEFAULT_HOME = Path.home() / ".centric-api"
 LOCAL_ENV_CONFIG_PATH = Path("local.env")
+DEFAULT_CONFIG_DIR = Path("config")
+BUNDLED_DEFAULT_CONFIG_DIR = "default_config"
 FETCHER_CONFIG_KEYS = {
     "timeout",
     "retry_max_attempts",
@@ -29,28 +32,25 @@ class ConfigError(ValueError):
     pass
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
+def _load_yaml_text(text: str) -> dict[str, Any]:
     try:
         import yaml  # type: ignore
     except Exception as exc:
         raise ConfigError("YAML config requested but PyYAML is not installed.") from exc
 
-    with path.open("r", encoding="utf-8") as fh:
-        payload = yaml.safe_load(fh)
+    payload = yaml.safe_load(text)
     if not isinstance(payload, dict):
         raise ConfigError("Config file root must be an object.")
     return payload
 
 
 def _load_payload(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ConfigError(f"Config file not found: {path}")
-
+    text = read_config_text(path, missing_message="Config file not found: {path}")
     suffix = path.suffix.lower()
     if suffix == ".json":
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(text)
     elif suffix in {".yaml", ".yml"}:
-        payload = _load_yaml(path)
+        payload = _load_yaml_text(text)
     else:
         raise ConfigError("Config file must be JSON or YAML.")
 
@@ -193,6 +193,35 @@ def _reject_unknown_keys(payload: dict[str, Any], allowed: set[str], field_name:
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise ConfigError(f"{field_name} has unknown keys: {', '.join(unknown)}.")
+
+
+def read_config_text(path: Path, *, missing_message: str) -> str:
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    fallback = _default_config_text(path)
+    if fallback is not None:
+        return fallback
+    raise ConfigError(missing_message.format(path=path))
+
+
+def default_config_exists(path: Path) -> bool:
+    return path.is_file() or _default_config_text(path) is not None
+
+
+def _default_config_text(path: Path) -> str | None:
+    if path.is_absolute() or path.parent != DEFAULT_CONFIG_DIR:
+        return None
+    source_path = Path(__file__).resolve().parents[2] / path
+    if source_path.is_file():
+        return source_path.read_text(encoding="utf-8")
+    try:
+        return (
+            resources.files("centric_api")
+            .joinpath(BUNDLED_DEFAULT_CONFIG_DIR, path.name)
+            .read_text(encoding="utf-8")
+        )
+    except (FileNotFoundError, ModuleNotFoundError):
+        return None
 
 
 def resolve_private_config_path(relative_path: str | Path, path: str | Path | None = None) -> Path:

@@ -259,7 +259,7 @@ Progress lines are phase-oriented for checks and dry runs:
 [load] headers: matched=4/4 required=3/3 aliases=1 issues=0
 [load] refs: material_types matched=42 values=42 filter=available:true
 [load] validate: scanned=500 valid=500 errors=0
-[load] artifacts: /Users/max/runtime/centric-api/load/runs/... requests=500
+[load] artifacts: $CENTRIC_API_HOME/load/runs/... requests=500
 ```
 
 Real runs also print one send line per API request:

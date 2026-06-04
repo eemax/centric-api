@@ -27,10 +27,10 @@ uv run centric-api download --dry-run
 uv run centric-api download --sync
 uv run centric-api download --rebuild
 uv run centric-api bundle
-uv run centric-api bundle --job ss26-style-techpacks
+uv run centric-api bundle --job basic
 uv run centric-api bundle list
-uv run centric-api bundle show 2026-05-20T031422Z-style-bundle
-uv run centric-api bundle changelog 2026-05-20T031422Z-style-bundle
+uv run centric-api bundle show BUNDLE_RUN_ID
+uv run centric-api bundle changelog BUNDLE_RUN_ID
 uv run centric-api view list
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
