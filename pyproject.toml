@@ -35,6 +35,7 @@ packages = ["src/centric_api"]
 "config/load.yml" = "centric_api/default_config/load.yml"
 "config/units.yml" = "centric_api/default_config/units.yml"
 "config/views.yml" = "centric_api/default_config/views.yml"
+"src/centric_api/templates/endpoint-map.html" = "centric_api/templates/endpoint-map.html"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -65,6 +65,7 @@ def top_level_help(*, color: bool = False) -> str:
             command("view", "Export cache data to Excel/CSV"),
             command("validate", "Run private cache validation reports"),
             command("load", "Validate Excel rows and push data to Centric"),
+            command("map", "Generate endpoint relationship maps"),
             command("changelog", "Review changed records and actor activity"),
             command("download", "Download current document revisions"),
             command("bundle", "Package downloaded files"),

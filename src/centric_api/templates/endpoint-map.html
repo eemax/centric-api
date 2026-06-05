@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Endpoint Relationship Map</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f6f4;
+      --panel: #ffffff;
+      --ink: #202124;
+      --muted: #6c716f;
+      --line: #d8ddd9;
+      --accent: #0f766e;
+      --accent-soft: #d9f2ee;
+      --incoming: #7c3aed;
+      --incoming-soft: #efe7ff;
+      --outgoing: #0f766e;
+      --outgoing-soft: #d9f2ee;
+      --neutral-soft: #eef1ef;
+      --shadow: 0 1px 2px rgba(20, 28, 24, 0.08), 0 10px 24px rgba(20, 28, 24, 0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: center;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 { margin: 0; font-size: 22px; }
+    .meta { color: var(--muted); margin-top: 4px; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(92px, auto));
+      gap: 8px;
+    }
+    .stat {
+      min-width: 92px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fbfbf9;
+    }
+    .stat-value {
+      display: block;
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .stat-label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(240px, 300px) 1fr;
+      min-height: calc(100vh - 77px);
+    }
+    aside {
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      padding: 14px;
+      overflow: auto;
+    }
+    input {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+      margin-bottom: 10px;
+    }
+    .sidebar-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      margin: 8px 2px 10px;
+      text-transform: uppercase;
+    }
+    button {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      padding: 8px 9px;
+      border-radius: 6px;
+      cursor: pointer;
+      font: inherit;
+      color: var(--ink);
+    }
+    button:hover, button.active { background: var(--accent-soft); }
+    .endpoint-button {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .endpoint-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .endpoint-count {
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    section { padding: 18px 22px; overflow: auto; }
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 14px;
+    }
+    .selected h2 { margin: 0; font-size: 22px; }
+    .selected span { color: var(--muted); display: block; margin-top: 3px; }
+    .toggle {
+      display: inline-flex;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .toggle button {
+      width: auto;
+      min-width: 76px;
+      text-align: center;
+      padding: 7px 10px;
+    }
+    .toggle button.active {
+      color: #ffffff;
+      background: var(--accent);
+    }
+    .inspector {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .metric strong {
+      display: block;
+      font-size: 22px;
+      line-height: 1.1;
+      margin-bottom: 5px;
+    }
+    .metric span { color: var(--muted); }
+    svg {
+      width: 100%;
+      height: 460px;
+      display: block;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    .node circle { fill: white; stroke: var(--line); stroke-width: 2; }
+    .node.active circle {
+      stroke: var(--accent);
+      stroke-width: 4;
+      fill: var(--accent-soft);
+    }
+    .node.related circle { stroke: #8ea19a; fill: #fbfbf9; }
+    .node text { font-size: 12px; text-anchor: middle; dominant-baseline: middle; }
+    .edge {
+      stroke: #a9afad;
+      stroke-width: 1.4;
+      opacity: 0.45;
+      fill: none;
+      marker-end: url(#arrow);
+    }
+    .edge.outgoing { stroke: var(--outgoing); stroke-width: 2.4; opacity: 0.95; }
+    .edge.incoming { stroke: var(--incoming); stroke-width: 2.4; opacity: 0.95; }
+    .edge.hidden { display: none; }
+    .table-wrap {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    th { color: var(--muted); font-weight: 600; background: #fbfbf9; }
+    tbody tr:hover { background: #fbfbf9; }
+    tr:last-child td { border-bottom: 0; }
+    .pill {
+      display: inline-block;
+      min-width: 74px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      text-align: center;
+    }
+    .pill.outgoing { color: var(--outgoing); background: var(--outgoing-soft); }
+    .pill.incoming { color: var(--incoming); background: var(--incoming-soft); }
+    .pill.neutral { color: var(--muted); background: var(--neutral-soft); }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .empty {
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 760px) {
+      header { display: block; }
+      .stats { margin-top: 12px; }
+      main { grid-template-columns: 1fr; }
+      aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 280px; }
+      .toolbar { display: block; }
+      .toggle { margin-top: 12px; width: 100%; }
+      .toggle button { flex: 1; min-width: 0; }
+      .inspector { grid-template-columns: 1fr; }
+      svg { height: 360px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Endpoint Relationship Map</h1>
+      <div class="meta">Generated from local cached endpoint records &middot; run __RUN_ID__</div>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <span class="stat-value">__ENDPOINT_COUNT__</span>
+        <span class="stat-label">Endpoints</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value">__RELATIONSHIP_COUNT__</span>
+        <span class="stat-label">Relationships</span>
+      </div>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <input id="search" placeholder="Search endpoints">
+      <div class="sidebar-title">Endpoints</div>
+      <div id="endpoint-list"></div>
+    </aside>
+    <section>
+      <div class="toolbar">
+        <div class="selected">
+          <h2 id="selected-name">All endpoints</h2>
+          <span id="selected-meta"></span>
+        </div>
+        <div class="toggle" aria-label="Relationship filter">
+          <button id="mode-all" class="active" data-mode="all">All</button>
+          <button id="mode-outgoing" data-mode="outgoing">Outgoing</button>
+          <button id="mode-incoming" data-mode="incoming">Incoming</button>
+        </div>
+      </div>
+      <div class="inspector">
+        <div class="metric">
+          <strong id="metric-total">0</strong>
+          <span>Visible relationships</span>
+        </div>
+        <div class="metric">
+          <strong id="metric-outgoing">0</strong>
+          <span>Outgoing</span>
+        </div>
+        <div class="metric">
+          <strong id="metric-incoming">0</strong>
+          <span>Incoming</span>
+        </div>
+      </div>
+      <svg id="graph" role="img" aria-label="Endpoint relationship graph"></svg>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Direction</th><th>Source</th><th>Field</th><th>Target</th></tr>
+          </thead>
+          <tbody id="relationship-rows"></tbody>
+        </table>
+        <div id="empty-state" class="empty" hidden>No relationships to show.</div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const endpoints = __ENDPOINTS_JSON__;
+    const relationships = __RELATIONSHIPS_JSON__;
+    let selected = null;
+
+    const list = document.getElementById('endpoint-list');
+    const search = document.getElementById('search');
+    const selectedName = document.getElementById('selected-name');
+    const selectedMeta = document.getElementById('selected-meta');
+    const rows = document.getElementById('relationship-rows');
+    const svg = document.getElementById('graph');
+    const emptyState = document.getElementById('empty-state');
+    const metricTotal = document.getElementById('metric-total');
+    const metricOutgoing = document.getElementById('metric-outgoing');
+    const metricIncoming = document.getElementById('metric-incoming');
+    const modeButtons = Array.from(document.querySelectorAll('.toggle button'));
+    let mode = 'all';
+
+    function endpointDegree(endpoint) {
+      return relationships.filter(
+        r => r.source_endpoint === endpoint || r.target_endpoint === endpoint
+      ).length;
+    }
+
+    function renderList() {
+      const query = search.value.trim().toLowerCase();
+      list.innerHTML = '';
+      endpoints
+        .filter(endpoint => endpoint.toLowerCase().includes(query))
+        .forEach(endpoint => {
+          const button = document.createElement('button');
+          button.innerHTML = [
+            `<span class="endpoint-name">${escapeHtml(endpoint)}</span>`,
+            `<span class="endpoint-count">${endpointDegree(endpoint)}</span>`,
+          ].join('');
+          button.title = endpoint;
+          button.className = endpoint === selected ? 'active' : '';
+          button.classList.add('endpoint-button');
+          button.onclick = () => {
+            selected = selected === endpoint ? null : endpoint;
+            render();
+          };
+          list.appendChild(button);
+        });
+    }
+
+    function visibleRelationships() {
+      if (!selected) return relationships;
+      return relationships.filter(
+        r => r.source_endpoint === selected || r.target_endpoint === selected
+      );
+    }
+
+    function filteredRelationships() {
+      return visibleRelationships().filter(item => {
+        if (!selected || mode === 'all') return true;
+        if (mode === 'outgoing') return item.source_endpoint === selected;
+        return item.target_endpoint === selected;
+      });
+    }
+
+    function relationshipDirection(item) {
+      if (!selected) return 'neutral';
+      if (item.source_endpoint === selected && item.target_endpoint === selected) return 'neutral';
+      if (item.source_endpoint === selected) return 'outgoing';
+      if (item.target_endpoint === selected) return 'incoming';
+      return 'neutral';
+    }
+
+    function renderTable() {
+      rows.innerHTML = '';
+      const items = filteredRelationships();
+      emptyState.hidden = items.length > 0;
+      items.forEach(item => {
+        const direction = relationshipDirection(item);
+        const row = document.createElement('tr');
+        row.innerHTML = [
+          `<td><span class="pill ${direction}">${direction}</span></td>`,
+          `<td><code>${escapeHtml(item.source_endpoint)}</code></td>`,
+          `<td><code>${escapeHtml(item.source_path)}</code></td>`,
+          `<td><code>${escapeHtml(item.target_endpoint)}</code></td>`,
+        ].join('');
+        rows.appendChild(row);
+      });
+    }
+
+    function renderGraph() {
+      const width = svg.clientWidth || 900;
+      const height = svg.clientHeight || 460;
+      const radius = Math.max(130, Math.min(width, height) * 0.36);
+      const cx = width / 2;
+      const cy = height / 2;
+      svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      svg.innerHTML = [
+        '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"',
+        ' markerWidth="6" markerHeight="6" orient="auto-start-reverse">',
+        '<path d="M 0 0 L 10 5 L 0 10 z" fill="#7a807d"></path>',
+        '</marker></defs>',
+      ].join('');
+      const related = new Set();
+      if (selected) {
+        related.add(selected);
+        visibleRelationships().forEach(r => {
+          related.add(r.source_endpoint);
+          related.add(r.target_endpoint);
+        });
+      } else {
+        endpoints.forEach(endpoint => related.add(endpoint));
+      }
+      const nodes = endpoints.filter(endpoint => related.has(endpoint));
+      const positions = new Map();
+      nodes.forEach((endpoint, index) => {
+        const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1) - Math.PI / 2;
+        positions.set(endpoint, {
+          x: cx + Math.cos(angle) * radius,
+          y: cy + Math.sin(angle) * radius,
+        });
+      });
+      const filtered = new Set(filteredRelationships());
+      visibleRelationships().forEach(item => {
+        const a = positions.get(item.source_endpoint);
+        const b = positions.get(item.target_endpoint);
+        if (!a || !b) return;
+        const direction = relationshipDirection(item);
+        const isHidden = !filtered.has(item);
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const mx = (a.x + b.x) / 2 - dy * 0.08;
+        const my = (a.y + b.y) / 2 + dx * 0.08;
+        path.setAttribute('d', `M ${a.x} ${a.y} Q ${mx} ${my} ${b.x} ${b.y}`);
+        path.setAttribute(
+          'class',
+          [
+            'edge',
+            direction,
+            isHidden ? 'hidden' : '',
+          ].join(' ')
+        );
+        path.appendChild(
+          title(`${item.source_endpoint}.${item.source_path} -> ${item.target_endpoint}`)
+        );
+        svg.appendChild(path);
+      });
+      nodes.forEach(endpoint => {
+        const pos = positions.get(endpoint);
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        const isRelated = selected && endpoint !== selected && related.has(endpoint);
+        group.setAttribute(
+          'class',
+          ['node', endpoint === selected ? 'active' : '', isRelated ? 'related' : ''].join(' ')
+        );
+        group.style.cursor = 'pointer';
+        group.onclick = () => {
+          selected = selected === endpoint ? null : endpoint;
+          render();
+        };
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', pos.x);
+        circle.setAttribute('cy', pos.y);
+        circle.setAttribute('r', 36);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', pos.x);
+        text.setAttribute('y', pos.y);
+        text.textContent = endpoint.length > 18 ? endpoint.slice(0, 16) + '...' : endpoint;
+        group.appendChild(circle);
+        group.appendChild(text);
+        group.appendChild(title(endpoint));
+        svg.appendChild(group);
+      });
+    }
+
+    function renderMetrics() {
+      const visible = visibleRelationships();
+      const outgoing = selected
+        ? visible.filter(item => item.source_endpoint === selected).length
+        : visible.length;
+      const incoming = selected
+        ? visible.filter(item => item.target_endpoint === selected).length
+        : visible.length;
+      metricTotal.textContent = filteredRelationships().length;
+      metricOutgoing.textContent = outgoing;
+      metricIncoming.textContent = incoming;
+    }
+
+    function renderModeButtons() {
+      if (!selected) mode = 'all';
+      modeButtons.forEach(button => {
+        button.classList.toggle('active', button.dataset.mode === mode);
+        button.disabled = !selected && button.dataset.mode !== 'all';
+      });
+    }
+
+    function title(value) {
+      const node = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      node.textContent = value;
+      return node;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(
+        /[&<>"']/g,
+        ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch])
+      );
+    }
+
+    function render() {
+      selectedName.textContent = selected || 'All endpoints';
+      selectedMeta.textContent = selected
+        ? `${visibleRelationships().length} relationships connected to this endpoint`
+        : 'Showing the full inferred relationship map';
+      renderModeButtons();
+      renderList();
+      renderMetrics();
+      renderTable();
+      renderGraph();
+    }
+
+    search.addEventListener('input', renderList);
+    modeButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        mode = button.dataset.mode;
+        render();
+      });
+    });
+    window.addEventListener('resize', renderGraph);
+    render();
+  </script>
+</body>
+</html>

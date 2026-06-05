@@ -425,6 +425,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_run_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
+    map_parser = subparsers.add_parser("map", help="Generate local cache relationship maps")
+    map_actions = map_parser.add_subparsers(dest="action", required=True)
+
+    map_endpoints_parser = map_actions.add_parser(
+        "endpoints",
+        help="Map inferred endpoint references from the local cache",
+    )
+    map_endpoints_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    map_endpoints_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Endpoint map artifact root directory.",
+    )
+    map_endpoints_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
     units_parser = subparsers.add_parser("units", help="Inspect and convert configured units")
     units_parser.add_argument(
         "--units-config", metavar="PATH", default=None, help="Units config path."

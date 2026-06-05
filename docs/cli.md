@@ -18,7 +18,7 @@ command:
   `view show --json`, `view check --json`, `view export --json`, `load show --json`,
   `load check --json`, `load run --json`, `load retry --json`, `model show --json`,
   `model check --json`, `model run --json`, `validate show --json`,
-  `validate run NAME --json`, and units commands emit one JSON object.
+  `validate run NAME --json`, `map endpoints --json`, and units commands emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used. Group config
 flags such as `--load-config`, `--models-dir`, `--validators-dir`, and `--units-config` can be
@@ -96,6 +96,26 @@ Useful options:
 Fetch uses `CENTRIC_API_HOME/fetch.lock`. A successful fetch writes a run manifest alongside raw
 files. The process exits nonzero if any selected endpoint fails or the ingest/changelog pipeline
 fails.
+
+## Map
+
+```bash
+uv run centric-api map endpoints
+uv run centric-api map endpoints --output-dir /path/to/maps
+uv run centric-api map endpoints --json
+```
+
+`map endpoints` inspects cached endpoint payloads and infers references by matching payload values
+to cached record IDs. It writes all artifacts for the run:
+
+```text
+CENTRIC_API_HOME/maps/endpoints/{run_id}/relationships.json
+CENTRIC_API_HOME/maps/endpoints/{run_id}/endpoint-map.md
+CENTRIC_API_HOME/maps/endpoints/{run_id}/endpoint-map.html
+```
+
+The Markdown file is intended as a compact agent-readable map. The HTML file is a static local
+explorer for inspecting incoming and outgoing endpoint relationships.
 
 ## Changelog
 
