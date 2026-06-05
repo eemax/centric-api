@@ -99,6 +99,10 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  product_sources:
+    delete_when_any:
+      - field: active
+        equals: false
   documents:
     delete_when_any:
       - field: active

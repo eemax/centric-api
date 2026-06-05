@@ -60,6 +60,7 @@ DEFAULT_ENDPOINT_SCHEMAS: dict[str, EndpointSchema] = {
         "lookup_item_subtypes",
         "material_types",
         "style_types",
+        "product_sources",
         "documents",
         "document_revisions",
         "duty_rates",

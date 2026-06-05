@@ -113,12 +113,14 @@ def test_default_configs_load_outside_repo_root(
     assert fetcher_cfg.output_dir == tmp_path / "home" / "raw"
     assert auth_settings.env_file == tmp_path / "home" / "local.env"
     assert endpoints
+    assert "product_sources" in {endpoint.name for endpoint in endpoints}
     assert download_config.jobs
     assert bundle_config.bundles
     assert view_config.views
     assert load_config.jobs
     assert units.dimensions
     assert "styles" in endpoint_schemas
+    assert "product_sources" in endpoint_schemas
 
 
 def test_load_fetcher_settings_runtime_defaults(

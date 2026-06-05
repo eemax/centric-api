@@ -131,6 +131,11 @@ endpoints:
     path: style_types
     count_spec:
       path: count/StyleType
+  - name: product_sources
+    api_version: v2
+    path: product_sources
+    count_spec:
+      path: count/ProductSource
   - name: documents
     api_version: v2
     path: documents
