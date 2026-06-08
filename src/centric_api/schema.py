@@ -44,6 +44,7 @@ DEFAULT_ENDPOINT_SCHEMAS: dict[str, EndpointSchema] = {
         "seasons",
         "materials",
         "bom_masters",
+        "bom_subtypes",
         "boms",
         "bom_sections",
         "bom_lines",

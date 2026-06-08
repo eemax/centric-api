@@ -74,6 +74,13 @@ endpoints:
     last_attempted_error:
     last_successful_fetch_start: "2026-01-01T00:21:00.000Z"
     last_successful_fetch_end: "2026-01-01T00:24:00.000Z"
+  bom_subtypes:
+    last_attempted_fetch_start: "2026-01-01T00:24:00.000Z"
+    last_attempted_fetch_end: "2026-01-01T00:25:00.000Z"
+    last_attempted_status: OK
+    last_attempted_error:
+    last_successful_fetch_start: "2026-01-01T00:24:00.000Z"
+    last_successful_fetch_end: "2026-01-01T00:25:00.000Z"
   boms:
     last_attempted_fetch_start: "2026-01-01T00:24:00.000Z"
     last_attempted_fetch_end: "2026-01-01T00:34:00.000Z"

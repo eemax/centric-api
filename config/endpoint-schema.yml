@@ -35,6 +35,10 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  bom_subtypes:
+    delete_when_any:
+      - field: active
+        equals: false
   boms:
     delete_when_any:
       - field: active

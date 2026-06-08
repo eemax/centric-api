@@ -114,6 +114,9 @@ def test_default_configs_load_outside_repo_root(
     assert auth_settings.env_file == tmp_path / "home" / "local.env"
     assert endpoints
     assert "product_sources" in {endpoint.name for endpoint in endpoints}
+    bom_subtypes = next(endpoint for endpoint in endpoints if endpoint.name == "bom_subtypes")
+    assert bom_subtypes.path == "apparel_bom_subtypes"
+    assert bom_subtypes.count_spec.path == "count/ApparelBOMSubtype"
     assert download_config.jobs
     assert bundle_config.bundles
     assert view_config.views
@@ -121,6 +124,7 @@ def test_default_configs_load_outside_repo_root(
     assert units.dimensions
     assert "styles" in endpoint_schemas
     assert "product_sources" in endpoint_schemas
+    assert "bom_subtypes" in endpoint_schemas
 
 
 def test_load_fetcher_settings_runtime_defaults(

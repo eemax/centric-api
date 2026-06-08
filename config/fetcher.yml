@@ -51,6 +51,11 @@ endpoints:
     path: apparel_boms
     count_spec:
       path: count/ApparelBOM
+  - name: bom_subtypes
+    api_version: v2
+    path: apparel_bom_subtypes
+    count_spec:
+      path: count/ApparelBOMSubtype
   - name: boms
     api_version: v3
     path: apparel_bom_revisions
