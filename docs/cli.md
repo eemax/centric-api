@@ -289,6 +289,7 @@ uv run centric-api load show material-create
 uv run centric-api load check material-create materials.xlsx
 uv run centric-api load check material-create materials.xlsx --sheet Materials
 uv run centric-api load check material-composition-create material-compositions.xlsx
+uv run centric-api load run style-bom-load style-bom-lines.xlsx --dry-run
 uv run centric-api load run material-create materials.xlsx --dry-run
 uv run centric-api load run material-create materials.xlsx --yes
 uv run centric-api load retry material-create review.xlsx --dry-run
@@ -300,10 +301,11 @@ uv run centric-api load retry material-create review.xlsx --yes
 `material_types`, and posts valid rows to `/v2/materials`. The bundled
 `material-composition-create` job accepts either
 material IDs or material codes, parses natural-language composition text, and posts technical
-compositions to `/v2/materials/{material}/technical_compositions`. If `--sheet` is omitted, the
-first worksheet is used. Real runs write a review workbook when rows receive API outcomes or
-validation errors; `retry` processes rows in a review workbook with `_cent_load_status` of `failed`
-or `validation_error`.
+compositions to `/v2/materials/{material}/technical_compositions`. The bundled `style-bom-load`
+workflow validates a style within a season, then chains BOM header creation, owned section creation,
+and material line creation from one workbook. If `--sheet` is omitted, the first worksheet is used.
+Real runs write a review workbook when rows receive API outcomes or validation errors; `retry`
+processes rows in a review workbook with `_cent_load_status` of `failed` or `validation_error`.
 
 `load list` shows whether each job is `bundled`, `private`, or `explicit`. Private jobs from
 `CENTRIC_API_HOME/load.yml` replace bundled jobs with the same name.

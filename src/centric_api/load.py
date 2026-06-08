@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 
 from .auth import AuthContext
 from .config import ConfigError, runtime_path
-from .load_config import LoadColumn, LoadConfig, LoadJob, LoadResolve
+from .load_config import LoadColumn, LoadConfig, LoadJob, LoadResolve, LoadScope
 from .store import connect_readonly, endpoint_has_cache_evidence, table_exists
 
 LOAD_RUNS_DIR = Path("load/runs")
@@ -100,6 +100,12 @@ class LoadRunResult:
     review_path: Path | None
     started_at: str
     finished_at: str
+
+
+@dataclass(frozen=True)
+class StyleBomRow:
+    row: int
+    values: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -321,6 +327,607 @@ def run_load(
     return result
 
 
+def materialize_style_bom_workflow(
+    db_path: Path,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None = None,
+    limit: int | None = None,
+    mode: str = "check",
+    retry_statuses: set[str] | None = None,
+    progress_callback: LoadProgressCallback | None = None,
+) -> LoadMaterialized:
+    parsed = _style_bom_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+    )
+    requests = _style_bom_planned_requests(parsed["rows"])
+    _emit_progress(
+        progress_callback,
+        {
+            "event": "load_validate",
+            "scanned": parsed["rows_scanned"],
+            "valid": len(parsed["rows"]),
+            "errors": parsed["error_rows"],
+        },
+    )
+    return LoadMaterialized(
+        job_name=job.name,
+        title=job.title,
+        workbook_path=Path(workbook_path).expanduser(),
+        sheet=str(parsed["sheet"]),
+        header_row=job.input.header_row,
+        rows_scanned=int(parsed["rows_scanned"]),
+        valid_rows=len(parsed["rows"]),
+        error_rows=int(parsed["error_rows"]),
+        issues=tuple(parsed["issues"]),
+        requests=tuple(requests),
+    )
+
+
+def run_style_bom_workflow(
+    db_path: Path,
+    config: LoadConfig,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    dry_run: bool,
+    yes: bool,
+    retry_statuses: set[str] | None = None,
+    materialized: LoadMaterialized | None = None,
+    auth_ctx: AuthContext | None = None,
+    progress_callback: LoadProgressCallback | None = None,
+) -> LoadRunResult:
+    if not dry_run and not yes:
+        raise ConfigError("Non-dry-run load requires --yes.")
+    mode = (
+        "retry-dry-run"
+        if retry_statuses and dry_run
+        else ("retry" if retry_statuses else ("dry-run" if dry_run else "run"))
+    )
+    parsed = _style_bom_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+    )
+    started_at = _utc_iso()
+    run_id = _run_id(job.name)
+    run_dir = runtime_path(LOAD_RUNS_DIR / run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    materialized = materialized or LoadMaterialized(
+        job_name=job.name,
+        title=job.title,
+        workbook_path=Path(workbook_path).expanduser(),
+        sheet=str(parsed["sheet"]),
+        header_row=job.input.header_row,
+        rows_scanned=int(parsed["rows_scanned"]),
+        valid_rows=len(parsed["rows"]),
+        error_rows=int(parsed["error_rows"]),
+        issues=tuple(parsed["issues"]),
+        requests=tuple(_style_bom_planned_requests(parsed["rows"])),
+    )
+    requests = list(materialized.requests)
+    responses: list[LoadResponse] = []
+    issues = list(materialized.issues)
+    workflow_issues: list[LoadIssue] = []
+    if dry_run:
+        _write_requests(run_dir / "requests.jsonl", tuple(requests))
+    else:
+        if parsed["rows"] and auth_ctx is None:
+            raise ConfigError("Load run requires an auth context.")
+        requests = []
+        responses = []
+        if parsed["rows"]:
+            workflow_issues = _execute_style_bom_workflow(
+                auth_ctx,
+                parsed["rows"],
+                requests=requests,
+                responses=responses,
+                progress_callback=progress_callback,
+            )
+            issues.extend(workflow_issues)
+        _write_requests(run_dir / "requests.jsonl", tuple(requests))
+        _write_responses(run_dir / "responses.jsonl", tuple(responses))
+    _emit_progress(
+        progress_callback,
+        {
+            "event": "load_artifacts",
+            "run_dir": str(run_dir),
+            "requests": len(requests),
+        },
+    )
+
+    finished_at = _utc_iso()
+    materialized = LoadMaterialized(
+        job_name=job.name,
+        title=job.title,
+        workbook_path=Path(workbook_path).expanduser(),
+        sheet=str(parsed["sheet"]),
+        header_row=job.input.header_row,
+        rows_scanned=int(parsed["rows_scanned"]),
+        valid_rows=len(parsed["rows"]),
+        error_rows=int(parsed["error_rows"]) + len(workflow_issues if not dry_run else ()),
+        issues=tuple(issues),
+        requests=tuple(requests),
+    )
+    review_path = None
+    if responses or _has_row_issues(materialized.issues):
+        review_path = _write_review_workbook(
+            materialized,
+            responses=tuple(responses),
+            run_id=run_id,
+            processed_at=finished_at,
+            output_path=run_dir / REVIEW_WORKBOOK_NAME,
+        )
+    result = LoadRunResult(
+        run_id=run_id,
+        job_name=job.name,
+        title=job.title,
+        mode=mode,
+        dry_run=dry_run,
+        workbook_path=Path(workbook_path).expanduser(),
+        sheet=str(parsed["sheet"]),
+        rows_scanned=int(parsed["rows_scanned"]),
+        valid_rows=len(parsed["rows"]),
+        error_rows=int(parsed["error_rows"]),
+        request_count=len(requests),
+        success_count=sum(1 for response in responses if response.ok),
+        failure_count=sum(1 for response in responses if not response.ok),
+        issues=tuple(issues),
+        requests=tuple(requests),
+        responses=tuple(responses),
+        run_dir=run_dir,
+        review_path=review_path,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+    _write_summary(run_dir / "summary.json", result, config)
+    return result
+
+
+def _style_bom_rows(
+    db_path: Path,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    mode: str,
+    retry_statuses: set[str] | None,
+    progress_callback: LoadProgressCallback | None,
+) -> dict[str, Any]:
+    _require_style_bom_columns(job)
+    workbook_path = workbook_path.expanduser()
+    if not workbook_path.is_file():
+        raise FileNotFoundError(f"Workbook not found: {workbook_path}")
+    section_names = _style_bom_section_names(db_path)
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    try:
+        worksheet = _select_sheet(workbook, sheet)
+        _emit_progress(
+            progress_callback,
+            {
+                "event": "load_planning",
+                "job": job.name,
+                "mode": mode,
+                "workbook": str(workbook_path),
+                "sheet": worksheet.title,
+            },
+        )
+        header_map, header_issues, header_stats = _map_headers(job, worksheet)
+        retry_status_index = _retry_status_index(
+            worksheet,
+            job.input.header_row,
+            retry_statuses=retry_statuses,
+        )
+        _emit_progress(
+            progress_callback,
+            {
+                "event": "load_headers",
+                "matched": header_stats["matched"],
+                "columns": len(job.columns),
+                "required_matched": header_stats["required_matched"],
+                "required": header_stats["required"],
+                "aliases": header_stats["aliases"],
+                "issues": len(header_issues),
+            },
+        )
+        reference_indexes = _build_reference_indexes(
+            db_path,
+            job,
+            progress_callback=progress_callback,
+        )
+        value_set_indexes = _build_value_set_indexes(
+            job,
+            progress_callback=progress_callback,
+        )
+        rows: list[StyleBomRow] = []
+        issues: list[LoadIssue] = list(header_issues)
+        rows_scanned = 0
+        error_rows = 0
+        if not header_issues:
+            for row_number, row_values in _iter_data_rows(worksheet, job.input.header_row):
+                if not _include_retry_row(row_values, retry_status_index, retry_statuses):
+                    continue
+                if limit is not None and rows_scanned >= limit:
+                    break
+                rows_scanned += 1
+                values, row_issues = _row_values(
+                    job,
+                    row_number=row_number,
+                    row_values=row_values,
+                    header_map=header_map,
+                    reference_indexes=reference_indexes,
+                    value_set_indexes=value_set_indexes,
+                )
+                section_name = values.get("section")
+                if not _is_blank(section_name) and str(section_name) not in section_names:
+                    row_issues.append(
+                        LoadIssue(
+                            row=row_number,
+                            code="bom_section_not_found",
+                            column="section",
+                            message=(
+                                f"Section {section_name!r} was not found exactly in "
+                                "bom_sections.node_name."
+                            ),
+                        )
+                    )
+                if row_issues:
+                    error_rows += 1
+                    issues.extend(row_issues)
+                    continue
+                rows.append(StyleBomRow(row=row_number, values=values))
+        return {
+            "sheet": worksheet.title,
+            "rows_scanned": rows_scanned,
+            "error_rows": error_rows,
+            "issues": issues,
+            "rows": tuple(rows),
+        }
+    finally:
+        workbook.close()
+
+
+def _require_style_bom_columns(job: LoadJob) -> None:
+    required = {
+        "season",
+        "style",
+        "node_name",
+        "description",
+        "subtype",
+        "section",
+        "pm_id",
+        "qty_default",
+        "actual",
+    }
+    present = {column.key for column in job.columns}
+    missing = sorted(required - present)
+    if missing:
+        raise ConfigError(
+            f"load job[{job.name}] workflow style_bom is missing columns: "
+            f"{', '.join(missing)}."
+        )
+
+
+def _style_bom_section_names(db_path: Path) -> set[str]:
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_records"):
+            raise ConfigError(
+                "BOM load requires endpoint_records. Run fetch first."
+            )
+        if not endpoint_has_cache_evidence(conn, "bom_sections"):
+            raise ConfigError(
+                "BOM load requires cached endpoint records for: bom_sections. "
+                "Run centric-api fetch --endpoint bom_sections first."
+            )
+        rows = conn.execute(
+            """
+            SELECT payload_json
+            FROM endpoint_records
+            WHERE endpoint = 'bom_sections'
+            ORDER BY record_id
+            """
+        ).fetchall()
+    names: set[str] = set()
+    for row in rows:
+        payload = _json_dict(row["payload_json"])
+        if payload.get("active") is not True or payload.get("ad_hoc") is not False:
+            continue
+        value = payload.get("node_name")
+        if not _is_blank(value):
+            names.add(str(value))
+    return names
+
+
+def _style_bom_groups(rows: tuple[StyleBomRow, ...]) -> list[list[StyleBomRow]]:
+    groups: dict[tuple[str, str, str, str], list[StyleBomRow]] = {}
+    for row in rows:
+        values = row.values
+        key = (
+            str(values["style"]),
+            str(values["node_name"]),
+            str(values.get("description") or ""),
+            str(values["subtype"]),
+        )
+        groups.setdefault(key, []).append(row)
+    return list(groups.values())
+
+
+def _style_bom_planned_requests(rows: tuple[StyleBomRow, ...]) -> tuple[LoadRequest, ...]:
+    requests: list[LoadRequest] = []
+    for group in _style_bom_groups(rows):
+        first = group[0]
+        requests.append(_style_bom_header_request(first))
+        for section_name in _style_bom_unique_sections(group):
+            requests.append(
+                LoadRequest(
+                    row=_style_bom_first_section_row(group, section_name),
+                    method="POST",
+                    path=(
+                        "/v2/apparel_bom_revisions/DRY-RUN-REVISION/"
+                        "owned_sections/bom_section_definition"
+                    ),
+                    body={"node_name": section_name},
+                )
+            )
+        for row in group:
+            requests.append(
+                _style_bom_line_request(
+                    row,
+                    revision_id="DRY-RUN-REVISION",
+                    section_id=f"DRY-RUN-SECTION-{_slug(str(row.values['section']))}",
+                )
+            )
+    return tuple(requests)
+
+
+def _execute_style_bom_workflow(
+    auth_ctx: AuthContext,
+    rows: tuple[StyleBomRow, ...],
+    *,
+    requests: list[LoadRequest],
+    responses: list[LoadResponse],
+    progress_callback: LoadProgressCallback | None,
+) -> list[LoadIssue]:
+    issues: list[LoadIssue] = []
+    groups = _style_bom_groups(rows)
+    total = sum(1 + len(_style_bom_unique_sections(group)) + len(group) for group in groups)
+    index = 0
+    for group in groups:
+        first = group[0]
+        header_request = _style_bom_header_request(first)
+        index += 1
+        header_response = _execute_style_bom_request(
+            auth_ctx,
+            header_request,
+            index=index,
+            total=total,
+            requests=requests,
+            responses=responses,
+            progress_callback=progress_callback,
+        )
+        if not header_response.ok:
+            issues.extend(
+                _style_bom_group_issues(group, "bom_header_failed", "BOM header request failed.")
+            )
+            continue
+        revision_id = _response_field(header_response, "latest_revision") or _response_field(
+            header_response,
+            "current_revision",
+        )
+        if _is_blank(revision_id):
+            issues.extend(
+                _style_bom_group_issues(
+                    group,
+                    "bom_revision_missing",
+                    "BOM header response did not include latest_revision or current_revision.",
+                )
+            )
+            continue
+
+        section_ids: dict[str, str] = {}
+        for section_name in _style_bom_unique_sections(group):
+            section_request = LoadRequest(
+                row=_style_bom_first_section_row(group, section_name),
+                method="POST",
+                path=(
+                    f"/v2/apparel_bom_revisions/{revision_id}/"
+                    "owned_sections/bom_section_definition"
+                ),
+                body={"node_name": section_name},
+            )
+            index += 1
+            section_response = _execute_style_bom_request(
+                auth_ctx,
+                section_request,
+                index=index,
+                total=total,
+                requests=requests,
+                responses=responses,
+                progress_callback=progress_callback,
+            )
+            section_id = _response_field(section_response, "id")
+            if not section_response.ok or _is_blank(section_id):
+                issues.extend(
+                    LoadIssue(
+                        row=row.row,
+                        code="bom_section_create_failed",
+                        column="section",
+                        message=f"Could not create BOM section {section_name!r}.",
+                    )
+                    for row in group
+                    if str(row.values["section"]) == section_name
+                )
+                continue
+            section_ids[section_name] = str(section_id)
+
+        for row in group:
+            section_id = section_ids.get(str(row.values["section"]))
+            if section_id is None:
+                continue
+            line_request = _style_bom_line_request(
+                row,
+                revision_id=str(revision_id),
+                section_id=section_id,
+            )
+            index += 1
+            line_response = _execute_style_bom_request(
+                auth_ctx,
+                line_request,
+                index=index,
+                total=total,
+                requests=requests,
+                responses=responses,
+                progress_callback=progress_callback,
+            )
+            if not line_response.ok:
+                issues.append(
+                    LoadIssue(
+                        row=row.row,
+                        code="bom_line_create_failed",
+                        message="BOM line request failed.",
+                    )
+                )
+    return issues
+
+
+def _style_bom_header_request(row: StyleBomRow) -> LoadRequest:
+    values = row.values
+    body = {
+        "node_name": values["node_name"],
+        "subtype": values["subtype"],
+    }
+    if not _is_blank(values.get("description")):
+        body["description"] = values["description"]
+    return LoadRequest(
+        row=row.row,
+        method="POST",
+        path=f"/v2/styles/{values['style']}/data_sheets/apparel_boms",
+        body=body,
+    )
+
+
+def _style_bom_line_request(
+    row: StyleBomRow,
+    *,
+    revision_id: str,
+    section_id: str,
+) -> LoadRequest:
+    values = row.values
+    return LoadRequest(
+        row=row.row,
+        method="POST",
+        path=f"/v2/apparel_bom_revisions/{revision_id}/items/part_materials",
+        body={
+            "ds_section": section_id,
+            "pm_id": values["pm_id"],
+            "qty_default": values["qty_default"],
+            "actual": values["actual"],
+        },
+    )
+
+
+def _execute_style_bom_request(
+    auth_ctx: AuthContext,
+    request: LoadRequest,
+    *,
+    index: int,
+    total: int,
+    requests: list[LoadRequest],
+    responses: list[LoadResponse],
+    progress_callback: LoadProgressCallback | None,
+) -> LoadResponse:
+    requests.append(request)
+    started = time.time()
+    try:
+        response = auth_ctx.request(
+            request.method,
+            _request_url(auth_ctx, request.path),
+            json_body=request.body,
+        )
+        status_code = response.status_code
+        body = _response_body(response)
+    except Exception as exc:
+        status_code = 0
+        body = _exception_body(exc)
+    _emit_progress(
+        progress_callback,
+        {
+            "event": "load_send",
+            "index": index,
+            "total": total,
+            "row": request.row,
+            "method": request.method,
+            "path": request.path,
+            "status_code": status_code,
+            "elapsed_seconds": time.time() - started,
+        },
+    )
+    load_response = LoadResponse(
+        row=request.row,
+        status_code=status_code,
+        ok=0 < status_code < 400,
+        body=body,
+    )
+    responses.append(load_response)
+    return load_response
+
+
+def _style_bom_unique_sections(group: list[StyleBomRow]) -> list[str]:
+    seen: set[str] = set()
+    sections: list[str] = []
+    for row in group:
+        section = str(row.values["section"])
+        if section in seen:
+            continue
+        seen.add(section)
+        sections.append(section)
+    return sections
+
+
+def _style_bom_first_section_row(group: list[StyleBomRow], section_name: str) -> int:
+    for row in group:
+        if str(row.values["section"]) == section_name:
+            return row.row
+    return group[0].row
+
+
+def _style_bom_group_issues(
+    group: list[StyleBomRow],
+    code: str,
+    message: str,
+) -> list[LoadIssue]:
+    return [LoadIssue(row=row.row, code=code, message=message) for row in group]
+
+
+def _response_field(response: LoadResponse, key: str) -> str | None:
+    if not isinstance(response.body, dict):
+        return None
+    value = response.body.get(key)
+    return None if _is_blank(value) else str(value)
+
+
+def _slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", value.strip()).strip("-")
+    return slug or "section"
+
+
 def _has_row_issues(issues: tuple[LoadIssue, ...]) -> bool:
     return any(issue.row is not None for issue in issues)
 
@@ -446,6 +1053,12 @@ def _row_values(
         if isinstance(parsed, LoadIssue):
             issues.append(parsed)
             continue
+        values[column.key] = parsed
+
+    for column in job.columns:
+        parsed = values.get(column.key)
+        if _is_blank(parsed):
+            continue
         if column.type == "ref":
             resolved = _resolve_value(
                 column,
@@ -461,6 +1074,18 @@ def _row_values(
             resolved = _resolve_ref_or_id(
                 column,
                 parsed,
+                row_number=row_number,
+                reference_indexes=reference_indexes,
+            )
+            if isinstance(resolved, LoadIssue):
+                issues.append(resolved)
+                continue
+            values[column.key] = resolved
+        elif column.type == "scoped_ref":
+            resolved = _resolve_scoped_ref(
+                column,
+                parsed,
+                values=values,
                 row_number=row_number,
                 reference_indexes=reference_indexes,
             )
@@ -490,13 +1115,11 @@ def _row_values(
                 issues.append(resolved)
                 continue
             values[column.key] = resolved
-        else:
-            values[column.key] = parsed
     return values, issues
 
 
 def _parse_value(column: LoadColumn, raw_value: Any, row_number: int) -> Any | LoadIssue:
-    if column.type in {"text", "ref"}:
+    if column.type in {"text", "ref", "ref_or_id", "scoped_ref"}:
         return str(raw_value).strip()
     if column.type == "number":
         try:
@@ -778,6 +1401,104 @@ def _resolve_ref_or_id(
     return resolved
 
 
+def _resolve_scoped_ref(
+    column: LoadColumn,
+    value: Any,
+    *,
+    values: dict[str, Any],
+    row_number: int,
+    reference_indexes: dict[str, dict[str, list[dict[str, Any]]]],
+) -> str | LoadIssue:
+    resolve = column.resolve
+    if resolve is None or resolve.scope is None:
+        raise ConfigError(f"Column {column.key} is missing scoped resolve config.")
+    scope = resolve.scope
+    scope_value = values.get(scope.column)
+    if _is_blank(scope_value):
+        return LoadIssue(
+            row=row_number,
+            code="scope_value_missing",
+            column=column.key,
+            message=f"{column.header} requires a value for scope column {scope.column!r}.",
+        )
+
+    candidates = reference_indexes.get(_resolve_key(resolve), {}).get(_lookup_key(str(value)), [])
+    if not candidates:
+        return LoadIssue(
+            row=row_number,
+            code="scoped_ref_not_found",
+            column=column.key,
+            message=(
+                f"{column.header} {value!r} was not found in "
+                f"{resolve.endpoint}.{resolve.match}."
+            ),
+        )
+
+    scope_index = reference_indexes.get(_scope_index_key(scope), {})
+    scoped_matches: list[dict[str, Any]] = []
+    missing_scope_refs: list[str] = []
+    for candidate in candidates:
+        scope_ref = _extract_path(candidate, scope.via)
+        if _is_blank(scope_ref):
+            continue
+        scope_payloads = scope_index.get(_lookup_key(str(scope_ref)), [])
+        if not scope_payloads:
+            missing_scope_refs.append(str(scope_ref).strip())
+            continue
+        scope_lookup = _lookup_key(str(scope_value))
+        if any(
+            _lookup_key(str(_extract_path(scope_payload, scope.match))) == scope_lookup
+            for scope_payload in scope_payloads
+        ):
+            scoped_matches.append(candidate)
+
+    if not scoped_matches and missing_scope_refs:
+        return LoadIssue(
+            row=row_number,
+            code="scope_ref_missing",
+            column=column.key,
+            message=(
+                f"{column.header} {value!r} matched {resolve.endpoint} records, but "
+                f"referenced {scope.endpoint} records were missing for "
+                f"{resolve.endpoint}.{scope.via}."
+            ),
+            sample=sorted(set(missing_scope_refs))[:MAX_SAMPLES],
+        )
+    if not scoped_matches:
+        return LoadIssue(
+            row=row_number,
+            code="scoped_ref_not_in_scope",
+            column=column.key,
+            message=(
+                f"{column.header} {value!r} was not found under {scope.column} "
+                f"{scope_value!r} via {resolve.endpoint}.{scope.via} -> "
+                f"{scope.endpoint}.{scope.match}."
+            ),
+        )
+    if len(scoped_matches) > 1:
+        return LoadIssue(
+            row=row_number,
+            code="scoped_ref_ambiguous",
+            column=column.key,
+            message=(
+                f"{column.header} {value!r} under {scope.column} {scope_value!r} "
+                f"matched {len(scoped_matches)} records."
+            ),
+            sample=[match.get("id") for match in scoped_matches[:MAX_SAMPLES]],
+        )
+
+    resolved = scoped_matches[0].get(resolve.output)
+    if _is_blank(resolved):
+        return LoadIssue(
+            row=row_number,
+            code="scoped_ref_output_blank",
+            column=column.key,
+            message=f"Resolved {resolve.endpoint} record has blank {resolve.output!r}.",
+            sample=scoped_matches[0].get("id"),
+        )
+    return str(resolved).strip()
+
+
 def _resolve_composition_list(
     column: LoadColumn,
     entries: list[tuple[Decimal, str]],
@@ -1036,9 +1757,10 @@ def _build_reference_indexes(
             )
         missing_endpoints = sorted(
             {
-                resolve.endpoint
+                endpoint
                 for resolve in refs
-                if not endpoint_has_cache_evidence(conn, resolve.endpoint)
+                for endpoint in _resolve_required_endpoints(resolve)
+                if not endpoint_has_cache_evidence(conn, endpoint)
             }
         )
         if missing_endpoints:
@@ -1063,6 +1785,17 @@ def _build_reference_indexes(
                         "values": len(indexes[key]),
                     },
                 )
+            if resolve.scope is not None:
+                scope_key = _scope_index_key(resolve.scope)
+                if scope_key not in indexes:
+                    indexes[scope_key] = _reference_index(
+                        conn,
+                        LoadResolve(
+                            endpoint=resolve.scope.endpoint,
+                            match=resolve.scope.output,
+                            output=resolve.scope.output,
+                        ),
+                    )
         for column in ref_columns:
             if column.type != "ref_or_id" or column.resolve is None:
                 continue
@@ -1074,6 +1807,12 @@ def _build_reference_indexes(
                     match_path=column.resolve.output,
                 )
         return indexes
+
+
+def _resolve_required_endpoints(resolve: LoadResolve) -> tuple[str, ...]:
+    if resolve.scope is None:
+        return (resolve.endpoint,)
+    return (resolve.endpoint, resolve.scope.endpoint)
 
 
 def _reference_index(
@@ -1505,6 +2244,10 @@ def _resolve_key(resolve: LoadResolve) -> str:
 def _resolve_direct_key(resolve: LoadResolve) -> str:
     filters = json.dumps(resolve.filters or {}, default=str, sort_keys=True)
     return f"{resolve.endpoint}:{resolve.output}:{resolve.output}:{filters}"
+
+
+def _scope_index_key(scope: LoadScope) -> str:
+    return f"{scope.endpoint}:{scope.output}:{scope.output}:scope"
 
 
 def _lookup_key(value: str) -> str:

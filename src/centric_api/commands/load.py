@@ -7,7 +7,13 @@ from pathlib import Path
 from ..auth import init_auth_context
 from ..config import LOCAL_ENV_CONFIG_PATH, ConfigError, resolve_private_config_path
 from ..defaults import db_path as resolve_db_path
-from ..load import RETRY_STATUSES, materialize_load, run_load
+from ..load import (
+    RETRY_STATUSES,
+    materialize_load,
+    materialize_style_bom_workflow,
+    run_load,
+    run_style_bom_workflow,
+)
 from ..load_config import load_load_config, select_load_job
 from ..models import AuthSettings
 from ..rendering.common import print_rows
@@ -44,7 +50,10 @@ def run_load_command(args: argparse.Namespace) -> int:
     workbook_path = Path(args.workbook).expanduser()
     progress_callback = None if args.json or args.quiet else write_load_progress_line
     if args.action == "check":
-        result = materialize_load(
+        materializer = (
+            materialize_style_bom_workflow if job.workflow == "style_bom" else materialize_load
+        )
+        result = materializer(
             resolve_db_path(args.db),
             job,
             workbook_path,
@@ -60,8 +69,12 @@ def run_load_command(args: argparse.Namespace) -> int:
 
     dry_run = bool(args.dry_run)
     retry_statuses = _parse_retry_statuses(args.statuses) if args.action == "retry" else None
+    runner = run_style_bom_workflow if job.workflow == "style_bom" else run_load
+    materializer = (
+        materialize_style_bom_workflow if job.workflow == "style_bom" else materialize_load
+    )
     if dry_run:
-        result = run_load(
+        result = runner(
             resolve_db_path(args.db),
             config,
             job,
@@ -77,7 +90,7 @@ def run_load_command(args: argparse.Namespace) -> int:
         if not args.yes:
             raise ConfigError("Non-dry-run load requires --yes.")
         mode = "retry" if retry_statuses else "run"
-        materialized = materialize_load(
+        materialized = materializer(
             resolve_db_path(args.db),
             job,
             workbook_path,
@@ -92,7 +105,7 @@ def run_load_command(args: argparse.Namespace) -> int:
                 env_file=resolve_private_config_path(LOCAL_ENV_CONFIG_PATH, args.env_file)
             )
             with init_auth_context(auth_settings) as auth_ctx:
-                result = run_load(
+                result = runner(
                     resolve_db_path(args.db),
                     config,
                     job,
@@ -107,7 +120,7 @@ def run_load_command(args: argparse.Namespace) -> int:
                     progress_callback=progress_callback,
                 )
         else:
-            result = run_load(
+            result = runner(
                 resolve_db_path(args.db),
                 config,
                 job,

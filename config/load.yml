@@ -73,3 +73,87 @@ jobs:
           filters:
             active: true
     body: compositions
+
+  - name: style-bom-load
+    title: Style BOM Load
+    workflow: style_bom
+    method: POST
+    path: /v2/styles/{style}/data_sheets/apparel_boms
+    input:
+      header_row: 1
+    columns:
+      season:
+        header: Season
+        type: text
+        required: true
+      style:
+        header: Style
+        headers:
+          - Style Name
+        type: scoped_ref
+        required: true
+        resolve:
+          endpoint: styles
+          match: node_name
+          output: id
+          scope:
+            column: season
+            endpoint: seasons
+            via: parent_season
+            match: node_name
+      node_name:
+        header: BOM Name
+        headers:
+          - Name
+          - Node Name
+        type: text
+        required: true
+      description:
+        header: Description
+        headers:
+          - Desc
+        type: text
+      subtype:
+        header: Subtype
+        headers:
+          - BOM Subtype
+          - BOM Type
+        type: ref
+        required: true
+        resolve:
+          endpoint: bom_subtypes
+          match: node_name
+          output: id
+      section:
+        header: Section
+        type: text
+        required: true
+      pm_id:
+        header: PM ID
+        headers:
+          - Part Material ID
+          - Line ID
+        type: text
+        required: true
+      qty_default:
+        header: Quantity
+        headers:
+          - Qty
+          - Qty Default
+        type: number
+        required: true
+      actual:
+        header: Material Code
+        headers:
+          - Material
+          - Actual
+        type: ref
+        required: true
+        resolve:
+          endpoint: materials
+          match: code
+          output: id
+    body:
+      node_name: node_name
+      description: description
+      subtype: subtype

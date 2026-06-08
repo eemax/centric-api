@@ -13,16 +13,27 @@ DEFAULT_LOAD_CONFIG_PATH = Path("config/load.yml")
 PRIVATE_LOAD_CONFIG_PATH = Path("load.yml")
 
 ROOT_CONFIG_KEYS = {"version", "jobs"}
-JOB_CONFIG_KEYS = {"name", "title", "method", "path", "input", "columns", "body"}
+JOB_CONFIG_KEYS = {"name", "title", "method", "path", "input", "columns", "body", "workflow"}
 INPUT_CONFIG_KEYS = {"header_row"}
 COLUMN_CONFIG_KEYS = {"header", "headers", "type", "required", "resolve", "value_set"}
-RESOLVE_CONFIG_KEYS = {"endpoint", "match", "output", "filters"}
+RESOLVE_CONFIG_KEYS = {"endpoint", "match", "output", "filters", "scope"}
+SCOPE_CONFIG_KEYS = {"column", "endpoint", "via", "match", "output"}
 VALUE_SET_CONFIG_KEYS = {"name"}
 LOAD_METHODS = {"POST", "PUT"}
-COLUMN_TYPES = {"text", "number", "boolean", "ref", "ref_or_id", "composition_list"}
+COLUMN_TYPES = {"text", "number", "boolean", "ref", "ref_or_id", "scoped_ref", "composition_list"}
+WORKFLOWS = {"default", "style_bom"}
 
-ColumnType = Literal["text", "number", "boolean", "ref", "ref_or_id", "composition_list"]
+ColumnType = Literal[
+    "text",
+    "number",
+    "boolean",
+    "ref",
+    "ref_or_id",
+    "scoped_ref",
+    "composition_list",
+]
 LoadSource = Literal["bundled", "private", "explicit"]
+LoadWorkflow = Literal["default", "style_bom"]
 LoadBody = dict[str, str] | str
 
 
@@ -37,6 +48,16 @@ class LoadResolve:
     match: str
     output: str = "id"
     filters: dict[str, Any] | None = None
+    scope: LoadScope | None = None
+
+
+@dataclass(frozen=True)
+class LoadScope:
+    column: str
+    endpoint: str
+    via: str
+    match: str
+    output: str = "id"
 
 
 @dataclass(frozen=True)
@@ -76,6 +97,7 @@ class LoadJob:
     source_path: Path
     method: str
     path: str
+    workflow: LoadWorkflow
     input: LoadInput
     columns: tuple[LoadColumn, ...]
     body: LoadBody
@@ -168,6 +190,7 @@ def _parse_job(raw: Any, index: int, *, source: LoadSource, source_path: Path) -
         source_path=source_path,
         method=method,
         path=path,
+        workflow=_choice(raw.get("workflow", "default"), WORKFLOWS, f"load job[{name}].workflow"),  # type: ignore[arg-type]
         input=_parse_input(raw.get("input"), name),
         columns=columns,
         body=body,
@@ -197,12 +220,20 @@ def _parse_column(key: Any, raw: Any, field_name: str) -> LoadColumn:
         raise ConfigError(f"{field_name}.headers must be an array.")
     resolve = _parse_resolve(raw.get("resolve"), field_name)
     value_set = _parse_value_set(raw.get("value_set"), field_name)
-    if column_type in {"ref", "ref_or_id", "composition_list"} and resolve is None:
+    if column_type in {"ref", "ref_or_id", "scoped_ref", "composition_list"} and resolve is None:
         raise ConfigError(f"{field_name}.resolve is required for {column_type} columns.")
-    if column_type not in {"ref", "ref_or_id", "composition_list"} and resolve is not None:
+    if (
+        column_type not in {"ref", "ref_or_id", "scoped_ref", "composition_list"}
+        and resolve is not None
+    ):
         raise ConfigError(
-            f"{field_name}.resolve is only valid for ref, ref_or_id, and composition_list columns."
+            f"{field_name}.resolve is only valid for ref, ref_or_id, scoped_ref, "
+            "and composition_list columns."
         )
+    if column_type == "scoped_ref" and (resolve is None or resolve.scope is None):
+        raise ConfigError(f"{field_name}.resolve.scope is required for scoped_ref columns.")
+    if column_type != "scoped_ref" and resolve is not None and resolve.scope is not None:
+        raise ConfigError(f"{field_name}.resolve.scope is only valid for scoped_ref columns.")
     if value_set is not None and column_type != "text":
         raise ConfigError(f"{field_name}.value_set is only valid for text columns.")
     if value_set is not None and resolve is not None:
@@ -232,6 +263,22 @@ def _parse_resolve(raw: Any, field_name: str) -> LoadResolve | None:
         match=_required_string(raw.get("match"), f"{field_name}.resolve.match"),
         output=_string_or_default(raw.get("output"), "id", f"{field_name}.resolve.output"),
         filters=_parse_resolve_filters(raw.get("filters"), field_name),
+        scope=_parse_scope(raw.get("scope"), field_name),
+    )
+
+
+def _parse_scope(raw: Any, field_name: str) -> LoadScope | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{field_name}.resolve.scope must be an object.")
+    _reject_unknown_keys(raw, SCOPE_CONFIG_KEYS, f"{field_name}.resolve.scope")
+    return LoadScope(
+        column=_required_string(raw.get("column"), f"{field_name}.resolve.scope.column"),
+        endpoint=_required_string(raw.get("endpoint"), f"{field_name}.resolve.scope.endpoint"),
+        via=_required_string(raw.get("via"), f"{field_name}.resolve.scope.via"),
+        match=_required_string(raw.get("match"), f"{field_name}.resolve.scope.match"),
+        output=_string_or_default(raw.get("output"), "id", f"{field_name}.resolve.scope.output"),
     )
 
 

@@ -123,10 +123,13 @@ private `CENTRIC_API_HOME/validators` modules or a directory passed with `--vali
 `load` validates workbook rows and can send API requests to Centric. The repo includes
 `material-create`, which posts material rows to `/v2/materials`, and
 `material-composition-create`, which parses composition text like `95% cotton, 5% polyester` and
-posts technical compositions to existing materials. Use `load check` and `load run --dry-run` before
-running with `--yes`. Real runs write a `review.xlsx` copy for row-level success, failure, and
-validation status; `load retry` reprocesses failed or validation-error rows from that review
-workbook. Load schemas live in `config/load.yml` plus private `CENTRIC_API_HOME/load.yml`.
+posts technical compositions to existing materials. It also includes `style-bom-load`, which
+validates style and season together, then chains BOM header, section, and material-line creation
+from one workbook.
+Use `load check` and `load run --dry-run` before running with `--yes`. Real runs write a
+`review.xlsx` copy for row-level success, failure, and validation status; `load retry` reprocesses
+failed or validation-error rows from that review workbook. Load schemas live in `config/load.yml`
+plus private `CENTRIC_API_HOME/load.yml`.
 
 `status` gives a quick read-only overview of runtime home, DB path, locks, latest fetch/changelog,
 download, bundle, and endpoint counts. `doctor` validates local setup, config, credentials presence,

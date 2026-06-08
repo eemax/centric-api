@@ -18,6 +18,7 @@ def load_job_record(job: LoadJob) -> dict[str, Any]:
         "source_path": str(job.source_path),
         "method": job.method,
         "path": job.path,
+        "workflow": job.workflow,
         "header_row": job.input.header_row,
         "columns": [
             {
@@ -32,6 +33,17 @@ def load_job_record(job: LoadJob) -> dict[str, Any]:
                         "match": column.resolve.match,
                         "output": column.resolve.output,
                         "filters": column.resolve.filters or {},
+                        "scope": (
+                            {
+                                "column": column.resolve.scope.column,
+                                "endpoint": column.resolve.scope.endpoint,
+                                "via": column.resolve.scope.via,
+                                "match": column.resolve.scope.match,
+                                "output": column.resolve.scope.output,
+                            }
+                            if column.resolve.scope
+                            else None
+                        ),
                     }
                     if column.resolve
                     else None
@@ -128,6 +140,7 @@ def print_human_load_show(job: LoadJob) -> None:
     print(f"Config:     {job.source_path}")
     print(f"Method:     {job.method}")
     print(f"Path:       {job.path}")
+    print(f"Workflow:   {job.workflow}")
     print(f"Header row: {job.input.header_row}")
     print()
     print("Columns")
@@ -150,6 +163,13 @@ def print_human_load_show(job: LoadJob) -> None:
                 f"resolves {column.resolve.endpoint}.{column.resolve.match} -> "
                 f"{column.resolve.output}{filters}"
             )
+            if column.resolve.scope:
+                scope = column.resolve.scope
+                print(
+                    f"  {'':<{key_width}}  {'':<{type_width}}  {'':<8}  "
+                    f"scope {scope.column} via {column.resolve.endpoint}.{scope.via} -> "
+                    f"{scope.endpoint}.{scope.match}"
+                )
         if column.value_set:
             print(
                 f"  {'':<{key_width}}  {'':<{type_width}}  {'':<8}  "

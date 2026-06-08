@@ -300,8 +300,8 @@ jobs:
       product_type: product_type
 ```
 
-Use `docs/load.md` as the full schema reference. Bundled load jobs include `material-create` and
-`material-composition-create`; both can be extended or replaced by private
+Use `docs/load.md` as the full schema reference. Bundled load jobs include `material-create`,
+`material-composition-create`, and `style-bom-load`; all can be extended or replaced by private
 `CENTRIC_API_HOME/load.yml`. Private load value sets live under
 `CENTRIC_API_HOME/load/value-sets/{name}.xlsx`.
 
