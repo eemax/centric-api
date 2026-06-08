@@ -157,3 +157,73 @@ jobs:
       node_name: node_name
       description: description
       subtype: subtype
+
+  - name: style-supplier-quote-load
+    title: Style Supplier Quote Load
+    workflow: style_supplier_quote
+    method: POST
+    path: /v2/styles/{style}/product_sources
+    input:
+      header_row: 1
+    columns:
+      season:
+        header: Season
+        type: text
+        required: true
+      style:
+        header: Style
+        headers:
+          - Style Name
+        type: scoped_ref
+        required: true
+        resolve:
+          endpoint: styles
+          match: node_name
+          output: id
+          scope:
+            column: season
+            endpoint: seasons
+            via: parent_season
+            match: node_name
+      supplier:
+        header: Supplier
+        headers:
+          - Supplier Name
+          - Supplier Number
+        type: text
+        required: true
+      agent:
+        header: Agent
+        headers:
+          - Agent Name
+          - Agent Number
+        type: text
+        required: true
+      node_name:
+        header: Supplier Item
+        headers:
+          - Supplier Quote
+          - Quote Name
+          - Node Name
+        type: text
+        required: true
+      description:
+        header: Description
+        headers:
+          - Desc
+        type: text
+      quote_factory:
+        header: Quote Factory
+        headers:
+          - Factory
+          - Factory Name
+          - Factory Number
+        type: text
+      set_production_quote:
+        header: Set Production Quote
+        headers:
+          - Production Quote
+        type: boolean
+    body:
+      supplier: supplier
+      agent: agent

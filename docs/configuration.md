@@ -301,8 +301,8 @@ jobs:
 ```
 
 Use `docs/load.md` as the full schema reference. Bundled load jobs include `material-create`,
-`material-composition-create`, and `style-bom-load`; all can be extended or replaced by private
-`CENTRIC_API_HOME/load.yml`. Private load value sets live under
+`material-composition-create`, `style-bom-load`, and `style-supplier-quote-load`; all can be extended or
+replaced by private `CENTRIC_API_HOME/load.yml`. Private load value sets live under
 `CENTRIC_API_HOME/load/value-sets/{name}.xlsx`.
 
 ## Units Config

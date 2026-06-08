@@ -125,7 +125,8 @@ private `CENTRIC_API_HOME/validators` modules or a directory passed with `--vali
 `material-composition-create`, which parses composition text like `95% cotton, 5% polyester` and
 posts technical compositions to existing materials. It also includes `style-bom-load`, which
 validates style and season together, then chains BOM header, section, and material-line creation
-from one workbook.
+from one workbook, and `style-supplier-quote-load`, which chains product source, supplier item, quote
+factory, and optional production quote updates.
 Use `load check` and `load run --dry-run` before running with `--yes`. Real runs write a
 `review.xlsx` copy for row-level success, failure, and validation status; `load retry` reprocesses
 failed or validation-error rows from that review workbook. Load schemas live in `config/load.yml`

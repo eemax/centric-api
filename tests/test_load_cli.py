@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from centric_api.cli import main
-from centric_api.load import run_style_bom_workflow
+from centric_api.load import run_style_bom_workflow, run_style_supplier_quote_workflow
 from centric_api.load_config import load_load_config, select_load_job
 from centric_api.store import connect
 from tests.helpers_load import _insert_record, _write_material_workbook
@@ -295,6 +295,7 @@ def test_style_bom_load_marks_line_failures_as_row_issues(tmp_path, monkeypatch)
     )
 
     assert result.failure_count == 2
+    assert result.error_rows == 2
     assert result.request_count == 5
     assert [issue.code for issue in result.issues] == [
         "bom_line_create_failed",
@@ -357,6 +358,218 @@ def test_style_bom_load_rejects_inactive_sections(tmp_path, monkeypatch, capsys)
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["issues"][0]["code"] == "bom_section_not_found"
+
+
+def test_style_supplier_quote_load_dry_run_plans_chain(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path)
+    _seed_style_supplier_quote_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "style-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 4
+    assert payload["request_samples"][0]["path"] == "/v2/styles/S1/product_sources"
+    assert payload["request_samples"][0]["body"] == {"agent": "A1", "supplier": "SUP1"}
+    assert payload["request_samples"][1]["path"] == (
+        "/v2/product_sources/DRY-RUN-PRODUCT-SOURCE/supplier_items"
+    )
+    assert payload["request_samples"][2]["path"] == (
+        "/v2/supplier_item_revisions/DRY-RUN-REVISION"
+    )
+
+
+def test_style_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path)
+    _seed_style_supplier_quote_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "style-supplier-quote-load")
+    auth = _StyleSupplierQuoteAuthContext()
+
+    result = run_style_supplier_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 0
+    assert not result.issues
+    assert result.request_count == 4
+    assert auth.calls == [
+        (
+            "POST",
+            "https://example.test/api/v2/styles/S1/product_sources",
+            {"agent": "A1", "supplier": "SUP1"},
+        ),
+        (
+            "POST",
+            "https://example.test/api/v2/product_sources/PS1/supplier_items",
+            {"description": "Primary supplier quote", "node_name": "Main Quote"},
+        ),
+        (
+            "PUT",
+            "https://example.test/api/v2/supplier_item_revisions/REV1",
+            {"quote_factory": "F1"},
+        ),
+        (
+            "PUT",
+            "https://example.test/api/v2/styles/S1",
+            {"production_quote": "SQ1"},
+        ),
+    ]
+
+
+def test_style_supplier_quote_load_marks_product_source_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path)
+    _seed_style_supplier_quote_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "style-supplier-quote-load")
+    auth = _StyleSupplierQuoteAuthContext(fail_product_source=True)
+
+    result = run_style_supplier_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 1
+    assert result.error_rows == 1
+    assert result.request_count == 1
+    assert [issue.code for issue in result.issues] == ["product_source_create_failed"]
+    assert [issue.row for issue in result.issues] == [2]
+
+
+def test_style_supplier_quote_load_rejects_unlinked_agent(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path)
+    _seed_style_supplier_quote_cache(db_path, supplier_agents=())
+
+    assert (
+        main(
+            [
+                "load",
+                "check",
+                "style-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 1
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["issues"][0]["code"] == "agent_not_linked_to_supplier"
+
+
+def test_style_supplier_quote_load_rejects_unlinked_factory(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path)
+    _seed_style_supplier_quote_cache(db_path, factory_suppliers=("OTHER",))
+
+    assert (
+        main(
+            [
+                "load",
+                "check",
+                "style-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 1
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["issues"][0]["code"] == "factory_not_linked_to_supplier"
+
+
+def test_style_supplier_quote_load_allows_blank_factory_without_factory_cache(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path, quote_factory="")
+    _seed_style_supplier_quote_cache(db_path, include_factory=False)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "style-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 3
+    assert all("supplier_item_revisions" not in item["path"] for item in payload["request_samples"])
 
 
 def test_private_load_job_overrides_bundled_job(tmp_path, monkeypatch, capsys) -> None:
@@ -650,6 +863,99 @@ def _seed_style_bom_load_cache(
         )
 
 
+def _write_style_supplier_quote_workbook(
+    path: Path,
+    *,
+    quote_factory: str = "Primary Factory",
+) -> None:
+    _write_material_workbook(
+        path,
+        headers=[
+            "Season",
+            "Style",
+            "Supplier",
+            "Agent",
+            "Supplier Item",
+            "Description",
+            "Quote Factory",
+            "Set Production Quote",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Primary Supplier",
+                "Primary Agent",
+                "Main Quote",
+                "Primary supplier quote",
+                quote_factory,
+                "Yes",
+            ],
+        ],
+    )
+
+
+def _seed_style_supplier_quote_cache(
+    db_path: Path,
+    *,
+    supplier_agents: tuple[str, ...] = ("A1",),
+    factory_suppliers: tuple[str, ...] = ("SUP1",),
+    include_factory: bool = True,
+) -> None:
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="seasons",
+            record_id="SE1",
+            payload={"id": "SE1", "node_name": "SS26"},
+        )
+        _insert_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "node_name": "ST-001", "parent_season": "SE1"},
+        )
+        _insert_record(
+            conn,
+            endpoint="suppliers",
+            record_id="SUP1",
+            payload={
+                "id": "SUP1",
+                "node_name": "Primary Supplier",
+                "supplier_number": "SUP-001",
+                "is_supplier": True,
+                "is_agent": False,
+                "all_agents": {str(index): value for index, value in enumerate(supplier_agents)},
+            },
+        )
+        _insert_record(
+            conn,
+            endpoint="suppliers",
+            record_id="A1",
+            payload={
+                "id": "A1",
+                "node_name": "Primary Agent",
+                "supplier_number": "AG-001",
+                "is_supplier": False,
+                "is_agent": True,
+            },
+        )
+        if include_factory:
+            _insert_record(
+                conn,
+                endpoint="factories",
+                record_id="F1",
+                payload={
+                    "id": "F1",
+                    "node_name": "Primary Factory",
+                    "supplier_number": "FAC-001",
+                    "suppliers": {
+                        str(index): value for index, value in enumerate(factory_suppliers)
+                    },
+                },
+            )
+
+
 class _StyleBomAuthContext:
     base_url = "https://example.test"
 
@@ -686,3 +992,32 @@ class _JsonResponse:
 
     def json(self) -> dict[str, object]:
         return self._payload
+
+
+class _StyleSupplierQuoteAuthContext:
+    base_url = "https://example.test"
+
+    def __init__(self, *, fail_product_source: bool = False) -> None:
+        self.fail_product_source = fail_product_source
+        self.calls: list[tuple[str, str, object]] = []
+
+    def request(self, method: str, url: str, *, json_body: object) -> object:
+        self.calls.append((method, url, json_body))
+        if url.endswith("/product_sources"):
+            if self.fail_product_source:
+                return _JsonResponse(422, {"message": "product source rejected"})
+            return _JsonResponse(201, {"id": "PS1"})
+        if url.endswith("/supplier_items"):
+            return _JsonResponse(
+                201,
+                {
+                    "id": "SQ1",
+                    "latest_revision": "REV1",
+                    "current_revision": "REV1",
+                },
+            )
+        if url.endswith("/supplier_item_revisions/REV1"):
+            return _JsonResponse(200, {"id": "REV1", "quote_factory": "F1"})
+        if url.endswith("/styles/S1"):
+            return _JsonResponse(200, {"id": "S1", "production_quote": "SQ1"})
+        return _JsonResponse(404, {"message": "unexpected url"})

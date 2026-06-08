@@ -11,8 +11,10 @@ from ..load import (
     RETRY_STATUSES,
     materialize_load,
     materialize_style_bom_workflow,
+    materialize_style_supplier_quote_workflow,
     run_load,
     run_style_bom_workflow,
+    run_style_supplier_quote_workflow,
 )
 from ..load_config import load_load_config, select_load_job
 from ..models import AuthSettings
@@ -50,9 +52,7 @@ def run_load_command(args: argparse.Namespace) -> int:
     workbook_path = Path(args.workbook).expanduser()
     progress_callback = None if args.json or args.quiet else write_load_progress_line
     if args.action == "check":
-        materializer = (
-            materialize_style_bom_workflow if job.workflow == "style_bom" else materialize_load
-        )
+        materializer = _workflow_materializer(job.workflow)
         result = materializer(
             resolve_db_path(args.db),
             job,
@@ -69,10 +69,8 @@ def run_load_command(args: argparse.Namespace) -> int:
 
     dry_run = bool(args.dry_run)
     retry_statuses = _parse_retry_statuses(args.statuses) if args.action == "retry" else None
-    runner = run_style_bom_workflow if job.workflow == "style_bom" else run_load
-    materializer = (
-        materialize_style_bom_workflow if job.workflow == "style_bom" else materialize_load
-    )
+    runner = _workflow_runner(job.workflow)
+    materializer = _workflow_materializer(job.workflow)
     if dry_run:
         result = runner(
             resolve_db_path(args.db),
@@ -151,6 +149,22 @@ def _parse_retry_statuses(value: str | None) -> set[str]:
     if not statuses:
         raise ValueError("Retry statuses cannot be empty.")
     return statuses
+
+
+def _workflow_materializer(workflow: str):
+    if workflow == "style_bom":
+        return materialize_style_bom_workflow
+    if workflow == "style_supplier_quote":
+        return materialize_style_supplier_quote_workflow
+    return materialize_load
+
+
+def _workflow_runner(workflow: str):
+    if workflow == "style_bom":
+        return run_style_bom_workflow
+    if workflow == "style_supplier_quote":
+        return run_style_supplier_quote_workflow
+    return run_load
 
 
 def _normalize_status(value: str) -> str:

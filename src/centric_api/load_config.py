@@ -21,7 +21,7 @@ SCOPE_CONFIG_KEYS = {"column", "endpoint", "via", "match", "output"}
 VALUE_SET_CONFIG_KEYS = {"name"}
 LOAD_METHODS = {"POST", "PUT"}
 COLUMN_TYPES = {"text", "number", "boolean", "ref", "ref_or_id", "scoped_ref", "composition_list"}
-WORKFLOWS = {"default", "style_bom"}
+WORKFLOWS = {"default", "style_bom", "style_supplier_quote"}
 
 ColumnType = Literal[
     "text",
@@ -33,7 +33,7 @@ ColumnType = Literal[
     "composition_list",
 ]
 LoadSource = Literal["bundled", "private", "explicit"]
-LoadWorkflow = Literal["default", "style_bom"]
+LoadWorkflow = Literal["default", "style_bom", "style_supplier_quote"]
 LoadBody = dict[str, str] | str
 
 
