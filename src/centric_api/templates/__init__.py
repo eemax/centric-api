@@ -1,1 +1,1 @@
-"""HTML templates bundled with centric-api."""
+"""Static HTML and workbook templates bundled with centric-api."""

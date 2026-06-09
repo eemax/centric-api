@@ -270,6 +270,119 @@ def test_style_bom_load_matches_headers_when_columns_are_shuffled(
     }
 
 
+def test_style_bom_load_omits_blank_pm_id(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "bom-lines-no-pm-id.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=[
+            "Season",
+            "Style",
+            "BOM Name",
+            "Description",
+            "Subtype",
+            "Section",
+            "PM ID",
+            "Quantity",
+            "Material Code",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Main BOM",
+                "Main production BOM",
+                "Production",
+                "Fabrics",
+                "",
+                0.05,
+                "MAT-001",
+            ],
+        ],
+    )
+    _seed_style_bom_load_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "style-bom-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 3
+    assert payload["request_samples"][2]["body"] == {
+        "actual": "M1",
+        "ds_section": "DRY-RUN-SECTION-Fabrics",
+        "qty_default": 0.05,
+    }
+
+
+def test_style_bom_load_allows_missing_pm_id_header(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "bom-lines-missing-pm-id.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=[
+            "Season",
+            "Style",
+            "BOM Name",
+            "Description",
+            "Subtype",
+            "Section",
+            "Quantity",
+            "Material Code",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Main BOM",
+                "Main production BOM",
+                "Production",
+                "Fabrics",
+                0.05,
+                "MAT-001",
+            ],
+        ],
+    )
+    _seed_style_bom_load_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "check",
+                "style-bom-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["valid_rows"] == 1
+    assert payload["issues"] == []
+
+
 def test_style_bom_load_marks_line_failures_as_row_issues(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -508,6 +621,91 @@ def test_style_supplier_quote_load_rejects_unlinked_agent(tmp_path, monkeypatch,
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["issues"][0]["code"] == "agent_not_linked_to_supplier"
+
+
+def test_style_supplier_quote_load_omits_blank_agent(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes-no-agent.xlsx"
+    _write_style_supplier_quote_workbook(workbook_path, agent="")
+    _seed_style_supplier_quote_cache(db_path, supplier_agents=())
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "style-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["request_samples"][0]["path"] == "/v2/styles/S1/product_sources"
+    assert payload["request_samples"][0]["body"] == {"supplier": "SUP1"}
+
+
+def test_style_supplier_quote_load_allows_missing_agent_header(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "style-supplier-quotes-missing-agent.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=[
+            "Season",
+            "Style",
+            "Supplier",
+            "Supplier Item",
+            "Description",
+            "Quote Factory",
+            "Set Production Quote",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Primary Supplier",
+                "Main Quote",
+                "Primary supplier quote",
+                "Primary Factory",
+                "Yes",
+            ],
+        ],
+    )
+    _seed_style_supplier_quote_cache(db_path, supplier_agents=())
+
+    assert (
+        main(
+            [
+                "load",
+                "check",
+                "style-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["valid_rows"] == 1
+    assert payload["issues"] == []
 
 
 def test_style_supplier_quote_load_rejects_unlinked_factory(tmp_path, monkeypatch, capsys) -> None:
@@ -866,6 +1064,7 @@ def _seed_style_bom_load_cache(
 def _write_style_supplier_quote_workbook(
     path: Path,
     *,
+    agent: str = "Primary Agent",
     quote_factory: str = "Primary Factory",
 ) -> None:
     _write_material_workbook(
@@ -885,7 +1084,7 @@ def _write_style_supplier_quote_workbook(
                 "SS26",
                 "ST-001",
                 "Primary Supplier",
-                "Primary Agent",
+                agent,
                 "Main Quote",
                 "Primary supplier quote",
                 quote_factory,

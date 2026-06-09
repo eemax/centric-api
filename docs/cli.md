@@ -304,9 +304,10 @@ uv run centric-api load retry material-create review.xlsx --yes
 material IDs or material codes, parses natural-language composition text, and posts technical
 compositions to `/v2/materials/{material}/technical_compositions`. The bundled `style-bom-load`
 workflow validates a style within a season, then chains BOM header creation, owned section creation,
-and material line creation from one workbook. The bundled `style-supplier-quote-load` workflow validates a
-style within a season, supplier-agent membership, and optional supplier-factory membership, then
-chains product source, supplier item, quote factory, and optional production quote updates. If
+and material line creation from one workbook. The bundled `style-supplier-quote-load` workflow
+validates a style within a season, optional supplier-agent membership, and optional supplier-factory
+membership, then chains product source, supplier item, quote factory, and optional production quote
+updates. If
 `--sheet` is omitted, the first worksheet is used.
 Real runs write a review workbook when rows receive API outcomes or validation errors; `retry`
 processes rows in a review workbook with `_cent_load_status` of `failed` or `validation_error`.

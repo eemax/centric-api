@@ -119,6 +119,10 @@ A matching payload deletes the current record, writes an endpoint tombstone, and
 removal events. `delete_when_any` replaces existing rules for that endpoint; `delete_when_any_add`
 adds rules to the defaults or an earlier shared schema file.
 
+The bundled endpoint schema tombstones inactive records for standard active/inactive endpoints.
+`bom_sections` also tombstones ad hoc sections because load workflows validate against active,
+standard BOM sections only.
+
 ## Download Config
 
 Download configs use version `1` and reject unknown keys.

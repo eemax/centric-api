@@ -47,6 +47,8 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+      - field: ad_hoc
+        equals: true
   bom_lines:
     delete_when_any:
       - field: active

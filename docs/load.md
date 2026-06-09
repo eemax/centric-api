@@ -6,6 +6,9 @@ jobs include `material-create`, which creates materials from an Excel workbook,
 `style-bom-load`, which creates a BOM header, owned sections, and material lines from one workbook,
 and `style-supplier-quote-load`, which creates style supplier quotes.
 
+Basic Excel templates live in `src/centric_api/templates/style-bom-load-template.xlsx` and
+`src/centric_api/templates/style-supplier-quote-load-template.xlsx`.
+
 Load jobs are intentionally schema-driven but small: the schema maps workbook headers to typed
 fields, resolves simple cached references, and maps fields into a request body.
 
@@ -138,7 +141,8 @@ Season, Style, BOM Name, Description, Subtype, Section, PM ID, Quantity, Materia
 ```
 
 This order is recommended for readable workbooks, but the loader matches columns by header name, so
-the actual Excel column order does not matter.
+the actual Excel column order does not matter. `PM ID` is optional; when it is blank or omitted,
+the material-line payload leaves out `pm_id`.
 
 Rows are grouped by resolved style, BOM name, description, and subtype. For each group the workflow:
 
@@ -150,10 +154,11 @@ Rows are grouped by resolved style, BOM name, description, and subtype. For each
   `/v2/apparel_bom_revisions/{revision}/owned_sections/bom_section_definition`.
 - resolves `Material Code` through cached `materials.code`.
 - posts each line to `/v2/apparel_bom_revisions/{revision}/items/part_materials` with
-  `ds_section`, `pm_id`, `qty_default`, and `actual`.
+  `ds_section`, optional `pm_id`, `qty_default`, and `actual`.
 
-`PM ID`, `Quantity`, and `Material Code` come from the workbook. The section creation response id is
-used as `ds_section`, and the material cache id is used as `actual`.
+`Quantity` and `Material Code` come from the workbook, with optional `PM ID` when you need an
+internal line reference. The section creation response id is used as `ds_section`, and the material
+cache id is used as `actual`.
 
 The bundled style supplier quote load workflow resolves a style within a season, creates a product
 source, creates one supplier item, optionally updates the supplier item revision with a quote
@@ -174,16 +179,19 @@ Season, Style, Supplier, Agent, Supplier Item, Description, Quote Factory, Set P
 ```
 
 This order is recommended for readable workbooks, but the loader matches columns by header name, so
-the actual Excel column order does not matter.
+the actual Excel column order does not matter. `Agent`, `Description`, `Quote Factory`, and
+`Set Production Quote` are optional.
 
 For each row the workflow:
 
 - resolves `Style` within `Season` through cached `styles.parent_season -> seasons.node_name`.
 - resolves `Supplier` by cached `suppliers.node_name` or `suppliers.supplier_number` and requires
   `is_supplier` to be `true`.
-- resolves `Agent` by cached `suppliers.node_name` or `suppliers.supplier_number`, requires
-  `is_agent` to be `true`, and requires the agent id to be present in the supplier's `all_agents`.
-- posts the product source to `/v2/styles/{style}/product_sources` with `supplier` and `agent`.
+- when `Agent` is present, resolves it by cached `suppliers.node_name` or
+  `suppliers.supplier_number`, requires `is_agent` to be `true`, and requires the agent id to be
+  present in the supplier's `all_agents`.
+- posts the product source to `/v2/styles/{style}/product_sources` with `supplier` and optional
+  `agent`.
 - posts the supplier item to `/v2/product_sources/{product_source}/supplier_items` with
   `node_name` and optional `description`.
 - when `Quote Factory` is present, resolves it by cached `factories.node_name` or

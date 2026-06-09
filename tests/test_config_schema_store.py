@@ -125,6 +125,13 @@ def test_default_configs_load_outside_repo_root(
     assert "styles" in endpoint_schemas
     assert "product_sources" in endpoint_schemas
     assert "bom_subtypes" in endpoint_schemas
+    bom_sections_schema = endpoint_schemas["bom_sections"]
+    assert ("active", False) in {
+        (condition.field, condition.equals) for condition in bom_sections_schema.delete_when_any
+    }
+    assert ("ad_hoc", True) in {
+        (condition.field, condition.equals) for condition in bom_sections_schema.delete_when_any
+    }
 
 
 def test_load_fetcher_settings_runtime_defaults(
@@ -535,6 +542,55 @@ endpoints:
         tombstones = conn.execute("SELECT COUNT(*) FROM endpoint_tombstones").fetchone()[0]
     assert current == 0
     assert tombstones == 1
+
+
+def test_default_schema_tombstones_ad_hoc_bom_sections(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "bom_sections.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "BS1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+                "node_name": "Custom Section",
+                "active": True,
+                "ad_hoc": True,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"bom_sections": {"file": "bom_sections.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    result = ingest_raw_dir(raw_dir, db_path, schemas=load_endpoint_schemas())
+
+    assert result.records_read == 1
+    assert result.records_upserted == 0
+    assert result.records_deleted == 0
+    with sqlite3.connect(db_path) as conn:
+        current = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
+        tombstone = conn.execute(
+            """
+            SELECT payload_json
+            FROM endpoint_tombstones
+            WHERE endpoint = 'bom_sections' AND record_id = 'BS1'
+            """
+        ).fetchone()
+    assert current == 0
+    assert tombstone is not None
+    assert json.loads(tombstone[0])["ad_hoc"] is True
 
 
 def test_ingest_rejects_manifest_drift_for_applied_raw_file(tmp_path: Path) -> None:

@@ -134,7 +134,6 @@ jobs:
           - Part Material ID
           - Line ID
         type: text
-        required: true
       qty_default:
         header: Quantity
         headers:
@@ -198,7 +197,6 @@ jobs:
           - Agent Name
           - Agent Number
         type: text
-        required: true
       node_name:
         header: Supplier Item
         headers:

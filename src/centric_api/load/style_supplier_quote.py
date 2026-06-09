@@ -323,7 +323,6 @@ def _require_style_supplier_quote_columns(job: LoadJob) -> None:
         "season",
         "style",
         "supplier",
-        "agent",
         "node_name",
         "description",
         "quote_factory",
@@ -398,37 +397,38 @@ def _resolve_style_supplier_quote_memberships(
         return issues
     values["supplier"] = str(supplier["id"]).strip()
 
-    agent = _resolve_style_supplier_quote_record(
-        refs.suppliers,
-        values.get("agent"),
-        row_number=row_number,
-        column="agent",
-        label="Agent",
-    )
-    if isinstance(agent, LoadIssue):
-        issues.append(agent)
-    elif agent.get("is_agent") is not True:
-        issues.append(
-            LoadIssue(
-                row=row_number,
-                code="agent_not_agent",
-                column="agent",
-                message=f"Agent {values.get('agent')!r} is not marked as an agent.",
-                sample=agent.get("id"),
-            )
+    if not _is_blank(values.get("agent")):
+        agent = _resolve_style_supplier_quote_record(
+            refs.suppliers,
+            values.get("agent"),
+            row_number=row_number,
+            column="agent",
+            label="Agent",
         )
-    elif not _record_has_ref(supplier.get("all_agents"), str(agent.get("id"))):
-        issues.append(
-            LoadIssue(
-                row=row_number,
-                code="agent_not_linked_to_supplier",
-                column="agent",
-                message=f"Agent {values.get('agent')!r} is not linked to the supplier.",
-                sample=agent.get("id"),
+        if isinstance(agent, LoadIssue):
+            issues.append(agent)
+        elif agent.get("is_agent") is not True:
+            issues.append(
+                LoadIssue(
+                    row=row_number,
+                    code="agent_not_agent",
+                    column="agent",
+                    message=f"Agent {values.get('agent')!r} is not marked as an agent.",
+                    sample=agent.get("id"),
+                )
             )
-        )
-    else:
-        values["agent"] = str(agent["id"]).strip()
+        elif not _record_has_ref(supplier.get("all_agents"), str(agent.get("id"))):
+            issues.append(
+                LoadIssue(
+                    row=row_number,
+                    code="agent_not_linked_to_supplier",
+                    column="agent",
+                    message=f"Agent {values.get('agent')!r} is not linked to the supplier.",
+                    sample=agent.get("id"),
+                )
+            )
+        else:
+            values["agent"] = str(agent["id"]).strip()
 
     if not _is_blank(values.get("quote_factory")):
         if not refs.factories:
@@ -673,11 +673,14 @@ def _execute_style_supplier_quote_workflow(
 
 def _style_supplier_quote_product_source_request(row: StyleSupplierQuoteRow) -> LoadRequest:
     values = row.values
+    body = {"supplier": values["supplier"]}
+    if not _is_blank(values.get("agent")):
+        body["agent"] = values["agent"]
     return LoadRequest(
         row=row.row,
         method="POST",
         path=f"/v2/styles/{values['style']}/product_sources",
-        body={"supplier": values["supplier"], "agent": values["agent"]},
+        body=body,
     )
 
 
