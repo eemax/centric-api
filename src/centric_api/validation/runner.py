@@ -31,39 +31,43 @@ def run_validator(
     started_at = _utc_iso()
     run_id = _run_id(validator.definition.name)
     output_dir = _output_dir(validator.definition.name, run_id, output_root)
-    with connect_readonly(db_path) as conn:
-        ctx = ValidationContext(
-            conn,
-            units=load_unit_registry(units_config),
-            validator_name=validator.definition.name,
-            artifact_dir=output_dir,
+    try:
+        with connect_readonly(db_path) as conn:
+            ctx = ValidationContext(
+                conn,
+                units=load_unit_registry(units_config),
+                validator_name=validator.definition.name,
+                artifact_dir=output_dir,
+            )
+            for endpoint in validator.definition.required_endpoints:
+                ctx.resolve_endpoint(endpoint)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            result = validator.run(ctx)
+        _validate_result(validator.definition.name, result)
+        finished_at = _utc_iso()
+        errors, warnings, info, total_findings = _finding_totals(result)
+        finding_samples = _finding_samples(result)
+        status = _status(errors, warnings, info)
+        run_record = {
+            "run_id": run_id,
+            "validator": validator.definition.name,
+            "title": validator.definition.title,
+            "status": status,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "findings": total_findings,
+            "errors": errors,
+            "warnings": warnings,
+            "info": info,
+        }
+        report_path, summary_path, findings_path = write_validation_artifacts(
+            output_dir,
+            result,
+            run_record=run_record,
         )
-        for endpoint in validator.definition.required_endpoints:
-            ctx.resolve_endpoint(endpoint)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        result = validator.run(ctx)
-    _validate_result(validator.definition.name, result)
-    finished_at = _utc_iso()
-    errors, warnings, info, total_findings = _finding_totals(result)
-    finding_samples = _finding_samples(result)
-    status = _status(errors, warnings, info)
-    run_record = {
-        "run_id": run_id,
-        "validator": validator.definition.name,
-        "title": validator.definition.title,
-        "status": status,
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "findings": total_findings,
-        "errors": errors,
-        "warnings": warnings,
-        "info": info,
-    }
-    report_path, summary_path, findings_path = write_validation_artifacts(
-        output_dir,
-        result,
-        run_record=run_record,
-    )
+    except Exception:
+        _remove_empty_output_dirs(output_dir)
+        raise
     return ValidationRunSummary(
         run_id=run_id,
         validator_name=validator.definition.name,
@@ -91,6 +95,14 @@ def _output_dir(validator_name: str, run_id: str, output_root: str | Path | None
         else runtime_home() / DEFAULT_VALIDATION_RUNS_DIR
     )
     return root / validator_name / run_id
+
+
+def _remove_empty_output_dirs(output_dir: Path) -> None:
+    for candidate in (output_dir, output_dir.parent):
+        try:
+            candidate.rmdir()
+        except OSError:
+            return
 
 
 def _status(errors: int, warnings: int, info: int) -> ValidationStatus:

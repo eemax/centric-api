@@ -292,6 +292,7 @@ def test_validation_run_rejects_inconsistent_explicit_totals(
     validators_dir.mkdir()
     _write_invalid_totals_validator(validators_dir / "invalid_totals.py")
     _seed_styles_cache(db_path)
+    output_root = tmp_path / "validation-runs"
 
     assert (
         main(
@@ -303,6 +304,8 @@ def test_validation_run_rejects_inconsistent_explicit_totals(
                 "invalid-totals",
                 "--db",
                 str(db_path),
+                "--output-dir",
+                str(output_root),
             ]
         )
         == 1
@@ -310,6 +313,7 @@ def test_validation_run_rejects_inconsistent_explicit_totals(
 
     captured = capsys.readouterr()
     assert "finding_totals cannot be smaller than exported samples" in captured.err
+    assert not (output_root / "invalid-totals").exists()
 
 
 def test_validate_run_all_requires_private_validators(
