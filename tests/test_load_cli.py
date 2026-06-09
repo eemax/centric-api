@@ -383,6 +383,182 @@ def test_style_bom_load_allows_missing_pm_id_header(tmp_path, monkeypatch, capsy
     assert payload["issues"] == []
 
 
+def test_style_bom_load_omits_blank_quantity(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "bom-lines-no-quantity.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=[
+            "Season",
+            "Style",
+            "BOM Name",
+            "Description",
+            "Subtype",
+            "Section",
+            "PM ID",
+            "Quantity",
+            "Material Code",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Main BOM",
+                "Main production BOM",
+                "Production",
+                "Fabrics",
+                "G2",
+                "",
+                "MAT-001",
+            ],
+        ],
+    )
+    _seed_style_bom_load_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "style-bom-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["request_samples"][2]["body"] == {
+        "actual": "M1",
+        "ds_section": "DRY-RUN-SECTION-Fabrics",
+        "pm_id": "G2",
+    }
+
+
+def test_style_bom_load_normalizes_comma_decimal_quantity(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "bom-lines-comma-quantity.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=[
+            "Season",
+            "Style",
+            "BOM Name",
+            "Description",
+            "Subtype",
+            "Section",
+            "PM ID",
+            "Quantity",
+            "Material Code",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Main BOM",
+                "Main production BOM",
+                "Production",
+                "Fabrics",
+                "G2",
+                "0,05",
+                "MAT-001",
+            ],
+        ],
+    )
+    _seed_style_bom_load_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "style-bom-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["request_samples"][2]["body"] == {
+        "actual": "M1",
+        "ds_section": "DRY-RUN-SECTION-Fabrics",
+        "pm_id": "G2",
+        "qty_default": 0.05,
+    }
+
+
+def test_style_bom_load_allows_missing_quantity_header(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "bom-lines-missing-quantity.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=[
+            "Season",
+            "Style",
+            "BOM Name",
+            "Description",
+            "Subtype",
+            "Section",
+            "PM ID",
+            "Material Code",
+        ],
+        rows=[
+            [
+                "SS26",
+                "ST-001",
+                "Main BOM",
+                "Main production BOM",
+                "Production",
+                "Fabrics",
+                "G2",
+                "MAT-001",
+            ],
+        ],
+    )
+    _seed_style_bom_load_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "check",
+                "style-bom-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["valid_rows"] == 1
+    assert payload["issues"] == []
+
+
 def test_style_bom_load_marks_line_failures_as_row_issues(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()

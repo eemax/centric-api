@@ -125,7 +125,7 @@ private `CENTRIC_API_HOME/validators` modules or a directory passed with `--vali
 `material-composition-create`, which parses composition text like `95% cotton, 5% polyester` and
 posts technical compositions to existing materials. It also includes `style-bom-load`, which
 validates style and season together, then chains BOM header, section, and material-line creation
-from one workbook. `PM ID` is optional for BOM line loads. It also includes
+from one workbook. `PM ID` and `Quantity` are optional for BOM line loads. It also includes
 `style-supplier-quote-load`, which chains product source, supplier item, optional quote factory,
 and optional production quote updates; `Agent` is optional on the product source.
 Use `load check` and `load run --dry-run` before running with `--yes`. Real runs write a

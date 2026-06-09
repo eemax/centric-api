@@ -125,7 +125,7 @@ def _parse_value(column: LoadColumn, raw_value: Any, row_number: int) -> Any | L
         return str(raw_value).strip()
     if column.type == "number":
         try:
-            value = Decimal(str(raw_value).strip())
+            value = Decimal(_normalize_number_text(raw_value))
         except (InvalidOperation, ValueError, AttributeError):
             return LoadIssue(
                 row=row_number,
@@ -153,6 +153,17 @@ def _parse_value(column: LoadColumn, raw_value: Any, row_number: int) -> Any | L
     if column.type == "composition_list":
         return _parse_composition_entries(column, raw_value, row_number)
     return raw_value
+
+
+def _normalize_number_text(value: Any) -> str:
+    text = str(value).strip().replace("\xa0", "").replace(" ", "")
+    if "," not in text:
+        return text
+    if "." not in text:
+        return text.replace(",", ".")
+    if text.rfind(",") > text.rfind("."):
+        return text.replace(".", "").replace(",", ".")
+    return text.replace(",", "")
 
 
 def _resolve_value(

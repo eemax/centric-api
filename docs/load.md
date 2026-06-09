@@ -141,8 +141,8 @@ Season, Style, BOM Name, Description, Subtype, Section, PM ID, Quantity, Materia
 ```
 
 This order is recommended for readable workbooks, but the loader matches columns by header name, so
-the actual Excel column order does not matter. `PM ID` is optional; when it is blank or omitted,
-the material-line payload leaves out `pm_id`.
+the actual Excel column order does not matter. `PM ID` and `Quantity` are optional; when blank or
+omitted, the material-line payload leaves out `pm_id` and `qty_default`.
 
 Rows are grouped by resolved style, BOM name, description, and subtype. For each group the workflow:
 
@@ -154,11 +154,12 @@ Rows are grouped by resolved style, BOM name, description, and subtype. For each
   `/v2/apparel_bom_revisions/{revision}/owned_sections/bom_section_definition`.
 - resolves `Material Code` through cached `materials.code`.
 - posts each line to `/v2/apparel_bom_revisions/{revision}/items/part_materials` with
-  `ds_section`, optional `pm_id`, `qty_default`, and `actual`.
+  `ds_section`, optional `pm_id`, optional `qty_default`, and `actual`.
 
-`Quantity` and `Material Code` come from the workbook, with optional `PM ID` when you need an
-internal line reference. The section creation response id is used as `ds_section`, and the material
-cache id is used as `actual`.
+`Material Code` comes from the workbook, with optional `PM ID` when you need an internal line
+reference and optional `Quantity` when Centric should receive `qty_default`. The section creation
+response id is used as `ds_section`, and the material cache id is used as `actual`.
+`Quantity` accepts either period or comma decimal separators, for example `0.05` or `0,05`.
 
 The bundled style supplier quote load workflow resolves a style within a season, creates a product
 source, creates one supplier item, optionally updates the supplier item revision with a quote

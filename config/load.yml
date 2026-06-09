@@ -140,7 +140,6 @@ jobs:
           - Qty
           - Qty Default
         type: number
-        required: true
       actual:
         header: Material Code
         headers:

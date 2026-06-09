@@ -327,7 +327,6 @@ def _require_style_bom_columns(job: LoadJob) -> None:
         "description",
         "subtype",
         "section",
-        "qty_default",
         "actual",
     }
     present = {column.key for column in job.columns}
@@ -542,11 +541,12 @@ def _style_bom_line_request(
     values = row.values
     body = {
         "ds_section": section_id,
-        "qty_default": values["qty_default"],
         "actual": values["actual"],
     }
     if not _is_blank(values.get("pm_id")):
         body["pm_id"] = values["pm_id"]
+    if not _is_blank(values.get("qty_default")):
+        body["qty_default"] = values["qty_default"]
     return LoadRequest(
         row=row.row,
         method="POST",
