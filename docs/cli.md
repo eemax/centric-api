@@ -289,8 +289,10 @@ uv run centric-api load show material-create
 uv run centric-api load check material-create materials.xlsx
 uv run centric-api load check material-create materials.xlsx --sheet Materials
 uv run centric-api load check material-composition-create material-compositions.xlsx
+uv run centric-api load run material-create-with-composition-and-quote materials.xlsx --dry-run
 uv run centric-api load run style-bom-load style-bom-lines.xlsx --dry-run
 uv run centric-api load run style-supplier-quote-load style-supplier-quotes.xlsx --dry-run
+uv run centric-api load run material-supplier-quote-load material-supplier-quotes.xlsx --dry-run
 uv run centric-api load run material-create materials.xlsx --dry-run
 uv run centric-api load run material-create materials.xlsx --yes
 uv run centric-api load retry material-create review.xlsx --dry-run
@@ -302,12 +304,16 @@ uv run centric-api load retry material-create review.xlsx --yes
 `material_types`, and posts valid rows to `/v2/materials`. The bundled
 `material-composition-create` job accepts either
 material IDs or material codes, parses natural-language composition text, and posts technical
-compositions to `/v2/materials/{material}/technical_compositions`. The bundled `style-bom-load`
-workflow validates a style within a season, then chains BOM header creation, owned section creation,
-and material line creation from one workbook. The bundled `style-supplier-quote-load` workflow
-validates a style within a season, optional supplier-agent membership, and optional supplier-factory
-membership, then chains product source, supplier item, quote factory, and optional production quote
-updates. If
+compositions to `/v2/materials/{material}/technical_compositions`.
+`material-create-with-composition` chains material creation with composition creation for new
+materials. `material-create-with-composition-and-quote` also chains material supplier quote creation
+for the new material. The bundled `style-bom-load` workflow validates a style within a season, then
+chains BOM header creation, owned section creation, and material line creation from one workbook. The
+bundled `style-supplier-quote-load` workflow validates a style within a season, optional
+supplier-agent membership, and optional supplier-factory membership, then chains product source,
+supplier item, quote factory, and optional production quote updates for styles.
+`material-supplier-quote-load` uses the same supplier quote chain for materials resolved by code
+and can set the material's default quote. If
 `--sheet` is omitted, the first worksheet is used.
 Real runs write a review workbook when rows receive API outcomes or validation errors; `retry`
 processes rows in a review workbook with `_cent_load_status` of `failed` or `validation_error`.

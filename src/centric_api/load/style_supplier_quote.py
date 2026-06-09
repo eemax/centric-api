@@ -39,6 +39,7 @@ from .models import (
     LoadRequest,
     LoadResponse,
     LoadRunResult,
+    MaterialSupplierQuoteRow,
     StyleSupplierQuoteReferences,
     StyleSupplierQuoteRow,
 )
@@ -57,7 +58,7 @@ def materialize_style_supplier_quote_workflow(
     retry_statuses: set[str] | None = None,
     progress_callback: LoadProgressCallback | None = None,
 ) -> LoadMaterialized:
-    parsed = _style_supplier_quote_rows(
+    return _materialize_supplier_quote_workflow(
         db_path,
         job,
         workbook_path,
@@ -66,8 +67,58 @@ def materialize_style_supplier_quote_workflow(
         mode=mode,
         retry_statuses=retry_statuses,
         progress_callback=progress_callback,
+        root="style",
     )
-    requests = _style_supplier_quote_planned_requests(parsed["rows"])
+
+
+def materialize_material_supplier_quote_workflow(
+    db_path: Path,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None = None,
+    limit: int | None = None,
+    mode: str = "check",
+    retry_statuses: set[str] | None = None,
+    progress_callback: LoadProgressCallback | None = None,
+) -> LoadMaterialized:
+    return _materialize_supplier_quote_workflow(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+        root="material",
+    )
+
+
+def _materialize_supplier_quote_workflow(
+    db_path: Path,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    mode: str,
+    retry_statuses: set[str] | None,
+    progress_callback: LoadProgressCallback | None,
+    root: str,
+) -> LoadMaterialized:
+    parsed = _supplier_quote_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+        root=root,
+    )
+    requests = _supplier_quote_planned_requests(parsed["rows"], root=root)
     _emit_progress(
         progress_callback,
         {
@@ -106,6 +157,71 @@ def run_style_supplier_quote_workflow(
     auth_ctx: AuthContext | None = None,
     progress_callback: LoadProgressCallback | None = None,
 ) -> LoadRunResult:
+    return _run_supplier_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        dry_run=dry_run,
+        yes=yes,
+        retry_statuses=retry_statuses,
+        materialized=materialized,
+        auth_ctx=auth_ctx,
+        progress_callback=progress_callback,
+        root="style",
+    )
+
+
+def run_material_supplier_quote_workflow(
+    db_path: Path,
+    config: LoadConfig,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    dry_run: bool,
+    yes: bool,
+    retry_statuses: set[str] | None = None,
+    materialized: LoadMaterialized | None = None,
+    auth_ctx: AuthContext | None = None,
+    progress_callback: LoadProgressCallback | None = None,
+) -> LoadRunResult:
+    return _run_supplier_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        dry_run=dry_run,
+        yes=yes,
+        retry_statuses=retry_statuses,
+        materialized=materialized,
+        auth_ctx=auth_ctx,
+        progress_callback=progress_callback,
+        root="material",
+    )
+
+
+def _run_supplier_quote_workflow(
+    db_path: Path,
+    config: LoadConfig,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    dry_run: bool,
+    yes: bool,
+    retry_statuses: set[str] | None,
+    materialized: LoadMaterialized | None,
+    auth_ctx: AuthContext | None,
+    progress_callback: LoadProgressCallback | None,
+    root: str,
+) -> LoadRunResult:
     if not dry_run and not yes:
         raise ConfigError("Non-dry-run load requires --yes.")
     mode = (
@@ -113,7 +229,7 @@ def run_style_supplier_quote_workflow(
         if retry_statuses and dry_run
         else ("retry" if retry_statuses else ("dry-run" if dry_run else "run"))
     )
-    parsed = _style_supplier_quote_rows(
+    parsed = _supplier_quote_rows(
         db_path,
         job,
         workbook_path,
@@ -122,6 +238,7 @@ def run_style_supplier_quote_workflow(
         mode=mode,
         retry_statuses=retry_statuses,
         progress_callback=progress_callback,
+        root=root,
     )
     started_at = _utc_iso()
     run_id = _run_id(job.name)
@@ -138,7 +255,7 @@ def run_style_supplier_quote_workflow(
         valid_rows=len(parsed["rows"]),
         error_rows=int(parsed["error_rows"]),
         issues=tuple(parsed["issues"]),
-        requests=tuple(_style_supplier_quote_planned_requests(parsed["rows"])),
+        requests=tuple(_supplier_quote_planned_requests(parsed["rows"], root=root)),
     )
     requests = list(materialized.requests)
     responses: list[LoadResponse] = []
@@ -152,9 +269,10 @@ def run_style_supplier_quote_workflow(
         requests = []
         responses = []
         if parsed["rows"]:
-            workflow_issues = _execute_style_supplier_quote_workflow(
+            workflow_issues = _execute_supplier_quote_workflow(
                 auth_ctx,
                 parsed["rows"],
+                root=root,
                 requests=requests,
                 responses=responses,
                 progress_callback=progress_callback,
@@ -230,7 +348,56 @@ def _style_supplier_quote_rows(
     retry_statuses: set[str] | None,
     progress_callback: LoadProgressCallback | None,
 ) -> dict[str, Any]:
-    _require_style_supplier_quote_columns(job)
+    return _supplier_quote_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+        root="style",
+    )
+
+
+def _material_supplier_quote_rows(
+    db_path: Path,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    mode: str,
+    retry_statuses: set[str] | None,
+    progress_callback: LoadProgressCallback | None,
+) -> dict[str, Any]:
+    return _supplier_quote_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+        root="material",
+    )
+
+
+def _supplier_quote_rows(
+    db_path: Path,
+    job: LoadJob,
+    workbook_path: Path,
+    *,
+    sheet: str | None,
+    limit: int | None,
+    mode: str,
+    retry_statuses: set[str] | None,
+    progress_callback: LoadProgressCallback | None,
+    root: str,
+) -> dict[str, Any]:
+    _require_supplier_quote_columns(job, root=root)
     workbook_path = workbook_path.expanduser()
     if not workbook_path.is_file():
         raise FileNotFoundError(f"Workbook not found: {workbook_path}")
@@ -275,7 +442,7 @@ def _style_supplier_quote_rows(
             job,
             progress_callback=progress_callback,
         )
-        rows: list[StyleSupplierQuoteRow] = []
+        rows: list[StyleSupplierQuoteRow | MaterialSupplierQuoteRow] = []
         issues: list[LoadIssue] = list(header_issues)
         rows_scanned = 0
         error_rows = 0
@@ -306,7 +473,10 @@ def _style_supplier_quote_rows(
                     error_rows += 1
                     issues.extend(row_issues)
                     continue
-                rows.append(StyleSupplierQuoteRow(row=row_number, values=values))
+                if root == "style":
+                    rows.append(StyleSupplierQuoteRow(row=row_number, values=values))
+                else:
+                    rows.append(MaterialSupplierQuoteRow(row=row_number, values=values))
         return {
             "sheet": worksheet.title,
             "rows_scanned": rows_scanned,
@@ -319,20 +489,25 @@ def _style_supplier_quote_rows(
 
 
 def _require_style_supplier_quote_columns(job: LoadJob) -> None:
+    _require_supplier_quote_columns(job, root="style")
+
+
+def _require_supplier_quote_columns(job: LoadJob, *, root: str) -> None:
     required = {
-        "season",
-        "style",
+        root,
         "supplier",
         "node_name",
         "description",
         "quote_factory",
         "set_production_quote",
     }
+    if root == "style":
+        required.add("season")
     present = {column.key for column in job.columns}
     missing = sorted(required - present)
     if missing:
         raise ConfigError(
-            f"load job[{job.name}] workflow style_supplier_quote is missing columns: "
+            f"load job[{job.name}] workflow {root}_supplier_quote is missing columns: "
             f"{', '.join(missing)}."
         )
 
@@ -531,20 +706,35 @@ def _ref_key(value: str) -> str:
 def _style_supplier_quote_planned_requests(
     rows: tuple[StyleSupplierQuoteRow, ...],
 ) -> tuple[LoadRequest, ...]:
+    return _supplier_quote_planned_requests(rows, root="style")
+
+
+def _material_supplier_quote_planned_requests(
+    rows: tuple[MaterialSupplierQuoteRow, ...],
+) -> tuple[LoadRequest, ...]:
+    return _supplier_quote_planned_requests(rows, root="material")
+
+
+def _supplier_quote_planned_requests(
+    rows: tuple[StyleSupplierQuoteRow, ...] | tuple[MaterialSupplierQuoteRow, ...],
+    *,
+    root: str,
+) -> tuple[LoadRequest, ...]:
     requests: list[LoadRequest] = []
     for row in rows:
-        requests.append(_style_supplier_quote_product_source_request(row))
+        requests.append(_supplier_quote_product_source_request(row, root=root))
         requests.append(
-            _style_supplier_quote_item_request(row, product_source_id="DRY-RUN-PRODUCT-SOURCE")
+            _supplier_quote_item_request(row, product_source_id="DRY-RUN-PRODUCT-SOURCE")
         )
         if not _is_blank(row.values.get("quote_factory")):
             requests.append(
-                _style_supplier_quote_revision_request(row, revision_id="DRY-RUN-REVISION")
+                _supplier_quote_revision_request(row, revision_id="DRY-RUN-REVISION")
             )
         if row.values.get("set_production_quote") is True:
             requests.append(
-                _style_supplier_quote_production_request(
+                _supplier_quote_production_request(
                     row,
+                    root=root,
                     supplier_item_id="DRY-RUN-SUPPLIER-ITEM",
                 )
             )
@@ -559,6 +749,25 @@ def _execute_style_supplier_quote_workflow(
     responses: list[LoadResponse],
     progress_callback: LoadProgressCallback | None,
 ) -> list[LoadIssue]:
+    return _execute_supplier_quote_workflow(
+        auth_ctx,
+        rows,
+        root="style",
+        requests=requests,
+        responses=responses,
+        progress_callback=progress_callback,
+    )
+
+
+def _execute_supplier_quote_workflow(
+    auth_ctx: AuthContext,
+    rows: tuple[StyleSupplierQuoteRow, ...] | tuple[MaterialSupplierQuoteRow, ...],
+    *,
+    root: str,
+    requests: list[LoadRequest],
+    responses: list[LoadResponse],
+    progress_callback: LoadProgressCallback | None,
+) -> list[LoadIssue]:
     issues: list[LoadIssue] = []
     total = sum(
         2
@@ -568,7 +777,7 @@ def _execute_style_supplier_quote_workflow(
     )
     index = 0
     for row in rows:
-        product_source_request = _style_supplier_quote_product_source_request(row)
+        product_source_request = _supplier_quote_product_source_request(row, root=root)
         index += 1
         product_source_response = _execute_chained_load_request(
             auth_ctx,
@@ -590,7 +799,7 @@ def _execute_style_supplier_quote_workflow(
             )
             continue
 
-        item_request = _style_supplier_quote_item_request(
+        item_request = _supplier_quote_item_request(
             row,
             product_source_id=str(product_source_id),
         )
@@ -622,7 +831,7 @@ def _execute_style_supplier_quote_workflow(
             continue
 
         if not _is_blank(row.values.get("quote_factory")):
-            revision_request = _style_supplier_quote_revision_request(
+            revision_request = _supplier_quote_revision_request(
                 row,
                 revision_id=str(revision_id),
             )
@@ -646,8 +855,9 @@ def _execute_style_supplier_quote_workflow(
                 )
 
         if row.values.get("set_production_quote") is True:
-            production_request = _style_supplier_quote_production_request(
+            production_request = _supplier_quote_production_request(
                 row,
+                root=root,
                 supplier_item_id=str(supplier_item_id),
             )
             index += 1
@@ -661,17 +871,26 @@ def _execute_style_supplier_quote_workflow(
                 progress_callback=progress_callback,
             )
             if not production_response.ok:
+                label = "Material default quote" if root == "material" else "Style production quote"
                 issues.append(
                     LoadIssue(
                         row=row.row,
                         code="production_quote_update_failed",
-                        message="Style production quote update failed.",
+                        message=f"{label} update failed.",
                     )
                 )
     return issues
 
 
 def _style_supplier_quote_product_source_request(row: StyleSupplierQuoteRow) -> LoadRequest:
+    return _supplier_quote_product_source_request(row, root="style")
+
+
+def _supplier_quote_product_source_request(
+    row: StyleSupplierQuoteRow | MaterialSupplierQuoteRow,
+    *,
+    root: str,
+) -> LoadRequest:
     values = row.values
     body = {"supplier": values["supplier"]}
     if not _is_blank(values.get("agent")):
@@ -679,13 +898,21 @@ def _style_supplier_quote_product_source_request(row: StyleSupplierQuoteRow) -> 
     return LoadRequest(
         row=row.row,
         method="POST",
-        path=f"/v2/styles/{values['style']}/product_sources",
+        path=f"/v2/{root}s/{values[root]}/product_sources",
         body=body,
     )
 
 
 def _style_supplier_quote_item_request(
     row: StyleSupplierQuoteRow,
+    *,
+    product_source_id: str,
+) -> LoadRequest:
+    return _supplier_quote_item_request(row, product_source_id=product_source_id)
+
+
+def _supplier_quote_item_request(
+    row: StyleSupplierQuoteRow | MaterialSupplierQuoteRow,
     *,
     product_source_id: str,
 ) -> LoadRequest:
@@ -706,6 +933,14 @@ def _style_supplier_quote_revision_request(
     *,
     revision_id: str,
 ) -> LoadRequest:
+    return _supplier_quote_revision_request(row, revision_id=revision_id)
+
+
+def _supplier_quote_revision_request(
+    row: StyleSupplierQuoteRow | MaterialSupplierQuoteRow,
+    *,
+    revision_id: str,
+) -> LoadRequest:
     return LoadRequest(
         row=row.row,
         method="PUT",
@@ -719,9 +954,23 @@ def _style_supplier_quote_production_request(
     *,
     supplier_item_id: str,
 ) -> LoadRequest:
+    return _supplier_quote_production_request(
+        row,
+        root="style",
+        supplier_item_id=supplier_item_id,
+    )
+
+
+def _supplier_quote_production_request(
+    row: StyleSupplierQuoteRow | MaterialSupplierQuoteRow,
+    *,
+    root: str,
+    supplier_item_id: str,
+) -> LoadRequest:
+    body_key = "default_quote" if root == "material" else "production_quote"
     return LoadRequest(
         row=row.row,
         method="PUT",
-        path=f"/v2/styles/{row.values['style']}",
-        body={"production_quote": supplier_item_id},
+        path=f"/v2/{root}s/{row.values[root]}",
+        body={body_key: supplier_item_id},
     )

@@ -36,6 +36,9 @@ packages = ["src/centric_api"]
 "config/units.yml" = "centric_api/default_config/units.yml"
 "config/views.yml" = "centric_api/default_config/views.yml"
 "src/centric_api/templates/endpoint-map.html" = "centric_api/templates/endpoint-map.html"
+"src/centric_api/templates/material-create-with-composition-template.xlsx" = "centric_api/templates/material-create-with-composition-template.xlsx"
+"src/centric_api/templates/material-create-with-composition-and-quote-template.xlsx" = "centric_api/templates/material-create-with-composition-and-quote-template.xlsx"
+"src/centric_api/templates/material-supplier-quote-load-template.xlsx" = "centric_api/templates/material-supplier-quote-load-template.xlsx"
 "src/centric_api/templates/style-bom-load-template.xlsx" = "centric_api/templates/style-bom-load-template.xlsx"
 "src/centric_api/templates/style-supplier-quote-load-template.xlsx" = "centric_api/templates/style-supplier-quote-load-template.xlsx"
 

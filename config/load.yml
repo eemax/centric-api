@@ -71,8 +71,219 @@ jobs:
           match: node_name
           output: id
           filters:
-            active: true
+            ok_for_material: true
     body: compositions
+
+  - name: material-create-with-composition
+    title: Material Create With Composition
+    workflow: material_create_with_composition
+    method: POST
+    path: /v2/materials
+    input:
+      header_row: 1
+    columns:
+      code:
+        header: Code
+        headers:
+          - Material Code
+        type: text
+        required: true
+      product_type:
+        header: Product Type
+        headers:
+          - Material Type
+          - Type
+        type: ref
+        required: true
+        resolve:
+          endpoint: material_types
+          match: node_name
+          output: id
+          filters:
+            available: true
+      description:
+        header: Description
+        headers:
+          - Desc
+        type: text
+      compositions:
+        header: Composition
+        headers:
+          - Technical Composition
+          - Material Composition
+          - Fiber Content
+          - Content
+        type: composition_list
+        required: true
+        resolve:
+          endpoint: compositions
+          match: node_name
+          output: id
+          filters:
+            ok_for_material: true
+    body:
+      code: code
+      product_type: product_type
+      description: description
+
+  - name: material-supplier-quote-load
+    title: Material Supplier Quote Load
+    workflow: material_supplier_quote
+    method: POST
+    path: /v2/materials/{material}/product_sources
+    input:
+      header_row: 1
+    columns:
+      material:
+        header: Material Code
+        headers:
+          - Material
+          - Code
+        type: ref
+        required: true
+        resolve:
+          endpoint: materials
+          match: code
+          output: id
+      supplier:
+        header: Supplier
+        headers:
+          - Supplier Name
+          - Supplier Number
+        type: text
+        required: true
+      agent:
+        header: Agent
+        headers:
+          - Agent Name
+          - Agent Number
+        type: text
+      node_name:
+        header: Supplier Item
+        headers:
+          - Supplier Quote
+          - Quote Name
+          - Node Name
+        type: text
+        required: true
+      description:
+        header: Description
+        headers:
+          - Desc
+        type: text
+      quote_factory:
+        header: Quote Factory
+        headers:
+          - Factory
+          - Factory Name
+          - Factory Number
+        type: text
+      set_production_quote:
+        header: Set Default Quote
+        headers:
+          - Set Production Quote
+          - Production Quote
+          - Default Quote
+        type: boolean
+    body:
+      supplier: supplier
+      agent: agent
+
+  - name: material-create-with-composition-and-quote
+    title: Material Create With Composition And Quote
+    workflow: material_create_with_composition_and_quote
+    method: POST
+    path: /v2/materials
+    input:
+      header_row: 1
+    columns:
+      code:
+        header: Code
+        headers:
+          - Material Code
+        type: text
+        required: true
+      product_type:
+        header: Product Type
+        headers:
+          - Material Type
+          - Type
+        type: ref
+        required: true
+        resolve:
+          endpoint: material_types
+          match: node_name
+          output: id
+          filters:
+            available: true
+      material_description:
+        header: Material Description
+        headers:
+          - Description
+          - Material Desc
+          - Desc
+        type: text
+      compositions:
+        header: Composition
+        headers:
+          - Technical Composition
+          - Material Composition
+          - Fiber Content
+          - Content
+        type: composition_list
+        required: true
+        resolve:
+          endpoint: compositions
+          match: node_name
+          output: id
+          filters:
+            ok_for_material: true
+      supplier:
+        header: Supplier
+        headers:
+          - Supplier Name
+          - Supplier Number
+        type: text
+        required: true
+      agent:
+        header: Agent
+        headers:
+          - Agent Name
+          - Agent Number
+        type: text
+      node_name:
+        header: Supplier Item
+        headers:
+          - Supplier Quote
+          - Quote Name
+          - Node Name
+        type: text
+        required: true
+      quote_description:
+        header: Quote Description
+        headers:
+          - Supplier Item Description
+          - Supplier Quote Description
+          - Quote Desc
+        type: text
+      quote_factory:
+        header: Quote Factory
+        headers:
+          - Factory
+          - Factory Name
+          - Factory Number
+        type: text
+      set_production_quote:
+        header: Set Default Quote
+        headers:
+          - Set Production Quote
+          - Production Quote
+          - Default Quote
+        type: boolean
+    body:
+      code: code
+      product_type: product_type
+      description: material_description
 
   - name: style-bom-load
     title: Style BOM Load

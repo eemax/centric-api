@@ -3,10 +3,16 @@
 `centric-api load` validates spreadsheet rows and can send them to Centric as API requests. Bundled
 jobs include `material-create`, which creates materials from an Excel workbook,
 `material-composition-create`, which posts parsed technical compositions onto existing materials,
+`material-create-with-composition`, which chains material creation and technical composition creation,
+`material-create-with-composition-and-quote`, which also creates a material supplier quote,
+`material-supplier-quote-load`, which creates material supplier quotes,
 `style-bom-load`, which creates a BOM header, owned sections, and material lines from one workbook,
 and `style-supplier-quote-load`, which creates style supplier quotes.
 
-Basic Excel templates live in `src/centric_api/templates/style-bom-load-template.xlsx` and
+Basic Excel templates live in `src/centric_api/templates/material-create-with-composition-template.xlsx`,
+`src/centric_api/templates/material-create-with-composition-and-quote-template.xlsx`,
+`src/centric_api/templates/material-supplier-quote-load-template.xlsx`,
+`src/centric_api/templates/style-bom-load-template.xlsx`, and
 `src/centric_api/templates/style-supplier-quote-load-template.xlsx`.
 
 Load jobs are intentionally schema-driven but small: the schema maps workbook headers to typed
@@ -24,6 +30,9 @@ uv run centric-api load run material-create materials.xlsx --yes
 uv run centric-api load retry material-create /path/to/review.xlsx --dry-run
 uv run centric-api load retry material-create /path/to/review.xlsx --yes
 uv run centric-api load check material-composition-create material-compositions.xlsx
+uv run centric-api load run material-create-with-composition materials.xlsx --dry-run
+uv run centric-api load run material-create-with-composition-and-quote materials.xlsx --dry-run
+uv run centric-api load run material-supplier-quote-load material-supplier-quotes.xlsx --dry-run
 uv run centric-api load run style-bom-load style-bom-lines.xlsx --dry-run
 uv run centric-api load run style-supplier-quote-load style-supplier-quotes.xlsx --dry-run
 ```
@@ -119,9 +128,112 @@ The bundled material composition job accepts either a cached material ID or a ma
         match: node_name
         output: id
         filters:
-          active: true
+          ok_for_material: true
   body: compositions
 ```
+
+The bundled `material-create-with-composition` workflow creates a material and then immediately uses
+the returned material id to post technical compositions:
+
+```yaml
+- name: material-create-with-composition
+  title: Material Create With Composition
+  workflow: material_create_with_composition
+  method: POST
+  path: /v2/materials
+```
+
+Expected workbook columns:
+
+```text
+Code, Product Type, Description, Composition
+```
+
+`Code`, `Product Type`, and `Composition` are required. `Description` is optional. `Product Type`
+resolves through cached available `material_types.node_name`, and `Composition` uses the same parser
+as `material-composition-create`.
+
+For each valid row the workflow:
+
+- posts the material to `/v2/materials` with `code`, `product_type`, and optional `description`.
+- reads `id` from the material create response.
+- posts the parsed composition array to `/v2/materials/{material}/technical_compositions`.
+
+The bundled `material-create-with-composition-and-quote` workflow creates a material, posts its
+technical composition, creates a material supplier quote, and can set that quote as the material
+default:
+
+```yaml
+- name: material-create-with-composition-and-quote
+  title: Material Create With Composition And Quote
+  workflow: material_create_with_composition_and_quote
+  method: POST
+  path: /v2/materials
+```
+
+Expected workbook columns:
+
+```text
+Code, Product Type, Material Description, Composition, Supplier, Agent, Supplier Item, Quote Description, Quote Factory, Set Default Quote
+```
+
+`Code`, `Product Type`, `Composition`, `Supplier`, and `Supplier Item` are required. `Agent`,
+`Material Description`, `Quote Description`, `Quote Factory`, and `Set Default Quote` are optional.
+Use `Material Description` for the material body and `Quote Description` for the supplier item body.
+
+For each valid row the workflow:
+
+- posts the material to `/v2/materials`.
+- reads `id` from the material create response.
+- posts the parsed composition array to `/v2/materials/{material}/technical_compositions`.
+- posts the product source to `/v2/materials/{material}/product_sources` with `supplier` and
+  optional `agent`.
+- posts the supplier item to `/v2/product_sources/{product_source}/supplier_items` with
+  `node_name` and optional quote description.
+- when `Quote Factory` is present, updates `/v2/supplier_item_revisions/{revision}` with
+  `quote_factory`.
+- when `Set Default Quote` is true, updates `/v2/materials/{material}` with `default_quote` set to
+  the new supplier item id.
+
+The bundled material supplier quote load workflow resolves a material by code, creates a product
+source, creates one supplier item, optionally updates the supplier item revision with a quote
+factory, and can optionally set the new supplier item as the material's default quote:
+
+```yaml
+- name: material-supplier-quote-load
+  title: Material Supplier Quote Load
+  workflow: material_supplier_quote
+  method: POST
+  path: /v2/materials/{material}/product_sources
+```
+
+Expected workbook columns:
+
+```text
+Material Code, Supplier, Agent, Supplier Item, Description, Quote Factory, Set Default Quote
+```
+
+This order is recommended for readable workbooks, but the loader matches columns by header name, so
+the actual Excel column order does not matter. `Agent`, `Description`, `Quote Factory`, and
+`Set Default Quote` are optional.
+
+For each row the workflow:
+
+- resolves `Material Code` through cached `materials.code`.
+- resolves `Supplier` by cached `suppliers.node_name` or `suppliers.supplier_number` and requires
+  `is_supplier` to be `true`.
+- resolves optional `Agent` by cached `suppliers.node_name` or `suppliers.supplier_number`,
+  requires `is_agent` to be `true`, and verifies the agent is linked to the chosen supplier.
+- resolves optional `Quote Factory` by cached `factories.node_name` or `factories.supplier_number`
+  and verifies the factory is linked to the chosen supplier.
+- posts the product source to `/v2/materials/{material}/product_sources` with `supplier` and
+  optional `agent`.
+- posts the supplier item to `/v2/product_sources/{product_source}/supplier_items` with
+  `node_name` and optional `description`.
+- when `Quote Factory` is present, updates the returned supplier item revision through
+  `/v2/supplier_item_revisions/{revision}` with `quote_factory`.
+- when `Set Default Quote` is true, updates `/v2/materials/{material}` with `default_quote` set to
+  the new supplier item id.
 
 The bundled style BOM load workflow resolves style/BOM header fields, then chains the API calls
 needed to create sections and material lines:
@@ -300,9 +412,9 @@ path: /v2/materials/{material}/technical_compositions
 column key makes that column value the root JSON body, which is how
 `material-composition-create` sends an array payload.
 
-Jobs with `workflow: style_bom` or `workflow: style_supplier_quote` are dedicated chained workflows. They
-still use the configured columns and cached reference resolution, but their requests are generated
-by Python workflow code so responses from earlier calls can feed later calls.
+Jobs with a non-default `workflow` are dedicated chained workflows. They still use the configured
+columns and cached reference resolution, but their requests are generated by Python workflow code so
+responses from earlier calls can feed later calls.
 
 ## Composition Lists
 

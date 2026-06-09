@@ -88,6 +88,24 @@ class LoadRunResult:
 
 
 @dataclass(frozen=True)
+class MaterialCreateCompositionRow:
+    row: int
+    values: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class MaterialCreateCompositionQuoteRow:
+    row: int
+    values: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class MaterialSupplierQuoteRow:
+    row: int
+    values: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class StyleBomRow:
     row: int
     values: dict[str, Any]

@@ -75,7 +75,7 @@ endpoints:
         equals: false
   compositions:
     delete_when_any:
-      - field: active
+      - field: ok_for_material
         equals: false
   material_compositions:
     delete_when_any:

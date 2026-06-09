@@ -140,12 +140,33 @@ def _write_review_workbook(
         worksheet = _select_sheet(workbook, result.sheet)
         columns = _review_column_indexes(worksheet, result.header_row)
         _clear_review_rows(worksheet, columns, result.header_row)
-        requests_by_row = {request.row: request for request in result.requests}
+        requests_by_row: dict[int, list[LoadRequest]] = {}
+        for request in result.requests:
+            requests_by_row.setdefault(request.row, []).append(request)
         issues_by_row: dict[int, list[LoadIssue]] = {}
         for issue in result.issues:
             if issue.row is not None:
                 issues_by_row.setdefault(issue.row, []).append(issue)
-        for row_number, issues in issues_by_row.items():
+        responses_by_row: dict[int, list[LoadResponse]] = {}
+        for response in responses:
+            responses_by_row.setdefault(response.row, []).append(response)
+        row_numbers = sorted(set(issues_by_row) | set(responses_by_row))
+        for row_number in row_numbers:
+            row_responses = responses_by_row.get(row_number, [])
+            row_requests = requests_by_row.get(row_number, [])
+            issues = issues_by_row.get(row_number, [])
+            if row_responses:
+                _write_response_review_summary(
+                    worksheet,
+                    row_number,
+                    columns,
+                    run_id=run_id,
+                    responses=row_responses,
+                    requests=row_requests,
+                    issues=issues,
+                    processed_at=processed_at,
+                )
+                continue
             _write_review_row(
                 worksheet,
                 row_number,
@@ -154,25 +175,8 @@ def _write_review_workbook(
                 status="validation_error",
                 status_code=None,
                 message="; ".join(issue.message for issue in issues),
-                request_path=requests_by_row.get(row_number).path
-                if row_number in requests_by_row
-                else "",
+                request_path=row_requests[-1].path if row_requests else "",
                 response_id="",
-                processed_at=processed_at,
-            )
-        for response in responses:
-            request = requests_by_row.get(response.row)
-            status = "success" if response.ok else "failed"
-            _write_review_row(
-                worksheet,
-                response.row,
-                columns,
-                run_id=run_id,
-                status=status,
-                status_code=response.status_code,
-                message=_response_message(response),
-                request_path=request.path if request else "",
-                response_id=_response_id(response),
                 processed_at=processed_at,
             )
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +190,61 @@ def _write_review_workbook(
         return output_path
     finally:
         workbook.close()
+
+
+def _write_response_review_summary(
+    worksheet: Any,
+    row_number: int,
+    columns: dict[str, int],
+    *,
+    run_id: str,
+    responses: list[LoadResponse],
+    requests: list[LoadRequest],
+    issues: list[LoadIssue],
+    processed_at: str,
+) -> None:
+    failed_index = next(
+        (index for index, response in enumerate(responses) if not response.ok),
+        None,
+    )
+    if failed_index is None and not issues:
+        response = responses[-1]
+        request = requests[-1] if requests else None
+        _write_review_row(
+            worksheet,
+            row_number,
+            columns,
+            run_id=run_id,
+            status="success",
+            status_code=response.status_code,
+            message="ok",
+            request_path=request.path if request else "",
+            response_id=_last_response_id(responses),
+            processed_at=processed_at,
+        )
+        return
+
+    response = responses[failed_index] if failed_index is not None else responses[-1]
+    request = (
+        requests[failed_index]
+        if failed_index is not None and failed_index < len(requests)
+        else (requests[-1] if requests else None)
+    )
+    messages = [issue.message for issue in issues]
+    if failed_index is not None:
+        messages.append(_response_message(response))
+    _write_review_row(
+        worksheet,
+        row_number,
+        columns,
+        run_id=run_id,
+        status="failed",
+        status_code=response.status_code,
+        message="; ".join(message for message in messages if message),
+        request_path=request.path if request else "",
+        response_id=_last_response_id(responses),
+        processed_at=processed_at,
+    )
 
 
 def _review_column_indexes(worksheet: Any, header_row: int) -> dict[str, int]:
@@ -260,6 +319,14 @@ def _response_id(response: LoadResponse) -> str:
         return ""
     value = response.body.get("id")
     return "" if _is_blank(value) else str(value)
+
+
+def _last_response_id(responses: list[LoadResponse]) -> str:
+    for response in reversed(responses):
+        response_id = _response_id(response)
+        if response_id:
+            return response_id
+    return ""
 
 
 def _request_url(auth_ctx: AuthContext, path: str) -> str:

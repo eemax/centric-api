@@ -224,13 +224,13 @@ def test_material_composition_create_resolves_code_and_parses_compositions(
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Cotton", "active": True},
+            payload={"id": "C1", "node_name": "Cotton", "ok_for_material": True},
         )
         _insert_record(
             conn,
             endpoint="compositions",
             record_id="C2",
-            payload={"id": "C2", "node_name": "Polyester", "active": True},
+            payload={"id": "C2", "node_name": "Polyester", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -273,13 +273,13 @@ def test_material_composition_create_accepts_direct_material_id_and_name_first(
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Cotton", "active": True},
+            payload={"id": "C1", "node_name": "Cotton", "ok_for_material": True},
         )
         _insert_record(
             conn,
             endpoint="compositions",
             record_id="C2",
-            payload={"id": "C2", "node_name": "Polyester", "active": True},
+            payload={"id": "C2", "node_name": "Polyester", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -322,13 +322,13 @@ def test_material_composition_create_accepts_unseparated_percent_first_entries(
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Cotton", "active": True},
+            payload={"id": "C1", "node_name": "Cotton", "ok_for_material": True},
         )
         _insert_record(
             conn,
             endpoint="compositions",
             record_id="C2",
-            payload={"id": "C2", "node_name": "Polyester", "active": True},
+            payload={"id": "C2", "node_name": "Polyester", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -381,13 +381,13 @@ def test_material_composition_create_accepts_flexible_recycled_polyester_names(
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Polyester - Recycled", "active": True},
+            payload={"id": "C1", "node_name": "Polyester - Recycled", "ok_for_material": True},
         )
         _insert_record(
             conn,
             endpoint="compositions",
             record_id="C2",
-            payload={"id": "C2", "node_name": "Elastane", "active": True},
+            payload={"id": "C2", "node_name": "Elastane", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -443,13 +443,13 @@ def test_material_composition_create_fails_ambiguous_canonical_composition(
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Polyester - Recycled", "active": True},
+            payload={"id": "C1", "node_name": "Polyester - Recycled", "ok_for_material": True},
         )
         _insert_record(
             conn,
             endpoint="compositions",
             record_id="C2",
-            payload={"id": "C2", "node_name": "Recycled Polyester", "active": True},
+            payload={"id": "C2", "node_name": "Recycled Polyester", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -489,7 +489,7 @@ def test_material_composition_create_fails_duplicate_material_code(
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Cotton", "active": True},
+            payload={"id": "C1", "node_name": "Cotton", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -525,7 +525,7 @@ def test_material_composition_create_fails_total_not_100(tmp_path, monkeypatch) 
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Cotton", "active": True},
+            payload={"id": "C1", "node_name": "Cotton", "ok_for_material": True},
         )
 
     config = load_load_config()
@@ -562,7 +562,7 @@ def test_material_composition_create_fails_unknown_composition(tmp_path, monkeyp
             conn,
             endpoint="compositions",
             record_id="C1",
-            payload={"id": "C1", "node_name": "Cotton", "active": True},
+            payload={"id": "C1", "node_name": "Cotton", "ok_for_material": True},
         )
 
     config = load_load_config()

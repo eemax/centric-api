@@ -120,8 +120,9 @@ removal events. `delete_when_any` replaces existing rules for that endpoint; `de
 adds rules to the defaults or an earlier shared schema file.
 
 The bundled endpoint schema tombstones inactive records for standard active/inactive endpoints.
-`bom_sections` also tombstones ad hoc sections because load workflows validate against active,
-standard BOM sections only.
+`compositions` uses `ok_for_material: false` because that endpoint does not expose the standard
+`active` field. `bom_sections` also tombstones ad hoc sections because load workflows validate
+against active, standard BOM sections only.
 
 ## Download Config
 
@@ -304,9 +305,9 @@ jobs:
       product_type: product_type
 ```
 
-Use `docs/load.md` as the full schema reference. Bundled load jobs include `material-create`,
-`material-composition-create`, `style-bom-load`, and `style-supplier-quote-load`; all can be extended or
-replaced by private `CENTRIC_API_HOME/load.yml`. Private load value sets live under
+Use `docs/load.md` as the full schema reference. Bundled load jobs include material create,
+composition, supplier quote, and style BOM workflows; all can be extended or replaced by private
+`CENTRIC_API_HOME/load.yml`. Private load value sets live under
 `CENTRIC_API_HOME/load/value-sets/{name}.xlsx`.
 
 ## Units Config

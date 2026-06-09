@@ -4,10 +4,16 @@ import json
 from pathlib import Path
 
 from centric_api.cli import main
-from centric_api.load import run_style_bom_workflow, run_style_supplier_quote_workflow
+from centric_api.load import (
+    run_material_create_with_composition_and_quote_workflow,
+    run_material_create_with_composition_workflow,
+    run_material_supplier_quote_workflow,
+    run_style_bom_workflow,
+    run_style_supplier_quote_workflow,
+)
 from centric_api.load_config import load_load_config, select_load_job
 from centric_api.store import connect
-from tests.helpers_load import _insert_record, _write_material_workbook
+from tests.helpers_load import _insert_record, _review_row, _write_material_workbook
 
 
 def test_load_cli_dry_run_writes_request_artifacts(tmp_path, monkeypatch, capsys) -> None:
@@ -100,6 +106,277 @@ def test_load_cli_json_request_samples_are_capped_at_three(tmp_path, monkeypatch
     payload = json.loads(capsys.readouterr().out)
     assert payload["requests"] == 4
     assert len(payload["request_samples"]) == 3
+
+
+def test_material_create_with_composition_dry_run_plans_chain(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials-with-composition.xlsx"
+    _write_material_create_composition_workbook(workbook_path)
+    _seed_material_create_composition_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "material-create-with-composition",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 2
+    assert payload["request_samples"][0]["path"] == "/v2/materials"
+    assert payload["request_samples"][0]["body"] == {
+        "code": "MAT-001",
+        "description": "Test fabric",
+        "product_type": "MT1",
+    }
+    assert payload["request_samples"][1]["path"] == (
+        "/v2/materials/DRY-RUN-MATERIAL/technical_compositions"
+    )
+    assert payload["request_samples"][1]["body"] == [
+        {"composition": "COTTON", "percentage": 100}
+    ]
+
+
+def test_material_create_with_composition_runs_chained_requests(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials-with-composition.xlsx"
+    _write_material_create_composition_workbook(workbook_path)
+    _seed_material_create_composition_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "material-create-with-composition")
+    auth = _MaterialCreateCompositionAuthContext()
+
+    result = run_material_create_with_composition_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 0
+    assert not result.issues
+    assert result.request_count == 2
+    assert auth.calls == [
+        (
+            "POST",
+            "https://example.test/api/v2/materials",
+            {"code": "MAT-001", "description": "Test fabric", "product_type": "MT1"},
+        ),
+        (
+            "POST",
+            "https://example.test/api/v2/materials/NEW-MAT/technical_compositions",
+            [{"composition": "COTTON", "percentage": 100}],
+        ),
+    ]
+
+
+def test_material_create_with_composition_marks_create_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials-with-composition.xlsx"
+    _write_material_create_composition_workbook(workbook_path)
+    _seed_material_create_composition_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "material-create-with-composition")
+    auth = _MaterialCreateCompositionAuthContext(fail_material=True)
+
+    result = run_material_create_with_composition_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 1
+    assert result.error_rows == 1
+    assert result.request_count == 1
+    assert [issue.code for issue in result.issues] == ["material_create_failed"]
+    assert [issue.row for issue in result.issues] == [2]
+
+
+def test_material_create_with_composition_and_quote_dry_run_plans_chain(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "material-full-create.xlsx"
+    _write_material_create_composition_quote_workbook(workbook_path)
+    _seed_material_create_composition_quote_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "material-create-with-composition-and-quote",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 6
+    assert payload["request_samples"][0]["path"] == "/v2/materials"
+    assert payload["request_samples"][0]["body"] == {
+        "code": "MAT-001",
+        "description": "Test fabric",
+        "product_type": "MT1",
+    }
+    assert payload["request_samples"][1]["path"] == (
+        "/v2/materials/DRY-RUN-MATERIAL/technical_compositions"
+    )
+    assert payload["request_samples"][2]["path"] == (
+        "/v2/materials/DRY-RUN-MATERIAL/product_sources"
+    )
+
+
+def test_material_create_with_composition_and_quote_runs_chained_requests(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "material-full-create.xlsx"
+    _write_material_create_composition_quote_workbook(workbook_path)
+    _seed_material_create_composition_quote_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "material-create-with-composition-and-quote")
+    auth = _MaterialCreateCompositionQuoteAuthContext()
+
+    result = run_material_create_with_composition_and_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 0
+    assert not result.issues
+    assert result.request_count == 6
+    assert auth.calls == [
+        (
+            "POST",
+            "https://example.test/api/v2/materials",
+            {"code": "MAT-001", "description": "Test fabric", "product_type": "MT1"},
+        ),
+        (
+            "POST",
+            "https://example.test/api/v2/materials/NEW-MAT/technical_compositions",
+            [{"composition": "COTTON", "percentage": 100}],
+        ),
+        (
+            "POST",
+            "https://example.test/api/v2/materials/NEW-MAT/product_sources",
+            {"agent": "A1", "supplier": "SUP1"},
+        ),
+        (
+            "POST",
+            "https://example.test/api/v2/product_sources/PS1/supplier_items",
+            {"description": "Primary material quote", "node_name": "Main Material Quote"},
+        ),
+        (
+            "PUT",
+            "https://example.test/api/v2/supplier_item_revisions/REV1",
+            {"quote_factory": "F1"},
+        ),
+        (
+            "PUT",
+            "https://example.test/api/v2/materials/NEW-MAT",
+            {"default_quote": "SQ1"},
+        ),
+    ]
+
+
+def test_material_create_with_composition_and_quote_review_keeps_partial_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "material-full-create.xlsx"
+    _write_material_create_composition_quote_workbook(workbook_path)
+    _seed_material_create_composition_quote_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "material-create-with-composition-and-quote")
+    auth = _MaterialCreateCompositionQuoteAuthContext(fail_composition=True)
+
+    result = run_material_create_with_composition_and_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 1
+    assert [issue.code for issue in result.issues] == ["material_composition_create_failed"]
+    assert result.review_path is not None
+    review_row = _review_row(result.review_path)
+    assert review_row["_cent_load_status"] == "failed"
+    assert review_row["_cent_load_status_code"] == 422
+    assert review_row["_cent_load_request_path"] == (
+        "/v2/materials/NEW-MAT/technical_compositions"
+    )
+    assert "Material composition request failed" in review_row["_cent_load_message"]
 
 
 def test_style_bom_load_dry_run_plans_header_sections_and_lines(
@@ -686,6 +963,98 @@ def test_style_supplier_quote_load_dry_run_plans_chain(tmp_path, monkeypatch, ca
     )
 
 
+def test_material_supplier_quote_load_dry_run_plans_chain(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "material-supplier-quotes.xlsx"
+    _write_material_supplier_quote_workbook(workbook_path)
+    _seed_material_supplier_quote_cache(db_path)
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "material-supplier-quote-load",
+                str(workbook_path),
+                "--db",
+                str(db_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 4
+    assert payload["request_samples"][0]["path"] == "/v2/materials/M1/product_sources"
+    assert payload["request_samples"][0]["body"] == {"agent": "A1", "supplier": "SUP1"}
+    assert payload["request_samples"][1]["path"] == (
+        "/v2/product_sources/DRY-RUN-PRODUCT-SOURCE/supplier_items"
+    )
+    assert payload["request_samples"][2]["path"] == (
+        "/v2/supplier_item_revisions/DRY-RUN-REVISION"
+    )
+
+
+def test_material_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "material-supplier-quotes.xlsx"
+    _write_material_supplier_quote_workbook(workbook_path)
+    _seed_material_supplier_quote_cache(db_path)
+    config = load_load_config()
+    job = select_load_job(config, "material-supplier-quote-load")
+    auth = _StyleSupplierQuoteAuthContext()
+
+    result = run_material_supplier_quote_workflow(
+        db_path,
+        config,
+        job,
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=auth,
+    )
+
+    assert result.failure_count == 0
+    assert not result.issues
+    assert result.request_count == 4
+    assert auth.calls == [
+        (
+            "POST",
+            "https://example.test/api/v2/materials/M1/product_sources",
+            {"agent": "A1", "supplier": "SUP1"},
+        ),
+        (
+            "POST",
+            "https://example.test/api/v2/product_sources/PS1/supplier_items",
+            {"description": "Primary material quote", "node_name": "Main Material Quote"},
+        ),
+        (
+            "PUT",
+            "https://example.test/api/v2/supplier_item_revisions/REV1",
+            {"quote_factory": "F1"},
+        ),
+        (
+            "PUT",
+            "https://example.test/api/v2/materials/M1",
+            {"default_quote": "SQ1"},
+        ),
+    ]
+
+
 def test_style_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -983,8 +1352,16 @@ jobs:
     assert "material-create" in list_output
     assert "private" in list_output
     assert "/v2/private-materials" in list_output
-    assert "material-create              private" in list_output
-    assert "material-create              bundled" not in list_output
+    assert any(
+        line.split()[0] == "material-create" and "private" in line
+        for line in list_output.splitlines()
+        if line.split()
+    )
+    assert not any(
+        line.split()[0] == "material-create" and "bundled" in line
+        for line in list_output.splitlines()
+        if line.split()
+    )
 
     assert main(["load", "show", "material-create"]) == 0
     show_output = capsys.readouterr().out
@@ -1133,6 +1510,67 @@ def test_load_cli_json_suppresses_human_progress(tmp_path, monkeypatch, capsys) 
     assert captured.err == ""
 
 
+def _write_material_create_composition_workbook(path: Path) -> None:
+    _write_material_workbook(
+        path,
+        headers=["Code", "Product Type", "Description", "Composition"],
+        rows=[["MAT-001", "Fabric", "Test fabric", "100% Cotton"]],
+    )
+
+
+def _write_material_create_composition_quote_workbook(path: Path) -> None:
+    _write_material_workbook(
+        path,
+        headers=[
+            "Code",
+            "Product Type",
+            "Material Description",
+            "Composition",
+            "Supplier",
+            "Agent",
+            "Supplier Item",
+            "Quote Description",
+            "Quote Factory",
+            "Set Default Quote",
+        ],
+        rows=[
+            [
+                "MAT-001",
+                "Fabric",
+                "Test fabric",
+                "100% Cotton",
+                "Primary Supplier",
+                "Primary Agent",
+                "Main Material Quote",
+                "Primary material quote",
+                "Primary Factory",
+                "Yes",
+            ],
+        ],
+    )
+
+
+def _seed_material_create_composition_cache(db_path: Path) -> None:
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="material_types",
+            record_id="MT1",
+            payload={"id": "MT1", "node_name": "Fabric", "available": True},
+        )
+        _insert_record(
+            conn,
+            endpoint="compositions",
+            record_id="COTTON",
+            payload={"id": "COTTON", "node_name": "Cotton", "ok_for_material": True},
+        )
+
+
+def _seed_material_create_composition_quote_cache(db_path: Path) -> None:
+    _seed_material_create_composition_cache(db_path)
+    _seed_style_supplier_quote_cache(db_path)
+
+
 def _write_style_bom_workbook(path: Path) -> None:
     _write_material_workbook(
         path,
@@ -1270,6 +1708,59 @@ def _write_style_supplier_quote_workbook(
     )
 
 
+def _write_material_supplier_quote_workbook(
+    path: Path,
+    *,
+    agent: str = "Primary Agent",
+    quote_factory: str = "Primary Factory",
+) -> None:
+    _write_material_workbook(
+        path,
+        headers=[
+            "Material Code",
+            "Supplier",
+            "Agent",
+            "Supplier Item",
+            "Description",
+            "Quote Factory",
+            "Set Default Quote",
+        ],
+        rows=[
+            [
+                "MAT-001",
+                "Primary Supplier",
+                agent,
+                "Main Material Quote",
+                "Primary material quote",
+                quote_factory,
+                "Yes",
+            ],
+        ],
+    )
+
+
+def _seed_material_supplier_quote_cache(
+    db_path: Path,
+    *,
+    supplier_agents: tuple[str, ...] = ("A1",),
+    factory_suppliers: tuple[str, ...] = ("SUP1",),
+    include_factory: bool = True,
+) -> None:
+    _seed_style_supplier_quote_cache(
+        db_path,
+        supplier_agents=supplier_agents,
+        factory_suppliers=factory_suppliers,
+        include_factory=include_factory,
+    )
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="materials",
+            record_id="M1",
+            payload={"id": "M1", "code": "MAT-001"},
+        )
+
+
 def _seed_style_supplier_quote_cache(
     db_path: Path,
     *,
@@ -1360,13 +1851,64 @@ class _StyleBomAuthContext:
 
 
 class _JsonResponse:
-    def __init__(self, status_code: int, payload: dict[str, object]) -> None:
+    def __init__(self, status_code: int, payload: object) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = json.dumps(payload)
 
-    def json(self) -> dict[str, object]:
+    def json(self) -> object:
         return self._payload
+
+
+class _MaterialCreateCompositionAuthContext:
+    base_url = "https://example.test"
+
+    def __init__(self, *, fail_material: bool = False) -> None:
+        self.fail_material = fail_material
+        self.calls: list[tuple[str, str, object]] = []
+
+    def request(self, method: str, url: str, *, json_body: object) -> object:
+        self.calls.append((method, url, json_body))
+        if url.endswith("/materials"):
+            if self.fail_material:
+                return _JsonResponse(422, {"message": "material rejected"})
+            return _JsonResponse(201, {"id": "NEW-MAT"})
+        if url.endswith("/technical_compositions"):
+            return _JsonResponse(201, [{"id": "COMP1"}])
+        return _JsonResponse(404, {"message": "unexpected url"})
+
+
+class _MaterialCreateCompositionQuoteAuthContext:
+    base_url = "https://example.test"
+
+    def __init__(self, *, fail_composition: bool = False) -> None:
+        self.fail_composition = fail_composition
+        self.calls: list[tuple[str, str, object]] = []
+
+    def request(self, method: str, url: str, *, json_body: object) -> object:
+        self.calls.append((method, url, json_body))
+        if method == "POST" and url.endswith("/materials"):
+            return _JsonResponse(201, {"id": "NEW-MAT"})
+        if url.endswith("/technical_compositions"):
+            if self.fail_composition:
+                return _JsonResponse(422, {"message": "composition rejected"})
+            return _JsonResponse(201, [{"id": "COMP1"}])
+        if url.endswith("/product_sources"):
+            return _JsonResponse(201, {"id": "PS1"})
+        if url.endswith("/supplier_items"):
+            return _JsonResponse(
+                201,
+                {
+                    "id": "SQ1",
+                    "latest_revision": "REV1",
+                    "current_revision": "REV1",
+                },
+            )
+        if url.endswith("/supplier_item_revisions/REV1"):
+            return _JsonResponse(200, {"id": "REV1", "quote_factory": "F1"})
+        if method == "PUT" and url.endswith("/materials/NEW-MAT"):
+            return _JsonResponse(200, {"id": "NEW-MAT", "default_quote": "SQ1"})
+        return _JsonResponse(404, {"message": "unexpected url"})
 
 
 class _StyleSupplierQuoteAuthContext:
@@ -1395,4 +1937,6 @@ class _StyleSupplierQuoteAuthContext:
             return _JsonResponse(200, {"id": "REV1", "quote_factory": "F1"})
         if url.endswith("/styles/S1"):
             return _JsonResponse(200, {"id": "S1", "production_quote": "SQ1"})
+        if url.endswith("/materials/M1"):
+            return _JsonResponse(200, {"id": "M1", "default_quote": "SQ1"})
         return _JsonResponse(404, {"message": "unexpected url"})

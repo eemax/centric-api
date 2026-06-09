@@ -10,9 +10,15 @@ from ..defaults import db_path as resolve_db_path
 from ..load import (
     RETRY_STATUSES,
     materialize_load,
+    materialize_material_create_with_composition_and_quote_workflow,
+    materialize_material_create_with_composition_workflow,
+    materialize_material_supplier_quote_workflow,
     materialize_style_bom_workflow,
     materialize_style_supplier_quote_workflow,
     run_load,
+    run_material_create_with_composition_and_quote_workflow,
+    run_material_create_with_composition_workflow,
+    run_material_supplier_quote_workflow,
     run_style_bom_workflow,
     run_style_supplier_quote_workflow,
 )
@@ -152,6 +158,12 @@ def _parse_retry_statuses(value: str | None) -> set[str]:
 
 
 def _workflow_materializer(workflow: str):
+    if workflow == "material_create_with_composition_and_quote":
+        return materialize_material_create_with_composition_and_quote_workflow
+    if workflow == "material_create_with_composition":
+        return materialize_material_create_with_composition_workflow
+    if workflow == "material_supplier_quote":
+        return materialize_material_supplier_quote_workflow
     if workflow == "style_bom":
         return materialize_style_bom_workflow
     if workflow == "style_supplier_quote":
@@ -160,6 +172,12 @@ def _workflow_materializer(workflow: str):
 
 
 def _workflow_runner(workflow: str):
+    if workflow == "material_create_with_composition_and_quote":
+        return run_material_create_with_composition_and_quote_workflow
+    if workflow == "material_create_with_composition":
+        return run_material_create_with_composition_workflow
+    if workflow == "material_supplier_quote":
+        return run_material_supplier_quote_workflow
     if workflow == "style_bom":
         return run_style_bom_workflow
     if workflow == "style_supplier_quote":
