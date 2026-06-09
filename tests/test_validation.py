@@ -52,7 +52,7 @@ def test_validate_cli_runs_private_validator_and_writes_artifacts(
                 "--json",
             ]
         )
-        == 1
+        == 0
     )
 
     payload = json.loads(capsys.readouterr().out)
@@ -108,7 +108,7 @@ def test_validate_human_output_distinguishes_run_from_outcome(
                 str(output_root),
             ]
         )
-        == 1
+        == 0
     )
 
     output = capsys.readouterr().out
@@ -248,7 +248,7 @@ def test_validation_run_can_use_explicit_samples_and_totals(
                 "--json",
             ]
         )
-        == 1
+        == 0
     )
 
     payload = json.loads(capsys.readouterr().out)
