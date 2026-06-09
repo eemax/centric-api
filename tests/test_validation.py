@@ -75,8 +75,10 @@ def test_validate_cli_runs_private_validator_and_writes_artifacts(
     assert findings_payload["truncated"] is False
     assert findings_payload["findings"][0]["code"] == "STYLE_NAME_MISSING"
 
-    workbook = load_workbook(report_path, read_only=True)
+    workbook = load_workbook(report_path, read_only=False)
     assert workbook.sheetnames[:3] == ["Summary", "Styles", "Findings"]
+    assert workbook["Styles"].auto_filter.ref == "A1:C3"
+    assert not workbook["Styles"].tables
     rows = list(workbook["Styles"].iter_rows(values_only=True))
     assert rows[0] == ("Style Id", "Style Name", "Status")
     assert rows[1] == ("S1", "Style One", "ok")
@@ -216,7 +218,9 @@ def test_validation_artifacts_can_cap_raw_finding_exports(tmp_path: Path) -> Non
     assert payload["exported_findings"] == 1
     assert payload["findings"][0]["record_id"] == "S0"
 
-    workbook = load_workbook(report_path, read_only=True)
+    workbook = load_workbook(report_path, read_only=False)
+    assert workbook["Findings"].auto_filter.ref == "A1:N2"
+    assert not workbook["Findings"].tables
     rows = list(workbook["Findings"].iter_rows(values_only=True))
     assert len(rows) == 2
     assert rows[1][8] == "S0"

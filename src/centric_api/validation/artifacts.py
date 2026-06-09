@@ -66,7 +66,6 @@ def write_validation_workbook(
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.utils import get_column_letter
-        from openpyxl.worksheet.table import Table, TableStyleInfo
     except ImportError as exc:  # pragma: no cover - dependency is declared
         raise RuntimeError("XLSX validation reports require openpyxl.") from exc
 
@@ -92,8 +91,6 @@ def write_validation_workbook(
     for sheet in workbook.worksheets:
         _format_sheet(
             sheet,
-            Table,
-            TableStyleInfo,
             get_column_letter,
             Alignment,
             Border,
@@ -186,8 +183,6 @@ def _headers_from_rows(rows: tuple[dict[str, Any], ...]) -> tuple[str, ...]:
 
 def _format_sheet(
     sheet: Any,
-    table_cls: Any,
-    table_style_cls: Any,
     get_column_letter: Any,
     alignment_cls: Any,
     border_cls: Any,
@@ -215,17 +210,6 @@ def _format_sheet(
     sheet.freeze_panes = "A2"
     if sheet.max_row >= 1 and sheet.max_column >= 1:
         sheet.auto_filter.ref = sheet.dimensions
-    if sheet.max_row >= 2 and sheet.max_column >= 1:
-        table_name = _excel_table_name(sheet.title)
-        table = table_cls(displayName=table_name, ref=sheet.dimensions)
-        table.tableStyleInfo = table_style_cls(
-            name="TableStyleMedium2",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False,
-        )
-        sheet.add_table(table)
 
 
 def _cell_value(value: Any) -> Any:
@@ -251,10 +235,3 @@ def _display_header(value: str) -> str:
 def _sheet_name(value: str) -> str:
     cleaned = re.sub(r"[\[\]:*?/\\]", " ", value).strip() or "Sheet"
     return cleaned[:31]
-
-
-def _excel_table_name(value: str) -> str:
-    cleaned = re.sub(r"\W+", "_", value.strip())
-    if not cleaned or cleaned[0].isdigit():
-        cleaned = f"Validation_{cleaned}"
-    return cleaned[:255]
