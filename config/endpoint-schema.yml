@@ -23,6 +23,10 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  apparel_dimensions:
+    delete_when_any:
+      - field: active
+        equals: false
   seasons:
     delete_when_any:
       - field: active
@@ -78,6 +82,10 @@ endpoints:
       - field: ok_for_material
         equals: false
   material_compositions:
+    delete_when_any:
+      - field: active
+        equals: false
+  care_symbols:
     delete_when_any:
       - field: active
         equals: false

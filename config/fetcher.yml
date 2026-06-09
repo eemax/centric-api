@@ -46,6 +46,32 @@ endpoints:
     path: product_sizes
     count_spec:
       path: count/ProductSize
+  - name: size_ranges
+    api_version: v2
+    path: size_ranges
+    count_spec:
+      path: count/SizeRange
+  - name: size_charts
+    api_version: v2
+    path: size_charts
+    count_spec:
+      path: count/SizeChart
+  - name: size_chart_revisions
+    api_version: v2
+    path: size_chart_revisions
+    count_spec:
+      path: count/SizeChartRevision
+  - name: size_chart_dimensions
+    api_version: v2
+    path: size_chart_dimensions
+    limit: 500
+    count_spec:
+      path: count/SizeChartDimension
+  - name: apparel_dimensions
+    api_version: v2
+    path: apparel_dimensions
+    count_spec:
+      path: count/ApparelDimension
   - name: bom_masters
     api_version: v2
     path: apparel_boms
@@ -106,6 +132,21 @@ endpoints:
     path: material_compositions
     count_spec:
       path: count/MaterialComposition
+  - name: care_and_compositions
+    api_version: v2
+    path: care_and_compositions
+    count_spec:
+      path: count/CareAndComposition
+  - name: care_and_composition_revisions
+    api_version: v2
+    path: care_and_composition_revisions
+    count_spec:
+      path: count/CareAndCompositionRevision
+  - name: care_symbols
+    api_version: v2
+    path: care_symbols
+    count_spec:
+      path: count/CareSymbol
   - name: countries
     api_version: v2
     path: countries

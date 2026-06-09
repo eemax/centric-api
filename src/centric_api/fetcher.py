@@ -27,6 +27,8 @@ from .fetch_common import (
 from .fetch_pagination import get_expected_count, iter_pages
 from .models import EndpointSpec, FetcherConfig, FetchProgressEvent, FetchRunResult
 
+COUNT_DRIFT_RELATIVE_TOLERANCE = 0.001
+
 
 def run_endpoint(
     spec: EndpointSpec,
@@ -260,6 +262,8 @@ def run_endpoint(
     next_skip = start_skip
     expected_pages = math.ceil(expected_count / spec.limit)
     page_durations: deque[float] = deque(maxlen=10)
+    last_page_skip: int | None = None
+    last_page_items: int | None = None
 
     def _fail_integrity(message: str) -> None:
         _emit_progress(
@@ -459,108 +463,172 @@ def run_endpoint(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open(mode, encoding="utf-8") as out_fh:
-        for page in iter_pages(
-            spec,
-            auth_ctx,
-            fetcher_cfg,
-            start_skip=start_skip,
-            already_fetched=items_fetched,
-            expected_total=expected_count,
-            retries_used_ref=retries_used_ref,
-            progress_callback=progress_callback,
-            api_log_callback=api_log_callback,
-        ):
-            pages_fetched += 1
-            for item in page.items:
-                out_fh.write(json.dumps(item, separators=(",", ":")) + "\n")
-                tracked_id_items += 1
-                invalid_detail = track_item_id(
-                    item,
-                    seen_ids=seen_ids,
-                    duplicate_id_set=duplicate_id_set,
-                    duplicate_ids=duplicate_ids,
+        try:
+            for page in iter_pages(
+                spec,
+                auth_ctx,
+                fetcher_cfg,
+                start_skip=start_skip,
+                already_fetched=items_fetched,
+                expected_total=expected_count,
+                retries_used_ref=retries_used_ref,
+                progress_callback=progress_callback,
+                api_log_callback=api_log_callback,
+            ):
+                last_page_skip = page.skip
+                last_page_items = len(page.items)
+                pages_fetched += 1
+                for item in page.items:
+                    out_fh.write(json.dumps(item, separators=(",", ":")) + "\n")
+                    tracked_id_items += 1
+                    invalid_detail = track_item_id(
+                        item,
+                        seen_ids=seen_ids,
+                        duplicate_id_set=duplicate_id_set,
+                        duplicate_ids=duplicate_ids,
+                    )
+                    if invalid_detail is not None:
+                        invalid_id_count += 1
+                        if first_invalid_id_detail is None:
+                            first_invalid_id_detail = invalid_detail
+                items_fetched += len(page.items)
+                next_skip = page.skip + spec.limit
+                page_durations.append(page.duration_seconds)
+                rolling_avg_seconds = sum(page_durations) / len(page_durations)
+                remaining_items = max(expected_count - items_fetched, 0)
+                remaining_pages = math.ceil(remaining_items / spec.limit)
+                estimated_remaining_seconds = remaining_pages * rolling_avg_seconds
+                write_checkpoint(
+                    checkpoint_path,
+                    spec.name,
+                    next_skip,
+                    items_fetched,
+                    delta_floor=effective_delta_floor,
+                    completed=False,
+                    restart_from_zero=False,
+                    window_start_line=window_start_line,
+                    output_file=output_path,
                 )
-                if invalid_detail is not None:
-                    invalid_id_count += 1
-                    if first_invalid_id_detail is None:
-                        first_invalid_id_detail = invalid_detail
-            items_fetched += len(page.items)
-            next_skip = page.skip + spec.limit
-            page_durations.append(page.duration_seconds)
-            rolling_avg_seconds = sum(page_durations) / len(page_durations)
-            remaining_items = max(expected_count - items_fetched, 0)
-            remaining_pages = math.ceil(remaining_items / spec.limit)
-            estimated_remaining_seconds = remaining_pages * rolling_avg_seconds
-            write_checkpoint(
-                checkpoint_path,
-                spec.name,
-                next_skip,
-                items_fetched,
-                delta_floor=effective_delta_floor,
-                completed=False,
-                restart_from_zero=False,
-                window_start_line=window_start_line,
-                output_file=output_path,
-            )
-            _emit_api_log(
-                api_log_callback,
-                {
-                    "level": "debug",
-                    "event": "checkpoint_written",
-                    "endpoint": spec.name,
-                    "checkpoint_file": str(checkpoint_path),
-                    "next_skip": next_skip,
-                    "fetched_count": items_fetched,
-                    "completed": False,
-                    "delta_floor": effective_delta_floor,
-                    "restart_from_zero": False,
-                    "window_start_line": window_start_line,
-                },
-            )
-            percent_complete = (
-                min(100.0, (items_fetched / expected_count) * 100.0) if expected_count > 0 else None
-            )
-            _emit_progress(
-                progress_callback,
-                FetchProgressEvent(
-                    kind="page_fetched",
-                    endpoint=spec.name,
-                    page_index=pages_fetched,
-                    page_items=len(page.items),
-                    pages_fetched=pages_fetched,
-                    items_fetched=items_fetched,
-                    skip=page.skip,
-                    next_skip=next_skip,
-                    expected_count=expected_count,
-                    expected_pages=expected_pages,
-                    percent_complete=percent_complete,
-                    page_duration_seconds=page.duration_seconds,
-                    rolling_avg_seconds=rolling_avg_seconds,
-                    estimated_remaining_seconds=estimated_remaining_seconds,
-                    retries_used=retries_used_ref[0],
-                    elapsed_seconds=time.time() - started,
-                ),
-            )
+                _emit_api_log(
+                    api_log_callback,
+                    {
+                        "level": "debug",
+                        "event": "checkpoint_written",
+                        "endpoint": spec.name,
+                        "checkpoint_file": str(checkpoint_path),
+                        "next_skip": next_skip,
+                        "fetched_count": items_fetched,
+                        "completed": False,
+                        "delta_floor": effective_delta_floor,
+                        "restart_from_zero": False,
+                        "window_start_line": window_start_line,
+                    },
+                )
+                percent_complete = (
+                    min(100.0, (items_fetched / expected_count) * 100.0)
+                    if expected_count > 0
+                    else None
+                )
+                _emit_progress(
+                    progress_callback,
+                    FetchProgressEvent(
+                        kind="page_fetched",
+                        endpoint=spec.name,
+                        page_index=pages_fetched,
+                        page_items=len(page.items),
+                        pages_fetched=pages_fetched,
+                        items_fetched=items_fetched,
+                        skip=page.skip,
+                        next_skip=next_skip,
+                        expected_count=expected_count,
+                        expected_pages=expected_pages,
+                        percent_complete=percent_complete,
+                        page_duration_seconds=page.duration_seconds,
+                        rolling_avg_seconds=rolling_avg_seconds,
+                        estimated_remaining_seconds=estimated_remaining_seconds,
+                        retries_used=retries_used_ref[0],
+                        elapsed_seconds=time.time() - started,
+                    ),
+                )
+        except FetchError as exc:
+            out_fh.flush()
+            _fail_integrity(str(exc))
 
     if items_fetched != expected_count:
         mismatch_error = (
             f"Fetched {items_fetched} items for '{spec.name}' "
             f"but count preflight expected {expected_count}."
         )
-        _emit_api_log(
-            api_log_callback,
-            {
-                "level": "summary",
-                "event": "count_mismatch_failed",
-                "endpoint": spec.name,
-                "expected_count": expected_count,
-                "items_fetched": items_fetched,
-            },
-        )
-        _fail_integrity(
-            f"{mismatch_error} Post-fetch integrity requires expected count to match actual count. "
-            "Action: exit endpoint."
-        )
+        count_delta = items_fetched - expected_count
+        if _is_acceptable_count_drift(
+            items_fetched=items_fetched,
+            expected_count=expected_count,
+            limit=spec.limit,
+            last_page_items=last_page_items,
+        ):
+            count_validation_status = "warning"
+            count_validation_reason = (
+                f"{mismatch_error} Accepted as small count drift during pagination."
+            )
+            warnings.append(count_validation_reason)
+            _emit_api_log(
+                api_log_callback,
+                {
+                    "level": "summary",
+                    "event": "count_mismatch_warn",
+                    "endpoint": spec.name,
+                    "expected_count": expected_count,
+                    "items_fetched": items_fetched,
+                    "count_delta": count_delta,
+                    "last_page_skip": last_page_skip,
+                    "last_page_items": last_page_items,
+                    "limit": spec.limit,
+                },
+            )
+            _emit_progress(
+                progress_callback,
+                FetchProgressEvent(
+                    kind="warning",
+                    endpoint=spec.name,
+                    message=count_validation_reason,
+                    pages_fetched=pages_fetched,
+                    items_fetched=items_fetched,
+                    expected_count=expected_count,
+                    retries_used=retries_used_ref[0],
+                    elapsed_seconds=time.time() - started,
+                ),
+            )
+        else:
+            if (
+                items_fetched < expected_count
+                and last_page_skip is not None
+                and last_page_items is not None
+            ):
+                mismatch_error = (
+                    f"Data pagination ended early for '{spec.name}': "
+                    f"last page skip={last_page_skip} limit={spec.limit} returned "
+                    f"{last_page_items} items after fetching {items_fetched} of expected "
+                    f"{expected_count}."
+                )
+            _emit_api_log(
+                api_log_callback,
+                {
+                    "level": "summary",
+                    "event": "count_mismatch_failed",
+                    "endpoint": spec.name,
+                    "expected_count": expected_count,
+                    "items_fetched": items_fetched,
+                    "last_page_skip": last_page_skip,
+                    "last_page_items": last_page_items,
+                    "limit": spec.limit,
+                },
+            )
+            _fail_integrity(
+                f"{mismatch_error} Post-fetch integrity requires expected count to match "
+                "actual count unless the difference is tiny enough to be treated as count "
+                "drift. Action: retry endpoint; if repeated, inspect endpoint sort/count "
+                "filters or lower the page limit."
+            )
 
     if invalid_id_count > 0 or duplicate_ids:
         detail_parts: list[str] = []
@@ -593,22 +661,40 @@ def run_endpoint(
         _fail_integrity(validation_error)
 
     unique_id_count = len(seen_ids)
-    if unique_id_count != expected_count:
+    if unique_id_count != tracked_id_items:
         _emit_api_log(
             api_log_callback,
             {
                 "level": "summary",
                 "event": "unique_id_count_mismatch_failed",
                 "endpoint": spec.name,
-                "expected_count": expected_count,
                 "checked_items": tracked_id_items,
                 "unique_ids": unique_id_count,
             },
         )
         _fail_integrity(
             f"Post-fetch ID validation failed for '{spec.name}': "
-            f"expected {expected_count} unique ids, found {unique_id_count}. "
+            f"checked {tracked_id_items} items but found {unique_id_count} unique ids. "
             "Action: exit endpoint."
         )
 
     return _finish_success(output_file_created=True)
+
+
+def _is_acceptable_count_drift(
+    *,
+    items_fetched: int,
+    expected_count: int,
+    limit: int,
+    last_page_items: int | None,
+) -> bool:
+    if expected_count <= 0 or items_fetched <= 0:
+        return False
+    if last_page_items is None or last_page_items >= limit:
+        return False
+    delta = abs(expected_count - items_fetched)
+    if delta == 0:
+        return False
+    if delta > limit:
+        return False
+    return (delta / expected_count) <= COUNT_DRIFT_RELATIVE_TOLERANCE

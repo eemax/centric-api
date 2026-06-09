@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 import yaml
@@ -20,6 +21,7 @@ from centric_api.commands.cron import run_cron_fetch_once
 from centric_api.commands.fetch import _allocate_run_id, run_fetch
 from centric_api.fetch_common import FetchError
 from centric_api.models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
+from centric_api.rendering.fetch import print_human_fetch_summary
 from centric_api.rendering.logs import render_log_line
 from centric_api.runtime_io import parse_jsonl
 from centric_api.store import IngestResult
@@ -158,6 +160,65 @@ def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     assert "Fetch run" not in captured.err
     assert "Pipeline" not in captured.err
     assert "changelog=running" not in captured.err
+
+def test_fetch_warning_propagates_to_json_manifest_delta_and_logs(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    monkeypatch.setattr(
+        "centric_api.commands.fetch.run_endpoint",
+        lambda *_args, **_kwargs: FetchRunResult(
+            endpoint="styles",
+            pages_fetched=3,
+            items_fetched=1499,
+            expected_count=1498,
+            retries_used=0,
+            start_skip=0,
+            next_skip=1500,
+            duration_seconds=1.2,
+            output_file=tmp_path / "raw" / "styles.jsonl",
+            checkpoint_file=tmp_path / "checkpoints" / "styles.json",
+            warnings=["count drift"],
+            count_validation_status="warning",
+            count_validation_reason="count drift",
+            id_validation_checked_items=1499,
+            id_validation_unique_ids=1499,
+        ),
+    )
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db"), "--json"])
+
+    captured = capsys.readouterr()
+    records = parse_jsonl(captured.out)
+    endpoint_record = next(record for record in records if record.get("endpoint") == "styles")
+    pipeline_record = next(
+        record for record in records if record.get("record_type") == "pipeline_summary"
+    )
+    manifest = json.loads(Path(pipeline_record["manifest"]).read_text(encoding="utf-8"))
+    delta_state = yaml.safe_load((tmp_path / "delta.yml").read_text(encoding="utf-8"))
+    log_text = (tmp_path / "logs" / "fetch.log").read_text(encoding="utf-8")
+
+    assert exit_code == 0
+    assert endpoint_record["status"] == "warn"
+    assert endpoint_record["warnings_count"] == 1
+    assert endpoint_record["count_validation"] == "warning"
+    assert pipeline_record["status"] == "warn"
+    assert pipeline_record["endpoints_ok"] == 0
+    assert pipeline_record["endpoints_warn"] == 1
+    assert pipeline_record["endpoints_failed"] == 0
+    assert manifest["status"] == "WARN"
+    assert manifest["endpoints_ok"] == 0
+    assert manifest["endpoints_warn"] == 1
+    assert manifest["endpoints"]["styles"]["status"] == "WARN"
+    assert manifest["endpoints"]["styles"]["warnings_count"] == 1
+    assert manifest["endpoints"]["styles"]["count_validation"] == "warning"
+    assert delta_state["endpoints"]["styles"]["last_attempted_status"] == "WARN"
+    assert "last_successful_fetch_start" in delta_state["endpoints"]["styles"]
+    assert "ENDPOINT warn" in log_text
+    assert "RUN warn" in log_text
 
 def test_fetch_does_not_advance_delta_success_on_pipeline_failure(
     tmp_path,
@@ -319,9 +380,122 @@ def test_fetch_partial_result_reports_partial_status(
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "[boms] ERROR  elapsed=" in captured.err
-    assert "status=partial endpoints=1/2 records=100 pages=2 retries=0 elapsed=" in captured.err
+    assert (
+        "status=partial endpoints=1 ok, 0 warn, 1 failed, 2 total "
+        "records=100 pages=2 retries=0 elapsed="
+    ) in captured.err
     assert "Fetch finished with failures" in captured.out
-    assert "- boms: HTTP 400 Bad Request" in captured.out
+    assert "boms" in captured.out
+    assert "failed" in captured.out
+    assert "- boms\n  HTTP 400 Bad Request" in captured.out
+
+def test_fetch_summary_shows_count_drift_warning(tmp_path, capsys) -> None:
+    print_human_fetch_summary(
+        mode="delta",
+        run_id="run-1",
+        raw_dir=tmp_path / "raw",
+        selected_count=3,
+        results=[
+            FetchRunResult(
+                endpoint="styles",
+                pages_fetched=2,
+                items_fetched=100,
+                expected_count=100,
+                retries_used=0,
+                start_skip=0,
+                next_skip=100,
+                duration_seconds=1.0,
+                output_file=tmp_path / "raw" / "styles.jsonl",
+                checkpoint_file=tmp_path / "checkpoints" / "styles.json",
+                id_validation_checked_items=100,
+                id_validation_unique_ids=100,
+            ),
+            FetchRunResult(
+                endpoint="size_charts",
+                pages_fetched=3,
+                items_fetched=1499,
+                expected_count=1498,
+                retries_used=0,
+                start_skip=0,
+                next_skip=1500,
+                duration_seconds=1.2,
+                output_file=tmp_path / "raw" / "size_charts.jsonl",
+                checkpoint_file=tmp_path / "checkpoints" / "size_charts.json",
+                warnings=["count drift"],
+                count_validation_status="warning",
+                count_validation_reason="count drift",
+                id_validation_checked_items=1499,
+                id_validation_unique_ids=1499,
+            )
+        ],
+        failures=[
+            (
+                "size_chart_revisions",
+                "Data pagination ended early for 'size_chart_revisions': last page "
+                "skip=1000 limit=500 returned 0 items after fetching 1000 of expected 1001.",
+            )
+        ],
+        duration_seconds=1.2,
+        ingest_result=None,
+        changelog_run=None,
+        changelog_skipped=None,
+        pipeline_error=None,
+    )
+
+    output = capsys.readouterr().out
+    assert "Fetch finished with failures" in output
+    assert "Endpoints: 1 ok, 1 warn, 1 failed, 3 total" in output
+    assert "Count Diff" in output
+    assert "Diff %" in output
+    assert "styles" in output
+    assert "size_charts" in output
+    assert "warn" in output
+    styles_row = next(line for line in output.splitlines() if line.startswith("styles"))
+    styles_columns = styles_row.split()
+    assert styles_columns[4:6] == ["0", "-"]
+    assert "+1 over" in output
+    assert "+0.067%" in output
+    assert "size_chart_revisions" in output
+    assert "failed" in output
+    assert "-1 under" in output
+    assert "-0.100%" in output
+
+def test_fetch_summary_title_shows_warning_without_failures(tmp_path, capsys) -> None:
+    print_human_fetch_summary(
+        mode="delta",
+        run_id="run-1",
+        raw_dir=tmp_path / "raw",
+        selected_count=1,
+        results=[
+            FetchRunResult(
+                endpoint="size_charts",
+                pages_fetched=3,
+                items_fetched=1499,
+                expected_count=1498,
+                retries_used=0,
+                start_skip=0,
+                next_skip=1500,
+                duration_seconds=1.2,
+                output_file=tmp_path / "raw" / "size_charts.jsonl",
+                checkpoint_file=tmp_path / "checkpoints" / "size_charts.json",
+                warnings=["count drift"],
+                count_validation_status="warning",
+                count_validation_reason="count drift",
+                id_validation_checked_items=1499,
+                id_validation_unique_ids=1499,
+            )
+        ],
+        failures=[],
+        duration_seconds=1.2,
+        ingest_result=None,
+        changelog_run=None,
+        changelog_skipped=None,
+        pipeline_error=None,
+    )
+
+    output = capsys.readouterr().out
+    assert output.startswith("Fetch complete with warnings")
+    assert "Endpoints: 0 ok, 1 warn, 0 failed, 1 total" in output
 
 def test_fetch_run_id_suffixes_existing_run_dirs(tmp_path) -> None:
     raw_root = tmp_path / "raw"

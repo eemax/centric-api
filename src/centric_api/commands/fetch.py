@@ -29,7 +29,12 @@ from ..fetch_delta_state import (
     update_delta_state_for_endpoint,
     write_delta_state,
 )
-from ..fetch_manifest import endpoint_manifest_record, write_run_manifest
+from ..fetch_manifest import (
+    endpoint_manifest_record,
+    fetch_result_has_warning,
+    fetch_result_status,
+    write_run_manifest,
+)
 from ..fetcher import FetchError, run_endpoint
 from ..models import EndpointSpec, FetchProgressEvent, FetchRunResult
 from ..rendering.fetch import (
@@ -50,6 +55,7 @@ PipelineProgressCallback = Callable[[str], None]
 @dataclass(frozen=True)
 class _DeltaStateUpdate:
     endpoint_name: str
+    status: str
     attempt_start: str
     attempt_end: str
 
@@ -206,19 +212,22 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         api_log_callback=log_callback,
                     )
                     results.append(result)
-                    status = "OK"
+                    status = fetch_result_status(result, uppercase=True)
                     attempt_end = utc_iso()
                     if log_callback:
+                        event = "endpoint_warn" if status == "WARN" else "endpoint_ok"
                         log_callback(
                             {
                                 "level": "summary",
-                                "event": "endpoint_ok",
+                                "event": event,
                                 "endpoint": result.endpoint,
                                 "mode": mode,
+                                "status": status,
                                 "expected": result.expected_count,
                                 "fetched": result.items_fetched,
                                 "pages": result.pages_fetched,
                                 "retries": result.retries_used,
+                                "warnings": len(result.warnings),
                                 "duration_seconds": round(result.duration_seconds, 3),
                                 "output": (
                                     str(result.output_file) if result.output_file_created else None
@@ -243,6 +252,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         pending_successful_delta_updates.append(
                             _DeltaStateUpdate(
                                 endpoint_name=spec.name,
+                                status=status,
                                 attempt_start=attempt_start,
                                 attempt_end=attempt_end,
                             )
@@ -292,13 +302,15 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         write_delta_state(delta_state_file, delta_state)
     except BaseException as exc:
         if isinstance(exc, KeyboardInterrupt) and log_callback:
+            endpoints_warn = sum(1 for result in results if fetch_result_has_warning(result))
             log_callback(
                 {
                     "level": "summary",
                     "event": "run_interrupted",
                     "run_id": run_id,
                     "mode": mode,
-                    "endpoints_ok": len(results),
+                    "endpoints_ok": len(results) - endpoints_warn,
+                    "endpoints_warn": endpoints_warn,
                     "endpoints_failed": len(failures),
                     "endpoints_total": len(selected_specs),
                     "duration_seconds": round(time.time() - started, 3),
@@ -479,15 +491,21 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     )
 
     duration_seconds = time.time() - started
+    endpoints_warn = sum(1 for result in results if fetch_result_has_warning(result))
+    endpoints_ok = len(results) - endpoints_warn
     run_status = "ok"
     if pipeline_error or (selected_specs and len(failures) == len(selected_specs)):
         run_status = "failed"
     elif failures:
         run_status = "partial"
+    elif endpoints_warn:
+        run_status = "warn"
     _emit_run_result_progress(
         pipeline_progress,
         status=run_status,
-        endpoints_ok=len(results),
+        endpoints_ok=endpoints_ok,
+        endpoints_warn=endpoints_warn,
+        endpoints_failed=len(failures),
         endpoints_total=len(selected_specs),
         records=sum(result.items_fetched for result in results),
         pages=sum(result.pages_fetched for result in results),
@@ -501,7 +519,8 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                 "event": f"run_{run_status}",
                 "run_id": run_id,
                 "mode": mode,
-                "endpoints_ok": len(results),
+                "endpoints_ok": endpoints_ok,
+                "endpoints_warn": endpoints_warn,
                 "endpoints_failed": len(failures),
                 "endpoints_total": len(selected_specs),
                 "fetched": sum(result.items_fetched for result in results),
@@ -662,8 +681,8 @@ def _apply_successful_delta_updates(
 ) -> None:
     if not updates:
         return
-    status = "OK" if pipeline_error is None else "PIPELINE_FAILED"
     for update in updates:
+        status = update.status if pipeline_error is None else "PIPELINE_FAILED"
         update_delta_state_for_endpoint(
             delta_state,
             endpoint_name=update.endpoint_name,
@@ -706,6 +725,8 @@ def _emit_run_result_progress(
     *,
     status: str,
     endpoints_ok: int,
+    endpoints_warn: int,
+    endpoints_failed: int,
     endpoints_total: int,
     records: int,
     pages: int,
@@ -717,7 +738,9 @@ def _emit_run_result_progress(
     progress("")
     progress("Fetch result")
     progress(
-        f"status={status} endpoints={_fmt_cli_int(endpoints_ok)}/{_fmt_cli_int(endpoints_total)} "
+        f"status={status} endpoints={_fmt_cli_int(endpoints_ok)} ok, "
+        f"{_fmt_cli_int(endpoints_warn)} warn, {_fmt_cli_int(endpoints_failed)} failed, "
+        f"{_fmt_cli_int(endpoints_total)} total "
         f"records={_fmt_cli_int(records)} pages={_fmt_cli_int(pages)} "
         f"retries={_fmt_cli_int(retries)} elapsed={format_duration(elapsed_seconds)}"
     )

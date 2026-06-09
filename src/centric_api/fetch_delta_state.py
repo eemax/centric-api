@@ -47,7 +47,7 @@ def update_delta_state_for_endpoint(
     existing["last_attempted_fetch_end"] = attempt_end
     existing["last_attempted_status"] = status
     existing["last_attempted_error"] = error
-    if status == "OK":
+    if status in {"OK", "WARN"}:
         existing["last_successful_fetch_start"] = attempt_start
         existing["last_successful_fetch_end"] = attempt_end
     endpoints[endpoint_name] = existing

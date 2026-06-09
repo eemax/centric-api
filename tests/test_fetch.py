@@ -118,13 +118,70 @@ def test_fetcher_marks_checkpoint_for_restart_on_count_mismatch(tmp_path: Path) 
     cfg = _fetcher_config(tmp_path)
     auth = _PagedAuth(count=3, pages={0: [{"id": "S1"}, {"id": "S2"}]})
 
-    with pytest.raises(FetchError, match="expected count to match actual count"):
+    with pytest.raises(FetchError, match="Data pagination ended early"):
         run_endpoint(_endpoint(limit=2), auth, cfg)
 
     checkpoint = json.loads((cfg.checkpoint_dir / "styles.json").read_text(encoding="utf-8"))
     assert checkpoint["restart_from_zero"] is True
     assert checkpoint["next_skip"] == 0
     assert checkpoint["fetched_count"] == 0
+
+
+def test_fetcher_accepts_tiny_count_drift_on_large_endpoint(tmp_path: Path) -> None:
+    cfg = _fetcher_config(tmp_path)
+    auth = _PagedAuth(
+        count=1001,
+        pages={
+            0: [{"id": f"S{i}"} for i in range(500)],
+            500: [{"id": f"S{i}"} for i in range(500, 1000)],
+            1000: [],
+        },
+    )
+
+    result = run_endpoint(_endpoint(limit=500), auth, cfg)
+
+    assert result.items_fetched == 1000
+    assert result.expected_count == 1001
+    assert result.count_validation_status == "warning"
+    assert result.count_validation_reason is not None
+    assert "Accepted as small count drift" in result.count_validation_reason
+    checkpoint = json.loads((cfg.checkpoint_dir / "styles.json").read_text(encoding="utf-8"))
+    assert checkpoint["completed"] is True
+    assert checkpoint["restart_from_zero"] is False
+
+
+def test_fetcher_accepts_tiny_overfetch_count_drift_on_last_page(tmp_path: Path) -> None:
+    cfg = _fetcher_config(tmp_path)
+    auth = _PagedAuth(
+        count=1498,
+        pages={
+            0: [{"id": f"S{i}"} for i in range(500)],
+            500: [{"id": f"S{i}"} for i in range(500, 1000)],
+            1000: [{"id": f"S{i}"} for i in range(1000, 1499)],
+        },
+    )
+
+    result = run_endpoint(_endpoint(limit=500), auth, cfg)
+
+    assert result.items_fetched == 1499
+    assert result.expected_count == 1498
+    assert result.count_validation_status == "warning"
+    assert result.count_validation_reason is not None
+    assert "Accepted as small count drift" in result.count_validation_reason
+
+
+def test_fetcher_rejects_tiny_overfetch_count_drift_on_full_page(tmp_path: Path) -> None:
+    cfg = _fetcher_config(tmp_path)
+    auth = _PagedAuth(
+        count=999,
+        pages={
+            0: [{"id": f"S{i}"} for i in range(500)],
+            500: [{"id": f"S{i}"} for i in range(500, 1000)],
+        },
+    )
+
+    with pytest.raises(FetchError, match="Fetched 1000 items"):
+        run_endpoint(_endpoint(limit=500), auth, cfg)
 
 
 def test_fetcher_rejects_duplicate_ids(tmp_path: Path) -> None:

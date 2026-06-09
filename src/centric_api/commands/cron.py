@@ -102,9 +102,13 @@ def run_cron_fetch_once(args: argparse.Namespace, *, lock_file: Path, log_file: 
             duration_seconds=duration,
         )
         ok_count = sum(1 for record in fetch_records if record.get("status") == "ok")
+        warn_count = sum(1 for record in fetch_records if record.get("status") == "warn")
         failed_count = sum(1 for record in fetch_records if record.get("status") == "failed")
         total_items = sum(safe_int(record.get("items_fetched")) for record in fetch_records)
         print(f"Fetch finished: exit={exit_code} duration={format_duration(duration)}")
-        print(f"Fetch records: {ok_count} ok, {failed_count} failed, {total_items} items fetched")
+        print(
+            f"Fetch records: {ok_count} ok, {warn_count} warn, {failed_count} failed, "
+            f"{total_items} items fetched"
+        )
     finally:
         release_fetch_lock(lock_file)

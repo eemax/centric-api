@@ -22,8 +22,11 @@ def write_run_manifest(
     modified_since: str | None,
     utc_iso,
 ) -> Path:
+    endpoints_warn = sum(1 for result in results if fetch_result_has_warning(result))
     status = (
-        "OK" if not failures else ("FAILED" if len(failures) == len(selected_specs) else "PARTIAL")
+        "FAILED"
+        if len(failures) == len(selected_specs) and selected_specs
+        else ("PARTIAL" if failures else ("WARN" if endpoints_warn else "OK"))
     )
     manifest = {
         "run_id": run_id,
@@ -36,6 +39,8 @@ def write_run_manifest(
         "selected_endpoints": [spec.name for spec in selected_specs],
         "endpoints_total": len(selected_specs),
         "endpoints_succeeded": len(results),
+        "endpoints_ok": len(results) - endpoints_warn,
+        "endpoints_warn": endpoints_warn,
         "endpoints_failed": len(failures),
         "total_items": sum(result.items_fetched for result in results),
         "modified_since": modified_since,
@@ -80,5 +85,28 @@ def endpoint_manifest_record(
         "expected_count": result.expected_count,
         "retries_used": result.retries_used,
         "warnings": result.warnings,
+        "warnings_count": len(result.warnings),
+        "count_validation": result.count_validation_status,
+        "count_validation_reason": result.count_validation_reason,
+        "id_validation": result.id_validation_status,
+        "id_validation_checked_items": result.id_validation_checked_items,
+        "id_validation_unique_ids": result.id_validation_unique_ids,
+        "count_diff": result.items_fetched - result.expected_count,
+        "count_diff_pct": _count_diff_pct(result.items_fetched, result.expected_count),
         "error": None,
     }
+
+
+def fetch_result_has_warning(result: FetchRunResult) -> bool:
+    return result.count_validation_status == "warning" or bool(result.warnings)
+
+
+def fetch_result_status(result: FetchRunResult, *, uppercase: bool = False) -> str:
+    status = "warn" if fetch_result_has_warning(result) else "ok"
+    return status.upper() if uppercase else status
+
+
+def _count_diff_pct(items_fetched: int, expected_count: int) -> float | None:
+    if expected_count == 0:
+        return 0.0 if items_fetched == 0 else None
+    return round(((items_fetched - expected_count) / expected_count) * 100, 6)

@@ -1,8 +1,5 @@
 # centric-api
 
-Centric API local data toolkit: fetch, cache, changelog, download, bundle, export, and load Centric
-records and documents.
-
 Runtime state is stored in `~/.centric-api` by default. Set `CENTRIC_API_HOME` to use a different
 directory.
 

@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
 from ..changelog import ChangelogRun
+from ..fetch_manifest import fetch_result_has_warning, fetch_result_status
 from ..models import EndpointSpec, FetchProgressEvent, FetchRunResult
 from ..store import IngestResult
 from .logs import format_duration, format_seconds
+
+_COUNT_MISMATCH_RE = re.compile(
+    r"Fetched (?P<fetched>\d+) items for '(?P<endpoint>[^']+)' "
+    r"but count preflight expected (?P<expected>\d+)\."
+)
+_EARLY_COUNT_MISMATCH_RE = re.compile(
+    r"Data pagination ended early for '(?P<endpoint>[^']+)': .* "
+    r"after fetching (?P<fetched>\d+) of expected (?P<expected>\d+)\."
+)
 
 
 def print_human_fetch_run_header(
@@ -110,6 +122,8 @@ def print_human_fetch_summary(
     title = "Fetch complete"
     if failures or pipeline_error:
         title = "Fetch finished with failures"
+    elif any(fetch_result_has_warning(result) for result in results):
+        title = "Fetch complete with warnings"
     print(title)
     print()
     print(f"Mode: {mode}")
@@ -117,39 +131,34 @@ def print_human_fetch_summary(
     print(f"Raw:  {raw_dir}")
     print()
     print("Summary")
-    print(f"Endpoints: {len(results)} ok, {len(failures)} failed, {selected_count} total")
+    warn_count = sum(1 for result in results if _result_status(result) == "warn")
+    ok_count = len(results) - warn_count
+    print(
+        f"Endpoints: {ok_count} ok, {warn_count} warn, {len(failures)} failed, "
+        f"{selected_count} total"
+    )
     print(f"Records:   {_fmt_int(sum(result.items_fetched for result in results))} fetched")
     print(f"Pages:     {_fmt_int(sum(result.pages_fetched for result in results))} fetched")
     print(f"Time:      {format_duration(duration_seconds)}")
     print(f"Retries:   {_fmt_int(sum(result.retries_used for result in results))}")
-    if results:
-        endpoint_width = max(len("Endpoint"), *(len(result.endpoint) for result in results))
-        rows = [
-            (
-                result.endpoint,
-                "ok",
-                _fmt_int(result.items_fetched),
-                _fmt_int(result.expected_count),
-                _fmt_int(result.pages_fetched),
-                _fmt_int(result.retries_used),
-                format_duration(result.duration_seconds),
-            )
-            for result in results
-        ]
-        records_width = max(len("Records"), *(len(row[2]) for row in rows))
-        expected_width = max(len("Expected"), *(len(row[3]) for row in rows))
-        pages_width = max(len("Pages"), *(len(row[4]) for row in rows))
-        retries_width = max(len("Retries"), *(len(row[5]) for row in rows))
-        time_width = max(len("Time"), *(len(row[6]) for row in rows))
-        warnings_width = max(
-            len("Warnings"),
-            *(len(_fmt_int(len(result.warnings))) for result in results),
+    table_rows = _fetch_summary_rows(results, failures)
+    if table_rows:
+        endpoint_width = max(len("Endpoint"), *(len(row["endpoint"]) for row in table_rows))
+        records_width = max(len("Records"), *(len(row["records"]) for row in table_rows))
+        expected_width = max(len("Expected"), *(len(row["expected"]) for row in table_rows))
+        count_diff_width = max(len("Count Diff"), *(len(row["count_diff"]) for row in table_rows))
+        count_diff_pct_width = max(
+            len("Diff %"), *(len(row["count_diff_pct"]) for row in table_rows)
         )
-        validations = [_validation_status(result) for result in results]
-        validation_width = max(len("Validation"), *(len(value) for value in validations))
+        pages_width = max(len("Pages"), *(len(row["pages"]) for row in table_rows))
+        retries_width = max(len("Retries"), *(len(row["retries"]) for row in table_rows))
+        time_width = max(len("Time"), *(len(row["elapsed"]) for row in table_rows))
+        warnings_width = max(len("Warnings"), *(len(row["warnings"]) for row in table_rows))
+        validation_width = max(len("Validation"), *(len(row["validation"]) for row in table_rows))
         header = (
             f"{'Endpoint':<{endpoint_width}}  {'Status':<6}  "
             f"{'Records':>{records_width}}  {'Expected':>{expected_width}}  "
+            f"{'Count Diff':>{count_diff_width}}  {'Diff %':>{count_diff_pct_width}}  "
             f"{'Pages':>{pages_width}}  {'Retries':>{retries_width}}  "
             f"{'Warnings':>{warnings_width}}  {'Validation':<{validation_width}}  "
             f"{'Time':>{time_width}}"
@@ -157,15 +166,16 @@ def print_human_fetch_summary(
         print()
         print(header)
         print("-" * len(header))
-        for row, result, validation in zip(rows, results, validations, strict=True):
-            endpoint, status, records, expected, pages, retries, elapsed = row
+        for row in table_rows:
             print(
-                f"{endpoint:<{endpoint_width}}  {status:<6}  "
-                f"{records:>{records_width}}  {expected:>{expected_width}}  "
-                f"{pages:>{pages_width}}  {retries:>{retries_width}}  "
-                f"{_fmt_int(len(result.warnings)):>{warnings_width}}  "
-                f"{validation:<{validation_width}}  "
-                f"{elapsed:>{time_width}}"
+                f"{row['endpoint']:<{endpoint_width}}  {row['status']:<6}  "
+                f"{row['records']:>{records_width}}  {row['expected']:>{expected_width}}  "
+                f"{row['count_diff']:>{count_diff_width}}  "
+                f"{row['count_diff_pct']:>{count_diff_pct_width}}  "
+                f"{row['pages']:>{pages_width}}  {row['retries']:>{retries_width}}  "
+                f"{row['warnings']:>{warnings_width}}  "
+                f"{row['validation']:<{validation_width}}  "
+                f"{row['elapsed']:>{time_width}}"
             )
     if ingest_result is not None:
         print()
@@ -197,7 +207,9 @@ def print_human_fetch_summary(
         print()
         print("Failures")
         for endpoint, message in failures:
-            print(f"- {endpoint}: {message}")
+            print(f"- {endpoint}")
+            for line in textwrap.wrap(message, width=88):
+                print(f"  {line}")
     if (failures or pipeline_error) and log_path is not None:
         print()
         print(f"Log: {log_path}")
@@ -218,11 +230,18 @@ def print_json_fetch_records(
             json.dumps(
                 {
                     "endpoint": result.endpoint,
-                    "status": "ok",
+                    "status": fetch_result_status(result),
                     "items_fetched": result.items_fetched,
                     "pages_fetched": result.pages_fetched,
                     "expected_count": result.expected_count,
                     "retries_used": result.retries_used,
+                    "warnings": result.warnings,
+                    "warnings_count": len(result.warnings),
+                    "count_validation": result.count_validation_status,
+                    "count_validation_reason": result.count_validation_reason,
+                    "id_validation": result.id_validation_status,
+                    "id_validation_checked_items": result.id_validation_checked_items,
+                    "id_validation_unique_ids": result.id_validation_unique_ids,
                     "output_file": str(result.output_file) if result.output_file_created else None,
                     "output_file_created": result.output_file_created,
                 }
@@ -230,10 +249,19 @@ def print_json_fetch_records(
         )
     for endpoint, message in failures:
         print(json.dumps({"endpoint": endpoint, "status": "failed", "error": message}))
+    endpoints_warn = sum(1 for result in results if fetch_result_has_warning(result))
     print(
         json.dumps(
             {
                 "record_type": "pipeline_summary",
+                "status": _pipeline_summary_status(
+                    results=results,
+                    failures=failures,
+                    pipeline_error=pipeline_error,
+                ),
+                "endpoints_ok": len(results) - endpoints_warn,
+                "endpoints_warn": endpoints_warn,
+                "endpoints_failed": len(failures),
                 "manifest": str(manifest_path),
                 "ingest": _ingest_record(ingest_result),
                 "changelog": _changelog_record(changelog_run, changelog_skipped),
@@ -289,12 +317,108 @@ def _validation_status(result: FetchRunResult) -> str:
     id_status = result.id_validation_status
     if count_status == "passed" and id_status == "passed":
         return "ok"
+    if count_status == "warning" and id_status == "passed":
+        return "warn"
     failed = [
         f"{label}_failed"
         for label, status in (("count", count_status), ("id", id_status))
-        if status != "passed"
+        if status not in {"passed", "warning"}
     ]
     return "+".join(failed) if failed else "unknown"
+
+
+def _fetch_summary_rows(
+    results: list[FetchRunResult],
+    failures: list[tuple[str, str]],
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = [
+        {
+            "endpoint": result.endpoint,
+            "status": _result_status(result),
+            "records": _fmt_int(result.items_fetched),
+            "expected": _fmt_int(result.expected_count),
+            "count_diff": _count_diff(result.items_fetched, result.expected_count),
+            "count_diff_pct": _count_diff_pct(result.items_fetched, result.expected_count),
+            "pages": _fmt_int(result.pages_fetched),
+            "retries": _fmt_int(result.retries_used),
+            "warnings": _fmt_int(len(result.warnings)),
+            "validation": _validation_status(result),
+            "elapsed": format_duration(result.duration_seconds),
+        }
+        for result in results
+    ]
+    rows.extend(_failure_summary_row(endpoint, message) for endpoint, message in failures)
+    return rows
+
+
+def _failure_summary_row(endpoint: str, message: str) -> dict[str, str]:
+    records = "unknown"
+    expected = "unknown"
+    count_diff = "unknown"
+    count_diff_pct = "unknown"
+    match = _count_mismatch_match(message)
+    if match:
+        fetched_count = int(match.group("fetched"))
+        expected_count = int(match.group("expected"))
+        records = _fmt_int(fetched_count)
+        expected = _fmt_int(expected_count)
+        count_diff = _count_diff(fetched_count, expected_count)
+        count_diff_pct = _count_diff_pct(fetched_count, expected_count)
+    return {
+        "endpoint": endpoint,
+        "status": "failed",
+        "records": records,
+        "expected": expected,
+        "count_diff": count_diff,
+        "count_diff_pct": count_diff_pct,
+        "pages": "unknown",
+        "retries": "unknown",
+        "warnings": "1",
+        "validation": "failed",
+        "elapsed": "unknown",
+    }
+
+
+def _count_mismatch_match(message: str) -> re.Match[str] | None:
+    return _COUNT_MISMATCH_RE.search(message) or _EARLY_COUNT_MISMATCH_RE.search(message)
+
+
+def _result_status(result: FetchRunResult) -> str:
+    if _validation_status(result) == "warn" or result.warnings:
+        return "warn"
+    return "ok"
+
+
+def _pipeline_summary_status(
+    *,
+    results: list[FetchRunResult],
+    failures: list[tuple[str, str]],
+    pipeline_error: str | None,
+) -> str:
+    if pipeline_error or (failures and not results):
+        return "failed"
+    if failures:
+        return "partial"
+    if any(fetch_result_has_warning(result) for result in results):
+        return "warn"
+    return "ok"
+
+
+def _count_diff(fetched_count: int, expected_count: int) -> str:
+    diff = fetched_count - expected_count
+    if diff == 0:
+        return "0"
+    direction = "over" if diff > 0 else "under"
+    return f"{diff:+,} {direction}"
+
+
+def _count_diff_pct(fetched_count: int, expected_count: int) -> str:
+    diff = fetched_count - expected_count
+    if diff == 0:
+        return "-"
+    if expected_count == 0:
+        return "unknown"
+    return f"{(diff / expected_count) * 100:+.3f}%"
 
 
 def _ingest_record(result: IngestResult | None) -> dict[str, Any] | None:
