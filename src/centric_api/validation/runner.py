@@ -138,6 +138,8 @@ def _validate_result(validator_name: str, result: object) -> None:
     _validate_findings(validator_name, "findings", result.findings)
     _validate_findings(validator_name, "finding_samples", result.finding_samples)
     _validate_finding_totals(validator_name, result)
+    if result.report_workbook is not None and not isinstance(result.report_workbook, bytes):
+        raise ConfigError(f"Validator {validator_name} report_workbook must be bytes.")
     if result.findings_export_limit is not None and result.findings_export_limit < 0:
         raise ConfigError(
             f"Validator {validator_name} findings_export_limit must be zero or greater."

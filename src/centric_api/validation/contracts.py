@@ -74,6 +74,7 @@ class ValidationResult:
     finding_totals: ValidationFindingTotals | None = None
     findings_export_limit: int | None = None
     sheets: tuple[ValidationSheet, ...] = ()
+    report_workbook: bytes | None = None
 
 
 @dataclass(frozen=True)

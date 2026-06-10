@@ -226,6 +226,52 @@ def test_validation_artifacts_can_cap_raw_finding_exports(tmp_path: Path) -> Non
     assert rows[1][8] == "S0"
 
 
+def test_validation_artifacts_can_use_custom_report_workbook(tmp_path: Path) -> None:
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from centric_api.validation.artifacts import write_validation_artifacts
+    from centric_api.validation.contracts import ValidationResult
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "DPP Summary"
+    sheet.append(["Metric", "ALL"])
+    sheet.append(["Ready Styles", 0])
+    buffer = BytesIO()
+    workbook.save(buffer)
+
+    result = ValidationResult(
+        summary={"styles": 1},
+        report_workbook=buffer.getvalue(),
+    )
+
+    report_path, summary_path, findings_path = write_validation_artifacts(
+        tmp_path,
+        result,
+        run_record={
+            "run_id": "run-1",
+            "validator": "dpp-readiness",
+            "title": "DPP Readiness",
+            "status": "failed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "findings": 0,
+            "errors": 0,
+            "warnings": 0,
+            "info": 0,
+        },
+    )
+
+    assert summary_path.is_file()
+    assert findings_path.is_file()
+    report = load_workbook(report_path, read_only=True)
+    assert report.sheetnames == ["DPP Summary"]
+    rows = list(report["DPP Summary"].iter_rows(values_only=True))
+    assert rows == [("Metric", "ALL"), ("Ready Styles", 0)]
+
+
 def test_validation_run_can_use_explicit_samples_and_totals(
     tmp_path: Path,
     capsys,
@@ -314,6 +360,37 @@ def test_validation_run_rejects_inconsistent_explicit_totals(
     captured = capsys.readouterr()
     assert "finding_totals cannot be smaller than exported samples" in captured.err
     assert not (output_root / "invalid-totals").exists()
+
+
+def test_validation_run_rejects_invalid_custom_report_workbook(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    validators_dir = tmp_path / "validators"
+    validators_dir.mkdir()
+    _write_invalid_report_workbook_validator(validators_dir / "invalid_report_workbook.py")
+    _seed_styles_cache(db_path)
+
+    assert (
+        main(
+            [
+                "validate",
+                "--validators-dir",
+                str(validators_dir),
+                "run",
+                "invalid-report-workbook",
+                "--db",
+                str(db_path),
+                "--output-dir",
+                str(tmp_path / "validation-runs"),
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert "report_workbook must be bytes" in captured.err
 
 
 def test_validate_run_all_requires_private_validators(
@@ -510,6 +587,35 @@ class InvalidTotalsValidator:
 
 
 VALIDATOR = InvalidTotalsValidator()
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_invalid_report_workbook_validator(path: Path) -> None:
+    path.write_text(
+        """
+from centric_api.validation import (
+    ValidationDefinition,
+    ValidationResult,
+)
+
+
+class InvalidReportWorkbookValidator:
+    definition = ValidationDefinition(
+        name="invalid-report-workbook",
+        title="Invalid Report Workbook",
+        required_endpoints=("styles",),
+    )
+
+    def run(self, ctx):
+        return ValidationResult(
+            summary={},
+            report_workbook="not bytes",
+        )
+
+
+VALIDATOR = InvalidReportWorkbookValidator()
 """,
         encoding="utf-8",
     )

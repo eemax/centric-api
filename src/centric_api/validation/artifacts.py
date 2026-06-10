@@ -62,6 +62,9 @@ def write_validation_workbook(
     *,
     run_record: dict[str, Any],
 ) -> None:
+    if result.report_workbook is not None:
+        _write_bytes(path, result.report_workbook)
+        return
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -159,6 +162,16 @@ def _write_json(path: Path, payload: Any) -> None:
     temp_path = path.parent / f".{path.name}.tmp"
     try:
         temp_path.write_text(json.dumps(payload, indent=2, default=str, sort_keys=True) + "\n")
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def _write_bytes(path: Path, payload: bytes) -> None:
+    temp_path = path.parent / f".{path.name}.tmp"
+    try:
+        temp_path.write_bytes(payload)
         temp_path.replace(path)
     except Exception:
         temp_path.unlink(missing_ok=True)
