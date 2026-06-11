@@ -151,10 +151,14 @@ default to a 10-minute overlap from the previous successful fetch start.
 Credentials resolve from environment variables or `~/.centric-api/local.env`:
 
 ```bash
-CENTRIC_BASE_URL=https://centric.example.com
+CENTRIC_BASE_URL=your-brand
 CENTRIC_USERNAME=user@example.com
 CENTRIC_PASSWORD=secret
 ```
+
+`CENTRIC_BASE_URL` accepts a brand slug such as `your-brand`, a Centric host such as
+`https://your-brand.centricsoftware.com`, or the full request-handler root. Centric Software hosts
+normalize to `https://your-brand.centricsoftware.com/csi-requesthandler` internally.
 
 Endpoint schema is intentionally lean. Record identity is always `id`, and freshness is always
 `_modified_at`; schema files only define endpoint-specific tombstone rules:

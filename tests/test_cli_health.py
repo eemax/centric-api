@@ -86,6 +86,37 @@ def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
         "message": f"SQLite database not found: {tmp_path / 'missing.db'}",
     } in checks
 
+def test_doctor_json_shows_normalized_centric_base_url(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "example-brand")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+
+    exit_code = main(["doctor", "--db", str(tmp_path / "missing.db"), "--json"])
+
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    credentials = next(check for check in checks if check["name"] == "credentials")
+    assert exit_code == 1
+    assert credentials == {
+        "status": "OK",
+        "name": "credentials",
+        "message": (
+            "found credentials for "
+            "https://example-brand.centricsoftware.com/csi-requesthandler"
+        ),
+    }
+
+def test_doctor_human_shows_normalized_centric_base_url(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "example-brand")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+
+    exit_code = main(["doctor", "--db", str(tmp_path / "missing.db")])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "credentials" in output
+    assert "https://example-brand.centricsoftware.com/csi-requesthandler" in output
+
 def test_doctor_uses_fetch_evidence_for_empty_download_endpoints(
     tmp_path, monkeypatch, capsys
 ) -> None:

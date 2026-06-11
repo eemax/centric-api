@@ -29,10 +29,23 @@ respected.
 Credentials can be environment variables or entries in `CENTRIC_API_HOME/local.env`:
 
 ```bash
-CENTRIC_BASE_URL=https://centric.example.com
+CENTRIC_BASE_URL=your-brand
 CENTRIC_USERNAME=user@example.com
 CENTRIC_PASSWORD=secret
 ```
+
+`CENTRIC_BASE_URL` is normalized before API calls. It can be a brand slug, a Centric host, or the
+full request-handler root:
+
+```bash
+CENTRIC_BASE_URL=your-brand
+CENTRIC_BASE_URL=https://your-brand.centricsoftware.com
+CENTRIC_BASE_URL=https://your-brand.centricsoftware.com/csi-requesthandler
+```
+
+All of those Centric Software forms resolve internally to
+`https://your-brand.centricsoftware.com/csi-requesthandler`. Custom non-Centric hosts keep their
+configured path.
 
 Fetch config intentionally rejects `base_url` and `auth`; keep secrets outside shared config files.
 

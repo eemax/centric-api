@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -19,10 +20,37 @@ class AuthError(RuntimeError):
 
 RequestParams = dict[str, Any] | list[tuple[str, Any]]
 TOKEN_CACHE_PATH = Path("auth/token.json")
+CENTRIC_DEFAULT_DOMAIN = "centricsoftware.com"
+CENTRIC_REQUEST_HANDLER_PATH = "/csi-requesthandler"
 
 
 def _normalize_base_url(value: str) -> str:
-    return value.rstrip("/")
+    raw_value = value.strip().rstrip("/")
+    if not raw_value:
+        return ""
+    if "://" not in raw_value:
+        host, separator, path = raw_value.strip("/").partition("/")
+        if "." not in host:
+            host = f"{host}.{CENTRIC_DEFAULT_DOMAIN}"
+        raw_value = f"https://{host}"
+        if separator:
+            raw_value = f"{raw_value}/{path.rstrip('/')}"
+
+    parsed = urlsplit(raw_value)
+    scheme = parsed.scheme or "https"
+    netloc = parsed.netloc
+    path = parsed.path.rstrip("/")
+    is_centric_host = _is_centricsoftware_host(netloc)
+    if is_centric_host and (
+        path in {"", "/"} or path.casefold() == CENTRIC_REQUEST_HANDLER_PATH
+    ):
+        path = CENTRIC_REQUEST_HANDLER_PATH
+    return urlunsplit((scheme, netloc, path, "", ""))
+
+
+def _is_centricsoftware_host(value: str) -> bool:
+    host = value.rsplit("@", 1)[-1].split(":", 1)[0].casefold()
+    return host == CENTRIC_DEFAULT_DOMAIN or host.endswith(f".{CENTRIC_DEFAULT_DOMAIN}")
 
 
 def _read_env_file(path: Path) -> dict[str, str]:

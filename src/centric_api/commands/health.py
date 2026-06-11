@@ -158,7 +158,8 @@ def _doctor_checks(args: Any) -> list[dict[str, Any]]:
                     _check(
                         "WARN",
                         "credentials",
-                        "CENTRIC_BASE_URL found, but username/password are incomplete.",
+                        f"CENTRIC_BASE_URL resolves to {base_url}, but username/password "
+                        "are incomplete.",
                     )
                 )
 

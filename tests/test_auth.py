@@ -10,6 +10,44 @@ import centric_api.auth as auth_module
 from centric_api.auth import AuthContext, AuthError
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("example-brand", "https://example-brand.centricsoftware.com/csi-requesthandler"),
+        ("example-brand/", "https://example-brand.centricsoftware.com/csi-requesthandler"),
+        (
+            "example-brand.centricsoftware.com",
+            "https://example-brand.centricsoftware.com/csi-requesthandler",
+        ),
+        (
+            "https://example-brand.centricsoftware.com",
+            "https://example-brand.centricsoftware.com/csi-requesthandler",
+        ),
+        (
+            "https://example-brand.centricsoftware.com/",
+            "https://example-brand.centricsoftware.com/csi-requesthandler",
+        ),
+        (
+            "https://example-brand.centricsoftware.com/csi-requesthandler",
+            "https://example-brand.centricsoftware.com/csi-requesthandler",
+        ),
+        (
+            "https://example-brand.centricsoftware.com/csi-requesthandler/",
+            "https://example-brand.centricsoftware.com/csi-requesthandler",
+        ),
+    ],
+)
+def test_normalize_base_url_accepts_centric_short_forms(raw: str, expected: str) -> None:
+    assert auth_module._normalize_base_url(raw) == expected
+
+
+def test_normalize_base_url_preserves_custom_url_paths() -> None:
+    assert (
+        auth_module._normalize_base_url("https://centric.example.com/custom-api/")
+        == "https://centric.example.com/custom-api"
+    )
+
+
 def test_auth_context_reuses_cached_token(tmp_path: Path) -> None:
     token_path = tmp_path / "auth" / "token.json"
     token_path.parent.mkdir()
