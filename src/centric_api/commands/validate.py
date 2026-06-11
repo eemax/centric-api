@@ -41,12 +41,17 @@ def run_validate_command(args: argparse.Namespace) -> int:
         names = [validator.definition.name for validator in validators]
     else:
         names = [args.name]
+    mode = args.mode or ("excel" if args.input_file else "cache")
+    if args.input_file and args.mode == "cache":
+        raise ConfigError("--input-file requires --mode excel or no --mode.")
     summaries = [
         run_validator(
             resolve_db_path(args.db),
             select_validator(validators, name),
             output_root=args.output_dir,
             units_config=args.units_config,
+            mode=mode,
+            input_file=args.input_file,
         )
         for name in names
     ]

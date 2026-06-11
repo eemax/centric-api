@@ -423,6 +423,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Validation artifact root directory.",
     )
+    validate_run_parser.add_argument(
+        "--mode",
+        choices=("cache", "excel"),
+        default=None,
+        help="Validation mode. Default: excel when --input-file is supplied, otherwise cache.",
+    )
+    validate_run_parser.add_argument(
+        "--input-file",
+        metavar="PATH",
+        default=None,
+        help="Optional input workbook for validators that support external files.",
+    )
     validate_run_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
     map_parser = subparsers.add_parser("map", help="Generate local cache relationship maps")

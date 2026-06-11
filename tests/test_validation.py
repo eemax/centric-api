@@ -85,6 +85,113 @@ def test_validate_cli_runs_private_validator_and_writes_artifacts(
     assert rows[2] == ("S2", None, "error")
 
 
+def test_validate_run_passes_mode_and_input_file_to_context(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    validators_dir = tmp_path / "validators"
+    input_file = tmp_path / "input.xlsx"
+    validators_dir.mkdir()
+    input_file.write_text("placeholder", encoding="utf-8")
+    _write_style_name_validator(validators_dir / "style_names.py")
+    _seed_styles_cache(db_path)
+
+    assert (
+        main(
+            [
+                "validate",
+                "--validators-dir",
+                str(validators_dir),
+                "run",
+                "style-name-check",
+                "--db",
+                str(db_path),
+                "--mode",
+                "excel",
+                "--input-file",
+                str(input_file),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["mode"] == "excel"
+    assert payload["summary"]["input_file"] == str(input_file)
+
+
+def test_validate_run_input_file_implies_excel_mode(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    validators_dir = tmp_path / "validators"
+    input_file = tmp_path / "input.xlsx"
+    validators_dir.mkdir()
+    input_file.write_text("placeholder", encoding="utf-8")
+    _write_style_name_validator(validators_dir / "style_names.py")
+    _seed_styles_cache(db_path)
+
+    assert (
+        main(
+            [
+                "validate",
+                "--validators-dir",
+                str(validators_dir),
+                "run",
+                "style-name-check",
+                "--db",
+                str(db_path),
+                "--input-file",
+                str(input_file),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["summary"]["mode"] == "excel"
+    assert payload["summary"]["input_file"] == str(input_file)
+
+
+def test_validate_run_rejects_input_file_with_cache_mode(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    validators_dir = tmp_path / "validators"
+    input_file = tmp_path / "input.xlsx"
+    validators_dir.mkdir()
+    input_file.write_text("placeholder", encoding="utf-8")
+    _write_style_name_validator(validators_dir / "style_names.py")
+    _seed_styles_cache(db_path)
+
+    assert (
+        main(
+            [
+                "validate",
+                "--validators-dir",
+                str(validators_dir),
+                "run",
+                "style-name-check",
+                "--db",
+                str(db_path),
+                "--mode",
+                "cache",
+                "--input-file",
+                str(input_file),
+                "--json",
+            ]
+        )
+        == 1
+    )
+
+    assert "--input-file requires --mode excel or no --mode." in capsys.readouterr().err
+
+
 def test_validate_human_output_distinguishes_run_from_outcome(
     tmp_path: Path,
     capsys,
@@ -496,6 +603,8 @@ class StyleNameValidator:
             summary={
                 "styles": len(rows),
                 "styles_missing_name": len(findings),
+                "mode": ctx.mode,
+                "input_file": str(ctx.input_file) if ctx.input_file else None,
             },
             findings=tuple(findings),
             sheets=(ValidationSheet("Styles", tuple(rows)),),

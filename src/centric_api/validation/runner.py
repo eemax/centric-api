@@ -27,6 +27,8 @@ def run_validator(
     *,
     output_root: str | Path | None = None,
     units_config: str | Path | None = None,
+    mode: str = "cache",
+    input_file: str | Path | None = None,
 ) -> ValidationRunSummary:
     started_at = _utc_iso()
     run_id = _run_id(validator.definition.name)
@@ -38,6 +40,8 @@ def run_validator(
                 units=load_unit_registry(units_config),
                 validator_name=validator.definition.name,
                 artifact_dir=output_dir,
+                mode=mode,
+                input_file=input_file,
             )
             for endpoint in validator.definition.required_endpoints:
                 ctx.resolve_endpoint(endpoint)
