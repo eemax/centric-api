@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .db_schema import ensure_changelog_tables
+from .db_schema import ensure_changelog_read_indexes, ensure_changelog_tables
 from .store import connect, connect_readonly, table_exists
 
 CHANGELOG_SOURCE = "full-payload"
@@ -21,6 +21,7 @@ USER_NAME_FIELD = "node_name"
 DELETE_TYPE_TOMBSTONE = "tombstone"
 DELETE_TYPE_HARD_DELETE = "hard_delete"
 DELETE_TYPE_UNKNOWN = "unknown"
+ACTIVITY_AT_SQL = "COALESCE(modified_at, changed_at)"
 ProgressCallback = Callable[[str], None]
 
 
@@ -106,6 +107,7 @@ def record_changelog(
             previous_index = _load_current_index(conn, endpoints=endpoint_names)
             _emit_progress(progress, "Loading current cache...")
             current_index = _build_current_index(conn, endpoints=endpoint_names)
+            tombstone_index = _build_tombstone_index(conn, endpoints=endpoint_names)
         else:
             _emit_progress(progress, "Loading scoped changelog index...")
             previous_index = _load_current_index_for_keys(conn, keys=scoped_keys)
@@ -113,6 +115,10 @@ def record_changelog(
             current_index = _build_scoped_current_index(
                 conn,
                 record_ids_by_endpoint=record_ids_by_endpoint or {},
+            )
+            tombstone_index = _build_scoped_tombstone_index(
+                conn,
+                deleted_record_ids_by_endpoint=deleted_record_ids_by_endpoint or {},
             )
 
         _emit_progress(progress, "Loading user names...")
@@ -123,6 +129,7 @@ def record_changelog(
             changed_at=created_at,
             previous_index=previous_index,
             current_index=current_index,
+            tombstone_index=tombstone_index,
             user_names=user_names,
             delete_types_by_endpoint=deleted_record_delete_types_by_endpoint or {},
         )
@@ -168,6 +175,8 @@ def record_changelog(
         except Exception:
             conn.execute("ROLLBACK")
             raise
+        _emit_progress(progress, "Preparing changelog read indexes...")
+        ensure_changelog_read_indexes(conn)
 
     return ChangelogRun(
         run_id=run_id,
@@ -210,6 +219,22 @@ def list_changelog_runs(
     return [dict(row) for row in rows]
 
 
+def ensure_changelog_read_schema(
+    db_path: Path,
+    *,
+    include_field_indexes: bool = False,
+) -> None:
+    if not db_path.is_file():
+        return
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("PRAGMA busy_timeout=5000")
+        if table_exists(conn, "endpoint_change_events") or table_exists(
+            conn,
+            "endpoint_changelog_runs",
+        ):
+            ensure_changelog_read_indexes(conn, include_field_indexes=include_field_indexes)
+
+
 def list_change_summary(
     db_path: Path,
     *,
@@ -219,13 +244,20 @@ def list_change_summary(
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    if since is not None:
+        return _list_change_summary_by_activity(
+            db_path,
+            endpoint=endpoint,
+            since=since,
+            limit=limit,
+        )
     clauses: list[str] = []
     params: list[Any] = []
     if endpoint:
         clauses.append("endpoint = ?")
         params.append(endpoint)
     if since is not None:
-        clauses.append("changed_at >= ?")
+        clauses.append(f"{ACTIVITY_AT_SQL} >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
     with connect_readonly(db_path) as conn:
@@ -245,6 +277,33 @@ def list_change_summary(
     return [dict(row) for row in rows]
 
 
+def _list_change_summary_by_activity(
+    db_path: Path,
+    *,
+    endpoint: str | None,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    ensure_changelog_read_schema(db_path)
+    clauses, params = _activity_clauses(endpoint=endpoint, since=since)
+    clause = "WHERE " + " AND ".join(clauses)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events"):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, change_type, delete_type, COUNT(*) AS count
+            FROM endpoint_change_events INDEXED BY idx_endpoint_change_events_activity_at
+            {clause}
+            GROUP BY endpoint, change_type, delete_type
+            ORDER BY endpoint, change_type, delete_type
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_actor_totals(
     db_path: Path,
     *,
@@ -254,13 +313,20 @@ def list_actor_totals(
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    if since is not None:
+        return _list_actor_totals_by_activity(
+            db_path,
+            endpoint=endpoint,
+            since=since,
+            limit=limit,
+        )
     clauses: list[str] = []
     params: list[Any] = []
     if endpoint:
         clauses.append("endpoint = ?")
         params.append(endpoint)
     if since is not None:
-        clauses.append("changed_at >= ?")
+        clauses.append(f"{ACTIVITY_AT_SQL} >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
     with connect_readonly(db_path) as conn:
@@ -280,6 +346,33 @@ def list_actor_totals(
     return [dict(row) for row in rows]
 
 
+def _list_actor_totals_by_activity(
+    db_path: Path,
+    *,
+    endpoint: str | None,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    ensure_changelog_read_schema(db_path)
+    clauses, params = _activity_clauses(endpoint=endpoint, since=since)
+    clause = "WHERE " + " AND ".join(clauses)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events"):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT modified_by_id, modified_by_name, COUNT(*) AS count
+            FROM endpoint_change_events INDEXED BY idx_endpoint_change_events_activity_at
+            {clause}
+            GROUP BY modified_by_id, modified_by_name
+            ORDER BY count DESC, modified_by_name, modified_by_id
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_field_summary(
     db_path: Path,
     *,
@@ -289,6 +382,13 @@ def list_field_summary(
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    if since is not None:
+        return _list_field_summary_by_activity(
+            db_path,
+            endpoint=endpoint,
+            since=since,
+            limit=limit,
+        )
     clauses: list[str] = []
     params: list[Any] = []
     if endpoint:
@@ -315,6 +415,42 @@ def list_field_summary(
     return [dict(row) for row in rows]
 
 
+def _list_field_summary_by_activity(
+    db_path: Path,
+    *,
+    endpoint: str | None,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    ensure_changelog_read_schema(db_path, include_field_indexes=True)
+    clauses = ["COALESCE(e.modified_at, e.changed_at) >= ?"]
+    params: list[Any] = [_datetime_to_db(since)]
+    if endpoint:
+        clauses.insert(0, "e.endpoint = ?")
+        params.insert(0, endpoint)
+    clause = "WHERE " + " AND ".join(clauses)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events") or not table_exists(
+            conn,
+            "endpoint_change_fields",
+        ):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT f.endpoint, f.field, f.field_change_type, f.event_change_type,
+                   COUNT(*) AS count
+            FROM endpoint_change_events AS e INDEXED BY idx_endpoint_change_events_activity_at
+            JOIN endpoint_change_fields f ON f.event_id = e.id
+            {clause}
+            GROUP BY f.endpoint, f.field, f.field_change_type, f.event_change_type
+            ORDER BY count DESC, f.endpoint, f.field, f.field_change_type, f.event_change_type
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_actor_summary(
     db_path: Path,
     *,
@@ -324,6 +460,13 @@ def list_actor_summary(
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    if since is not None:
+        return _list_actor_summary_by_activity(
+            db_path,
+            endpoint=endpoint,
+            since=since,
+            limit=limit,
+        )
     clauses: list[str] = []
     params: list[Any] = []
     if endpoint:
@@ -351,6 +494,34 @@ def list_actor_summary(
     return [dict(row) for row in rows]
 
 
+def _list_actor_summary_by_activity(
+    db_path: Path,
+    *,
+    endpoint: str | None,
+    since: datetime,
+    limit: int,
+) -> list[dict[str, Any]]:
+    ensure_changelog_read_schema(db_path)
+    clauses, params = _activity_clauses(endpoint=endpoint, since=since)
+    clause = "WHERE " + " AND ".join(clauses)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events"):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, modified_by_id, modified_by_name, change_type,
+                   delete_type, COUNT(*) AS count
+            FROM endpoint_change_events INDEXED BY idx_endpoint_change_events_activity_at
+            {clause}
+            GROUP BY endpoint, modified_by_id, modified_by_name, change_type, delete_type
+            ORDER BY count DESC, endpoint, modified_by_name, modified_by_id, change_type
+            LIMIT ?
+            """,
+            [*params, limit],
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_actor_leaderboard(
     db_path: Path,
     *,
@@ -359,6 +530,12 @@ def list_actor_leaderboard(
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    if since is not None:
+        return _list_actor_leaderboard_by_activity(
+            db_path,
+            endpoint=endpoint,
+            since=since,
+        )
     clauses: list[str] = []
     params: list[Any] = []
     if endpoint:
@@ -384,6 +561,31 @@ def list_actor_leaderboard(
     return _actor_leaderboard_rows([dict(row) for row in rows])
 
 
+def _list_actor_leaderboard_by_activity(
+    db_path: Path,
+    *,
+    endpoint: str | None,
+    since: datetime,
+) -> list[dict[str, Any]]:
+    ensure_changelog_read_schema(db_path)
+    clauses, params = _activity_clauses(endpoint=endpoint, since=since)
+    clause = "WHERE " + " AND ".join(clauses)
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events"):
+            return []
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, modified_by_id, modified_by_name, change_type, delete_type,
+                   COUNT(*) AS count
+            FROM endpoint_change_events INDEXED BY idx_endpoint_change_events_activity_at
+            {clause}
+            GROUP BY endpoint, modified_by_id, modified_by_name, change_type, delete_type
+            """,
+            params,
+        ).fetchall()
+    return _actor_leaderboard_rows([dict(row) for row in rows])
+
+
 def list_changes(
     db_path: Path,
     *,
@@ -399,9 +601,13 @@ def list_changes(
         clauses.append("endpoint = ?")
         params.append(endpoint)
     if since is not None:
-        clauses.append("changed_at >= ?")
+        ensure_changelog_read_schema(db_path)
+        clauses.append(f"{ACTIVITY_AT_SQL} >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+    table_ref = "endpoint_change_events"
+    if since is not None:
+        table_ref += " INDEXED BY idx_endpoint_change_events_activity_at"
     with connect_readonly(db_path) as conn:
         if not table_exists(conn, "endpoint_change_events"):
             return []
@@ -410,7 +616,7 @@ def list_changes(
             SELECT run_id, endpoint, record_id, changed_at, change_type,
                    delete_type, modified_at, modified_by_id, modified_by_name,
                    changed_fields_json, previous_payload_json, current_payload_json
-            FROM endpoint_change_events
+            FROM {table_ref}
             {clause}
             ORDER BY COALESCE(modified_at, changed_at) DESC, changed_at DESC, endpoint, record_id
             LIMIT ?
@@ -617,6 +823,48 @@ def _build_scoped_current_index(
     return index
 
 
+def _build_tombstone_index(
+    conn: sqlite3.Connection,
+    *,
+    endpoints: set[str],
+) -> dict[tuple[str, str], _IndexRow]:
+    if not endpoints:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT endpoint, record_id, payload_json, payload_sha256
+        FROM endpoint_tombstones
+        WHERE endpoint IN ({",".join("?" for _ in endpoints)})
+        ORDER BY endpoint, record_id
+        """,
+        sorted(endpoints),
+    ).fetchall()
+    return _index_from_rows(rows, hash_column="payload_sha256")
+
+
+def _build_scoped_tombstone_index(
+    conn: sqlite3.Connection,
+    *,
+    deleted_record_ids_by_endpoint: dict[str, set[str]],
+) -> dict[tuple[str, str], _IndexRow]:
+    index: dict[tuple[str, str], _IndexRow] = {}
+    for endpoint, record_ids in sorted(deleted_record_ids_by_endpoint.items()):
+        if not record_ids:
+            continue
+        rows = conn.execute(
+            f"""
+            SELECT endpoint, record_id, payload_json, payload_sha256
+            FROM endpoint_tombstones
+            WHERE endpoint = ?
+              AND record_id IN ({",".join("?" for _ in record_ids)})
+            ORDER BY endpoint, record_id
+            """,
+            [endpoint, *sorted(record_ids)],
+        ).fetchall()
+        index.update(_index_from_rows(rows, hash_column="payload_sha256"))
+    return index
+
+
 def _load_current_index(
     conn: sqlite3.Connection,
     *,
@@ -692,6 +940,7 @@ def _diff_indexes(
     changed_at: datetime,
     previous_index: dict[tuple[str, str], _IndexRow],
     current_index: dict[tuple[str, str], _IndexRow],
+    tombstone_index: dict[tuple[str, str], _IndexRow],
     user_names: dict[str, str],
     delete_types_by_endpoint: dict[str, dict[str, str]],
 ) -> list[_ChangeEvent]:
@@ -710,12 +959,15 @@ def _diff_indexes(
             continue
 
         delete_type = None
+        tombstone = (
+            tombstone_index.get((endpoint, record_id)) if change_type == "removed" else None
+        )
         if change_type == "removed":
             delete_type = delete_types_by_endpoint.get(endpoint, {}).get(
                 record_id,
-                DELETE_TYPE_UNKNOWN,
+                DELETE_TYPE_TOMBSTONE if tombstone is not None else DELETE_TYPE_UNKNOWN,
             )
-        actor_payload = _actor_payload(previous=previous, current=current)
+        actor_payload = _actor_payload(previous=previous, current=current, tombstone=tombstone)
         modified_by_id = _string_value(actor_payload.get(MODIFIED_BY_FIELD))
         events.append(
             _ChangeEvent(
@@ -1042,8 +1294,11 @@ def _actor_payload(
     *,
     previous: _IndexRow | None,
     current: _IndexRow | None,
+    tombstone: _IndexRow | None,
 ) -> dict[str, Any]:
-    if current is not None:
+    if tombstone is not None:
+        payload_json = tombstone.payload_json
+    elif current is not None:
         payload_json = current.payload_json
     elif previous is not None:
         payload_json = previous.payload_json
@@ -1094,6 +1349,19 @@ def _since_filter(since: datetime | None, column: str) -> tuple[str, list[Any]]:
     if since is None:
         return "", []
     return f"WHERE {column} >= ?", [_datetime_to_db(since)]
+
+
+def _activity_clauses(
+    *,
+    endpoint: str | None,
+    since: datetime,
+) -> tuple[list[str], list[Any]]:
+    clauses: list[str] = [f"{ACTIVITY_AT_SQL} >= ?"]
+    params: list[Any] = [_datetime_to_db(since)]
+    if endpoint:
+        clauses.insert(0, "endpoint = ?")
+        params.insert(0, endpoint)
+    return clauses, params
 
 
 def _json_dict(value: str | None) -> dict[str, Any]:

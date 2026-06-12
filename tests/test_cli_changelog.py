@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
 
@@ -11,6 +12,35 @@ from centric_api.store import connect
 from tests.helpers_cli import _insert_endpoint_record
 
 
+def _insert_endpoint_tombstone(
+    conn,
+    *,
+    endpoint: str,
+    record_id: str,
+    payload: dict[str, object],
+    payload_hash: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO endpoint_tombstones (
+            endpoint, record_id, payload_json, payload_sha256, modified_at,
+            source_file, source_run_id, ingested_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            endpoint,
+            record_id,
+            json.dumps(payload, sort_keys=True),
+            payload_hash,
+            payload.get("_modified_at"),
+            f"{endpoint}.jsonl",
+            "run-1",
+            "2026-01-01T00:00:00Z",
+        ],
+    )
+
+
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     exit_code = main(["changelog", "--db", str(db_path)])
@@ -18,6 +48,37 @@ def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
     assert exit_code == 0
     assert "No changelog events found." in capsys.readouterr().out
     assert not db_path.exists()
+
+
+def test_changelog_runs_does_not_create_activity_read_index(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_changelog_runs (
+                run_id, created_at, changelog_source, changelog_source_sha256,
+                endpoint_count, record_count, event_count, full_refresh,
+                scoped_record_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ["run-1", "2026-01-01T00:00:00Z", "test", "sha", 0, 0, 0, 1, 0],
+        )
+
+    exit_code = main(["changelog", "runs", "--db", str(db_path)])
+
+    assert exit_code == 0
+    assert "Changelog Runs" in capsys.readouterr().out
+    with sqlite3.connect(db_path) as conn:
+        index_exists = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'idx_endpoint_change_events_activity_at'
+            """
+        ).fetchone()
+    assert index_exists is None
 
 
 def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
@@ -42,6 +103,7 @@ def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
     assert "Loading current cache..." in output
     assert "Diffing records..." in output
     assert "Writing changelog tables..." in output
+    assert "Preparing changelog read indexes..." in output
     assert "Changelog updated:" in output
 
 
@@ -120,6 +182,19 @@ def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
             "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
             ["boms", "B1"],
         )
+        _insert_endpoint_tombstone(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={
+                "id": "B1",
+                "code": "BOM-001",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-02T00:00:00Z",
+                "active": False,
+            },
+            payload_hash="bom-tombstone",
+        )
     record_changelog(
         db_path,
         record_ids_by_endpoint={"styles": {"S1"}},
@@ -127,12 +202,14 @@ def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
         deleted_record_delete_types_by_endpoint={"boms": {"B1": "tombstone"}},
     )
 
-    exit_code = main(["changelog", "--db", str(db_path), "--since", "1d"])
+    exit_code = main(
+        ["changelog", "--db", str(db_path), "--since", "2026-01-02T00:00:00Z"]
+    )
 
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Centric API Changelog" in output
-    assert "Since:    1d" in output
+    assert "Modified since: 2026-01-02T00:00:00Z" in output
     assert "Totals" in output
     assert "Endpoints" in output
     assert "Modified By" in output
@@ -141,6 +218,103 @@ def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
     assert "Ava Admin" in output
     assert "endpoint=" not in output
     assert "delete_type=" not in output
+
+
+def test_changelog_since_uses_modified_at_not_detection_time(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="styles",
+            record_id="S1",
+            payload={"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"},
+            payload_hash="style-1",
+        )
+    record_changelog(db_path, endpoints={"styles"}, full=True)
+
+    assert (
+        main(["changelog", "--db", str(db_path), "--since", "2026-06-01T00:00:00Z"])
+        == 0
+    )
+    assert "No changelog events found." in capsys.readouterr().out
+
+    assert (
+        main(
+            [
+                "changelog",
+                "--db",
+                str(db_path),
+                "--since",
+                "2026-01-01T00:00:00Z",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert payloads == [
+        {"endpoint": "styles", "change_type": "added", "delete_type": None, "count": 1}
+    ]
+
+
+def test_changelog_tombstone_removal_uses_tombstone_modified_at(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_endpoint_record(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={
+                "id": "B1",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            payload_hash="bom-before",
+        )
+    record_changelog(db_path, endpoints={"boms"}, full=True)
+    with connect(db_path) as conn:
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["boms", "B1"],
+        )
+        _insert_endpoint_tombstone(
+            conn,
+            endpoint="boms",
+            record_id="B1",
+            payload={
+                "id": "B1",
+                "modified_by": "U2",
+                "_modified_at": "2026-01-03T00:00:00Z",
+                "active": False,
+            },
+            payload_hash="bom-tombstone",
+        )
+    record_changelog(
+        db_path,
+        deleted_record_ids_by_endpoint={"boms": {"B1"}},
+        deleted_record_delete_types_by_endpoint={"boms": {"B1": "tombstone"}},
+    )
+
+    assert (
+        main(
+            [
+                "changelog",
+                "changes",
+                "--db",
+                str(db_path),
+                "--since",
+                "2026-01-03T00:00:00Z",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payloads = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(payloads) == 1
+    assert payloads[0]["change_type"] == "removed"
+    assert payloads[0]["delete_type"] == "tombstone"
+    assert payloads[0]["modified_at"] == "2026-01-03T00:00:00Z"
+    assert payloads[0]["modified_by_id"] == "U2"
 
 
 def test_changelog_summary_human_digest_honors_endpoint_filter(tmp_path, capsys) -> None:

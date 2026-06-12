@@ -52,7 +52,8 @@ Important behavior:
   authoritative.
 - A successful full endpoint snapshot removes current local records that are missing from the
   snapshot and writes synthetic hard-delete tombstones.
-- Ingest updates `endpoint_records`, `endpoint_tombstones`, and `applied_raw_files`.
+- Ingest updates `endpoint_records`, `endpoint_tombstones`, `endpoint_state`, and
+  `applied_raw_files`.
 - Changelog runs automatically after ingest when current records changed.
 
 Fetch exits nonzero when any selected endpoint fails or when the ingest/changelog pipeline fails.
@@ -85,6 +86,10 @@ Removal types:
 
 Actor names resolve from the cached `users` endpoint `node_name`. If users have not been fetched,
 actor output may fall back to IDs or `Unknown`.
+
+Changelog activity views filter `--since` against Centric `_modified_at`, falling back to the local
+changelog detection timestamp only when a payload has no `_modified_at`. `changelog runs --since`
+filters local changelog run creation time.
 
 ## Downloads
 

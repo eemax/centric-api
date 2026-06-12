@@ -71,6 +71,45 @@ def test_status_human_output_is_operational_snapshot(tmp_path, capsys) -> None:
     assert "styles" in output
     assert "- styles:" not in output
 
+
+def test_status_endpoint_state_fallback_includes_tombstone_only_endpoints(tmp_path, capsys) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_tombstones (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "boms",
+                "B1",
+                json.dumps({"id": "B1", "_modified_at": "2026-01-02T00:00:00Z"}),
+                "bom-tombstone",
+                "2026-01-02T00:00:00Z",
+                "boms.jsonl",
+                "run-1",
+                "2026-01-03T00:00:00Z",
+            ],
+        )
+
+    exit_code = main(["status", "--db", str(db_path), "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["endpoint_state"] == [
+        {
+            "endpoint": "boms",
+            "current_count": 0,
+            "tombstone_count": 1,
+            "latest_modified_at": "2026-01-02T00:00:00Z",
+            "latest_ingested_at": "2026-01-03T00:00:00Z",
+        }
+    ]
+
+
 def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
     monkeypatch.setenv("CENTRIC_USERNAME", "user")

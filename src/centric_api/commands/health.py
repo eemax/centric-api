@@ -59,16 +59,7 @@ def _status_payload(target_db_path: Path) -> dict[str, Any]:
             LIMIT 1
             """,
         )
-        payload["endpoint_state"] = _all_rows(
-            conn,
-            "endpoint_records",
-            """
-            SELECT endpoint, COUNT(*) AS current_count, MAX(modified_at) AS latest_modified_at
-            FROM endpoint_records
-            GROUP BY endpoint
-            ORDER BY endpoint
-            """,
-        )
+        payload["endpoint_state"] = _endpoint_state_rows(conn)
         payload["latest_changelog"] = _first_row(
             conn,
             "endpoint_changelog_runs",
@@ -230,6 +221,73 @@ def _doctor_db_checks(conn: sqlite3.Connection, checks: list[dict[str, Any]]) ->
         checks.append(_check("OK" if count else "WARN", "changelog_runs", f"{count} runs"))
     else:
         checks.append(_check("WARN", "changelog_runs", "changelog tables not created yet"))
+
+
+def _endpoint_state_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    if table_exists(conn, "endpoint_state"):
+        rows = _all_rows(
+            conn,
+            "endpoint_state",
+            """
+            SELECT endpoint, current_count, tombstone_count, latest_modified_at,
+                   latest_ingested_at
+            FROM endpoint_state
+            ORDER BY endpoint
+            """,
+        )
+        if rows:
+            return rows
+    if not table_exists(conn, "endpoint_records"):
+        return []
+    if not table_exists(conn, "endpoint_tombstones"):
+        return _all_rows(
+            conn,
+            "endpoint_records",
+            """
+            SELECT
+                endpoint,
+                COUNT(*) AS current_count,
+                0 AS tombstone_count,
+                MAX(modified_at) AS latest_modified_at,
+                MAX(ingested_at) AS latest_ingested_at
+            FROM endpoint_records
+            GROUP BY endpoint
+            ORDER BY endpoint
+            """,
+        )
+    return _all_rows(
+        conn,
+        "endpoint_records",
+        """
+        SELECT
+            endpoint,
+            SUM(current_count) AS current_count,
+            SUM(tombstone_count) AS tombstone_count,
+            MAX(latest_modified_at) AS latest_modified_at,
+            MAX(latest_ingested_at) AS latest_ingested_at
+        FROM (
+            SELECT
+                endpoint,
+                COUNT(*) AS current_count,
+                0 AS tombstone_count,
+                MAX(modified_at) AS latest_modified_at,
+                MAX(ingested_at) AS latest_ingested_at
+            FROM endpoint_records
+            GROUP BY endpoint
+            UNION ALL
+            SELECT
+                endpoint,
+                0 AS current_count,
+                COUNT(*) AS tombstone_count,
+                MAX(modified_at) AS latest_modified_at,
+                MAX(ingested_at) AS latest_ingested_at
+            FROM endpoint_tombstones
+            GROUP BY endpoint
+        )
+        GROUP BY endpoint
+        ORDER BY endpoint
+        """,
+    )
 
 
 def _doctor_download_checks(

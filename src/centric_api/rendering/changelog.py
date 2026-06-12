@@ -20,7 +20,7 @@ def print_human_changelog_summary(
 
     print("Centric API Changelog")
     print()
-    print(f"Since:    {_changelog_since_label(since)}")
+    print(f"Modified since: {_changelog_since_label(since)}")
     if endpoint:
         print(f"Endpoint: {endpoint}")
     print(
@@ -109,7 +109,7 @@ def print_human_changelog_field_summary(
     field_rows = _changelog_field_rows(rows)
     print("Changelog Fields")
     print()
-    print(f"Since:    {_changelog_since_label(since)}")
+    print(f"Modified since: {_changelog_since_label(since)}")
     if endpoint:
         print(f"Endpoint: {endpoint}")
         print("Detail:   field-event counts")
@@ -148,7 +148,7 @@ def print_human_changelog_actor_summary(
     actor_rows = _changelog_actor_rows(rows)
     print("Changelog Actors")
     print()
-    print(f"Since:    {_changelog_since_label(since)}")
+    print(f"Modified since: {_changelog_since_label(since)}")
     if endpoint:
         print(f"Endpoint: {endpoint}")
     print(f"Actors:   {format_count(len(actor_rows))}")
@@ -183,7 +183,7 @@ def print_human_changelog_leaderboard(
     records_touched = sum(int(row["total"]) for row in rows)
     print("Centric API Leaderboard")
     print()
-    print(f"Since:           {_changelog_since_label(since)}")
+    print(f"Modified since:  {_changelog_since_label(since)}")
     if endpoint:
         print(f"Endpoint:        {endpoint}")
     print(f"Actors:          {format_count(len(rows))}")
@@ -211,7 +211,7 @@ def print_human_changelog_changes(
 ) -> None:
     print("Changelog Changes")
     print()
-    print(f"Detected since: {_changelog_since_label(since)}")
+    print(f"Modified since: {_changelog_since_label(since)}")
     if endpoint:
         print(f"Endpoint: {endpoint}")
     print(f"Changes:  {format_count(len(rows))}")

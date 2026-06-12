@@ -720,6 +720,111 @@ def test_manifest_scoped_ingest_ignores_unlisted_jsonl_files(tmp_path: Path) -> 
     assert endpoints == ["styles"]
 
 
+def test_ingest_refreshes_endpoint_state(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}),
+                json.dumps({"id": "S2", "_modified_at": "2026-01-02T00:00:00Z"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    result = ingest_raw_dir(raw_dir, db_path, schemas={})
+
+    assert result.records_upserted == 2
+    with sqlite3.connect(db_path) as conn:
+        state = conn.execute(
+            """
+            SELECT endpoint, current_count, tombstone_count, latest_modified_at
+            FROM endpoint_state
+            """
+        ).fetchone()
+        dashboard_state = conn.execute(
+            """
+            SELECT endpoint, current_count, tombstone_count, latest_modified_at
+            FROM dashboard_endpoint_state
+            """
+        ).fetchone()
+    assert state == ("styles", 2, 0, "2026-01-02T00:00:00Z")
+    assert dashboard_state == state
+
+
+def test_first_endpoint_state_refresh_backfills_existing_cache(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "materials",
+                "M1",
+                json.dumps({"id": "M1", "_modified_at": "2026-01-01T00:00:00Z"}),
+                "material-1",
+                "2026-01-01T00:00:00Z",
+                "materials.jsonl",
+                "run-0",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-02T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "delta",
+                "started_at": "2026-01-02T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": True}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = ingest_raw_dir(raw_dir, db_path, schemas={})
+
+    assert result.records_upserted == 1
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT endpoint, current_count, latest_modified_at
+            FROM endpoint_state
+            ORDER BY endpoint
+            """
+        ).fetchall()
+    assert rows == [
+        ("materials", 1, "2026-01-01T00:00:00Z"),
+        ("styles", 1, "2026-01-02T00:00:00Z"),
+    ]
+
+
 def test_full_ingest_hard_deletes_missing_current_records(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:

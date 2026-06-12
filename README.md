@@ -177,6 +177,8 @@ Changelog tracking is automatic. It compares canonical full payloads for current
 added, changed, and removed events after ingest. Event rows keep the previous and current payloads
 for drill-down, plus delete type for removals and actor fields from `modified_by`. Actor names are
 resolved from the `users` endpoint `node_name`.
+Changelog activity filters such as `--since 7d` use Centric `_modified_at` rather than the local
+fetch or changelog detection time. `changelog runs --since` remains based on local run creation time.
 
 Full fetch ingest is authoritative per successful endpoint. Current local records missing from a
 successful full snapshot are removed from `endpoint_records` and written as synthetic hard-delete

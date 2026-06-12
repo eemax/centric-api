@@ -131,7 +131,8 @@ uv run centric-api changelog update
 
 Common options:
 
-- `--since VALUE`: relative `10m`, `24h`, `7d`, or an ISO timestamp.
+- `--since VALUE`: relative `10m`, `24h`, `7d`, or an ISO timestamp. Changelog activity views use
+  Centric `_modified_at`; `runs` uses local changelog run creation time.
 - `--endpoint NAME`: filters to one endpoint for read views; `update` accepts repeatable endpoints.
   `runs` does not support endpoint filtering.
 - `--limit N`: limits displayed rows or actors, depending on the action.

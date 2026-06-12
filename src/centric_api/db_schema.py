@@ -45,6 +45,14 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "source_run_id",
         "ingested_at",
     },
+    "endpoint_state": {
+        "endpoint",
+        "current_count",
+        "tombstone_count",
+        "latest_modified_at",
+        "latest_ingested_at",
+        "updated_at",
+    },
     "ingest_warnings": {
         "endpoint",
         "record_id",
@@ -410,6 +418,7 @@ def validate_schema_shape(conn: sqlite3.Connection) -> list[str]:
 
 def ensure_feature_tables(conn: sqlite3.Connection) -> None:
     ensure_schema_metadata(conn)
+    ensure_endpoint_state_table(conn)
     ensure_changelog_tables(conn)
     ensure_download_tables(conn)
     ensure_bundle_tables(conn)
@@ -435,6 +444,21 @@ def ensure_schema_metadata(conn: sqlite3.Connection) -> None:
             updated_at = CURRENT_TIMESTAMP
         """,
         [str(SCHEMA_VERSION)],
+    )
+
+
+def ensure_endpoint_state_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS endpoint_state (
+            endpoint TEXT PRIMARY KEY,
+            current_count INTEGER NOT NULL,
+            tombstone_count INTEGER NOT NULL,
+            latest_modified_at TEXT,
+            latest_ingested_at TEXT,
+            updated_at TEXT NOT NULL
+        )
+        """
     )
 
 
@@ -574,6 +598,31 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
         ON endpoint_actor_field_change_summary(endpoint, changed_at);
         """
     )
+
+
+def ensure_changelog_read_indexes(
+    conn: sqlite3.Connection,
+    *,
+    include_field_indexes: bool = False,
+) -> None:
+    conn.executescript(
+        """
+        DROP INDEX IF EXISTS idx_endpoint_change_events_endpoint_activity_at;
+        DROP INDEX IF EXISTS idx_endpoint_change_events_actor_activity_at;
+        DROP INDEX IF EXISTS idx_endpoint_change_fields_activity_at;
+        DROP INDEX IF EXISTS idx_endpoint_change_fields_endpoint_activity_at;
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_activity_at
+        ON endpoint_change_events(COALESCE(modified_at, changed_at));
+        """
+    )
+    if include_field_indexes:
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_endpoint_change_fields_event_id
+            ON endpoint_change_fields(event_id);
+            """
+        )
 
 
 def ensure_download_tables(conn: sqlite3.Connection) -> None:
@@ -750,30 +799,11 @@ def ensure_dashboard_views(conn: sqlite3.Connection) -> None:
         CREATE VIEW dashboard_endpoint_state AS
         SELECT
             endpoint,
-            SUM(current_count) AS current_count,
-            SUM(tombstone_count) AS tombstone_count,
-            MAX(latest_modified_at) AS latest_modified_at,
-            MAX(latest_ingested_at) AS latest_ingested_at
-        FROM (
-            SELECT
-                endpoint,
-                COUNT(*) AS current_count,
-                0 AS tombstone_count,
-                MAX(modified_at) AS latest_modified_at,
-                MAX(ingested_at) AS latest_ingested_at
-            FROM endpoint_records
-            GROUP BY endpoint
-            UNION ALL
-            SELECT
-                endpoint,
-                0 AS current_count,
-                COUNT(*) AS tombstone_count,
-                MAX(modified_at) AS latest_modified_at,
-                MAX(ingested_at) AS latest_ingested_at
-            FROM endpoint_tombstones
-            GROUP BY endpoint
-        )
-        GROUP BY endpoint;
+            current_count,
+            tombstone_count,
+            latest_modified_at,
+            latest_ingested_at
+        FROM endpoint_state;
 
         DROP VIEW IF EXISTS dashboard_recent_changes;
         CREATE VIEW dashboard_recent_changes AS

@@ -4,12 +4,13 @@ import hashlib
 import json
 import sqlite3
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .db_schema import ensure_dashboard_views, ensure_feature_tables
+from .db_schema import ensure_dashboard_views, ensure_endpoint_state_table, ensure_feature_tables
 from .schema import DeleteCondition, EndpointSchema
 
 PRIMARY_KEY_FIELD = "id"
@@ -201,8 +202,10 @@ def ingest_raw_dir(
     upserted_ids: defaultdict[str, set[str]] = defaultdict(set)
     deleted_ids: defaultdict[str, set[str]] = defaultdict(set)
     deleted_types: defaultdict[str, dict[str, str]] = defaultdict(dict)
+    touched_endpoints: set[str] = set()
 
     with connect(db_path) as conn:
+        state_was_empty = _endpoint_state_is_empty(conn)
         for raw_file in raw_files:
             content_hash = _sha256(raw_file.path)
             applied_hash, applied_manifest_hash = _applied_hashes(conn, raw_file.path)
@@ -255,6 +258,14 @@ def ingest_raw_dir(
             upserted_ids[raw_file.endpoint].update(file_result["upserted_ids"])
             deleted_ids[raw_file.endpoint].update(file_result["deleted_ids"])
             deleted_types[raw_file.endpoint].update(file_result["deleted_types"])
+            touched_endpoints.add(raw_file.endpoint)
+
+        if touched_endpoints and state_was_empty:
+            refresh_endpoint_state(conn)
+        elif touched_endpoints:
+            refresh_endpoint_state(conn, touched_endpoints)
+        elif raw_files and state_was_empty:
+            refresh_endpoint_state(conn)
 
     return IngestResult(
         applied_files=applied_files,
@@ -281,6 +292,116 @@ def ingest_raw_dir(
             if record_types
         },
     )
+
+
+def refresh_endpoint_state(
+    conn: sqlite3.Connection,
+    endpoints: Iterable[str] | None = None,
+) -> None:
+    ensure_endpoint_state_table(conn)
+    now = _utc_iso()
+    if endpoints is None:
+        conn.execute("DELETE FROM endpoint_state")
+        conn.execute(
+            """
+            INSERT INTO endpoint_state (
+                endpoint, current_count, tombstone_count, latest_modified_at,
+                latest_ingested_at, updated_at
+            )
+            SELECT
+                endpoint,
+                SUM(current_count) AS current_count,
+                SUM(tombstone_count) AS tombstone_count,
+                MAX(latest_modified_at) AS latest_modified_at,
+                MAX(latest_ingested_at) AS latest_ingested_at,
+                ? AS updated_at
+            FROM (
+                SELECT
+                    endpoint,
+                    COUNT(*) AS current_count,
+                    0 AS tombstone_count,
+                    MAX(modified_at) AS latest_modified_at,
+                    MAX(ingested_at) AS latest_ingested_at
+                FROM endpoint_records
+                GROUP BY endpoint
+                UNION ALL
+                SELECT
+                    endpoint,
+                    0 AS current_count,
+                    COUNT(*) AS tombstone_count,
+                    MAX(modified_at) AS latest_modified_at,
+                    MAX(ingested_at) AS latest_ingested_at
+                FROM endpoint_tombstones
+                GROUP BY endpoint
+            )
+            GROUP BY endpoint
+            """,
+            [now],
+        )
+        return
+
+    for endpoint in sorted({str(endpoint) for endpoint in endpoints}):
+        row = conn.execute(
+            """
+            SELECT
+                SUM(current_count) AS current_count,
+                SUM(tombstone_count) AS tombstone_count,
+                MAX(latest_modified_at) AS latest_modified_at,
+                MAX(latest_ingested_at) AS latest_ingested_at
+            FROM (
+                SELECT
+                    COUNT(*) AS current_count,
+                    0 AS tombstone_count,
+                    MAX(modified_at) AS latest_modified_at,
+                    MAX(ingested_at) AS latest_ingested_at
+                FROM endpoint_records
+                WHERE endpoint = ?
+                UNION ALL
+                SELECT
+                    0 AS current_count,
+                    COUNT(*) AS tombstone_count,
+                    MAX(modified_at) AS latest_modified_at,
+                    MAX(ingested_at) AS latest_ingested_at
+                FROM endpoint_tombstones
+                WHERE endpoint = ?
+            )
+            """,
+            [endpoint, endpoint],
+        ).fetchone()
+        current_count = int(row["current_count"] or 0) if row is not None else 0
+        tombstone_count = int(row["tombstone_count"] or 0) if row is not None else 0
+        if current_count == 0 and tombstone_count == 0:
+            conn.execute("DELETE FROM endpoint_state WHERE endpoint = ?", [endpoint])
+            continue
+        conn.execute(
+            """
+            INSERT INTO endpoint_state (
+                endpoint, current_count, tombstone_count, latest_modified_at,
+                latest_ingested_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(endpoint) DO UPDATE SET
+                current_count = excluded.current_count,
+                tombstone_count = excluded.tombstone_count,
+                latest_modified_at = excluded.latest_modified_at,
+                latest_ingested_at = excluded.latest_ingested_at,
+                updated_at = excluded.updated_at
+            """,
+            [
+                endpoint,
+                current_count,
+                tombstone_count,
+                row["latest_modified_at"] if row is not None else None,
+                row["latest_ingested_at"] if row is not None else None,
+                now,
+            ],
+        )
+
+
+def _endpoint_state_is_empty(conn: sqlite3.Connection) -> bool:
+    ensure_endpoint_state_table(conn)
+    row = conn.execute("SELECT 1 FROM endpoint_state LIMIT 1").fetchone()
+    return row is None
 
 
 def discover_raw_files(raw_dir: Path) -> list[RawFile]:
