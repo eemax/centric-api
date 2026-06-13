@@ -15,6 +15,7 @@ from ..load import (
     materialize_material_supplier_quote_workflow,
     materialize_style_bom_workflow,
     materialize_style_supplier_quote_workflow,
+    private_workflow_function,
     run_load,
     run_material_create_with_composition_and_quote_workflow,
     run_material_create_with_composition_workflow,
@@ -168,6 +169,8 @@ def _workflow_materializer(workflow: str):
         return materialize_style_bom_workflow
     if workflow == "style_supplier_quote":
         return materialize_style_supplier_quote_workflow
+    if workflow != "default":
+        return private_workflow_function(workflow, f"materialize_{workflow}_workflow")
     return materialize_load
 
 
@@ -182,6 +185,8 @@ def _workflow_runner(workflow: str):
         return run_style_bom_workflow
     if workflow == "style_supplier_quote":
         return run_style_supplier_quote_workflow
+    if workflow != "default":
+        return private_workflow_function(workflow, f"run_{workflow}_workflow")
     return run_load
 
 

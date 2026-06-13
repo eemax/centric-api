@@ -926,6 +926,70 @@ def test_style_bom_load_rejects_inactive_sections(tmp_path, monkeypatch, capsys)
     assert payload["issues"][0]["code"] == "bom_section_not_found"
 
 
+def test_private_load_workflow_module_dispatches(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    workflow_dir = home / "load" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (workflow_dir / "private_echo.py").write_text(
+        """
+from centric_api.load.generic import materialize_load, run_load
+
+
+def materialize_private_echo_workflow(*args, **kwargs):
+    return materialize_load(*args, **kwargs)
+
+
+def run_private_echo_workflow(*args, **kwargs):
+    return run_load(*args, **kwargs)
+""",
+        encoding="utf-8",
+    )
+    (home / "load.yml").write_text(
+        """
+version: 1
+
+jobs:
+  - name: private-echo
+    title: Private Echo
+    workflow: private_echo
+    method: POST
+    path: /v2/materials
+    input:
+      header_row: 1
+    columns:
+      code:
+        header: Code
+        type: text
+        required: true
+    body:
+      code: code
+""",
+        encoding="utf-8",
+    )
+    workbook_path = tmp_path / "private-echo.xlsx"
+    _write_material_workbook(workbook_path, headers=["Code"], rows=[["MAT-001"]])
+
+    assert (
+        main(
+            [
+                "load",
+                "run",
+                "private-echo",
+                str(workbook_path),
+                "--dry-run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["requests"] == 1
+    assert payload["request_samples"][0]["path"] == "/v2/materials"
+
+
 def test_style_supplier_quote_load_dry_run_plans_chain(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()

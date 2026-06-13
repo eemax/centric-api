@@ -26,6 +26,7 @@ from .models import (
     LoadResponse,
     LoadRunResult,
 )
+from .private_workflows import private_workflow_function
 from .style_bom import materialize_style_bom_workflow, run_style_bom_workflow
 from .style_supplier_quote import (
     materialize_material_supplier_quote_workflow,
@@ -61,6 +62,7 @@ __all__ = [
     "run_material_create_with_composition_workflow",
     "materialize_material_supplier_quote_workflow",
     "run_material_supplier_quote_workflow",
+    "private_workflow_function",
     "materialize_style_bom_workflow",
     "run_style_bom_workflow",
     "materialize_style_supplier_quote_workflow",

@@ -21,7 +21,7 @@ SCOPE_CONFIG_KEYS = {"column", "endpoint", "via", "match", "output"}
 VALUE_SET_CONFIG_KEYS = {"name"}
 LOAD_METHODS = {"POST", "PUT"}
 COLUMN_TYPES = {"text", "number", "boolean", "ref", "ref_or_id", "scoped_ref", "composition_list"}
-WORKFLOWS = {
+BUILTIN_WORKFLOWS = {
     "default",
     "material_create_with_composition_and_quote",
     "material_create_with_composition",
@@ -40,14 +40,7 @@ ColumnType = Literal[
     "composition_list",
 ]
 LoadSource = Literal["bundled", "private", "explicit"]
-LoadWorkflow = Literal[
-    "default",
-    "material_create_with_composition_and_quote",
-    "material_create_with_composition",
-    "material_supplier_quote",
-    "style_bom",
-    "style_supplier_quote",
-]
+LoadWorkflow = str
 LoadBody = dict[str, str] | str
 
 
@@ -204,7 +197,7 @@ def _parse_job(raw: Any, index: int, *, source: LoadSource, source_path: Path) -
         source_path=source_path,
         method=method,
         path=path,
-        workflow=_choice(raw.get("workflow", "default"), WORKFLOWS, f"load job[{name}].workflow"),  # type: ignore[arg-type]
+        workflow=_workflow_name(raw.get("workflow", "default"), f"load job[{name}].workflow"),
         input=_parse_input(raw.get("input"), name),
         columns=columns,
         body=body,
@@ -414,6 +407,18 @@ def _choice(value: Any, choices: set[str], field_name: str) -> str:
     if not isinstance(value, str) or value not in choices:
         raise ConfigError(f"{field_name} must be one of: {', '.join(sorted(choices))}.")
     return value
+
+
+def _workflow_name(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{field_name} must be a non-empty string.")
+    workflow = value.strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", workflow):
+        raise ConfigError(
+            f"{field_name} may only contain letters, numbers, and underscores, "
+            "and must not start with a number."
+        )
+    return workflow
 
 
 def _reject_unknown_keys(payload: dict[str, Any], allowed: set[str], field_name: str) -> None:
