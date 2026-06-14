@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,16 @@ from ..defaults import (
 from ..download_config import load_download_config
 from ..schema import load_endpoint_schemas
 from ..store import IngestResult, connect_readonly, endpoint_has_cache_evidence, table_exists
+from ..swagger import (
+    build_swagger_index,
+    load_swagger_document,
+    load_swagger_meta,
+    resolve_swagger_meta_path,
+    resolve_swagger_path,
+)
 from ..time_display import format_time_ago
+
+SWAGGER_STALE_AFTER = timedelta(days=7)
 
 
 def _status_payload(target_db_path: Path) -> dict[str, Any]:
@@ -43,6 +53,7 @@ def _status_payload(target_db_path: Path) -> dict[str, Any]:
         "latest_changelog": None,
         "latest_download": None,
         "latest_bundle": None,
+        "swagger": _swagger_status(),
     }
     if not target_db_path.is_file():
         return payload
@@ -154,6 +165,8 @@ def _doctor_checks(args: Any) -> list[dict[str, Any]]:
                     )
                 )
 
+    checks.append(_swagger_check())
+
     if target_db_path.is_file():
         checks.append(_check("OK", "db", f"SQLite database exists: {target_db_path}"))
         with connect_readonly(target_db_path) as conn:
@@ -173,6 +186,119 @@ def _doctor_checks(args: Any) -> list[dict[str, Any]]:
         else:
             checks.append(_check("OK", name, "no lock file"))
     return checks
+
+
+def _swagger_status() -> dict[str, Any]:
+    swagger_path = resolve_swagger_path()
+    meta_path = resolve_swagger_meta_path()
+    meta_error = None
+    swagger_error = None
+    try:
+        meta = load_swagger_meta()
+    except Exception as exc:
+        meta = None
+        meta_error = str(exc)
+    fetched_at = (
+        str(meta.get("fetched_at"))
+        if isinstance(meta, dict) and meta.get("fetched_at")
+        else None
+    )
+    fetched_at_datetime = _parse_iso_datetime(fetched_at)
+    is_stale = (
+        fetched_at_datetime is None
+        or datetime.now(UTC) - fetched_at_datetime > SWAGGER_STALE_AFTER
+    )
+    operation_count = _meta_int(meta, "operation_count")
+    endpoint_count = _meta_int(meta, "endpoint_count")
+    if swagger_path.is_file() and not operation_count and not endpoint_count:
+        try:
+            index = build_swagger_index(load_swagger_document())
+        except Exception as exc:
+            swagger_error = str(exc)
+        else:
+            operation_count = index.operation_count
+            endpoint_count = len(index.endpoints)
+    return {
+        "path": str(swagger_path),
+        "exists": swagger_path.is_file(),
+        "meta_path": str(meta_path),
+        "meta_exists": meta_path.is_file(),
+        "meta_error": meta_error,
+        "swagger_error": swagger_error,
+        "fetched_at": fetched_at,
+        "fetched_ago": format_time_ago(fetched_at) if fetched_at else None,
+        "stale": is_stale,
+        "stale_after_days": SWAGGER_STALE_AFTER.days,
+        "operation_count": operation_count,
+        "endpoint_count": endpoint_count,
+    }
+
+
+def _swagger_check() -> dict[str, Any]:
+    status = _swagger_status()
+    if not status["exists"]:
+        return _check(
+            "WARN",
+            "swagger",
+            f"Swagger file not found: {status['path']}",
+            repair="centric-api swagger refresh",
+        )
+    if not status["meta_exists"]:
+        return _check(
+            "WARN",
+            "swagger",
+            f"Swagger metadata not found: {status['meta_path']}",
+            repair="centric-api swagger refresh",
+        )
+    if status["meta_error"]:
+        return _check(
+            "WARN",
+            "swagger",
+            f"Swagger metadata is unreadable: {status['meta_error']}",
+            repair="centric-api swagger refresh",
+        )
+    if status["swagger_error"]:
+        return _check(
+            "WARN",
+            "swagger",
+            f"Swagger file is unreadable: {status['swagger_error']}",
+            repair="centric-api swagger refresh",
+        )
+    if status["stale"]:
+        fetched = status["fetched_ago"] or "unknown"
+        return _check(
+            "WARN",
+            "swagger",
+            f"last refreshed {fetched}; refresh if checking API drift",
+            repair="centric-api swagger refresh",
+        )
+    return _check(
+        "OK",
+        "swagger",
+        f"{status['operation_count']} operations, {status['endpoint_count']} endpoints; "
+        f"refreshed {status['fetched_ago']}",
+    )
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _meta_int(meta: dict[str, Any] | None, key: str) -> int:
+    if not isinstance(meta, dict):
+        return 0
+    try:
+        return int(meta.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _doctor_db_checks(conn: sqlite3.Connection, checks: list[dict[str, Any]]) -> None:
@@ -427,6 +553,7 @@ def _print_human_status(payload: dict[str, Any]) -> None:
     print(f"  Fetch lock:     {_lock_status(payload['locks']['fetch'])}")
     print(f"  Download lock:  {_lock_status(payload['locks']['download'])}")
     print(f"  Bundle lock:    {_lock_status(payload['locks']['bundle'])}")
+    print(f"  Swagger:        {_swagger_status_text(payload['swagger'])}")
     print()
     print("Latest Runs")
     print(f"  Fetch:      {_latest_fetch_status(payload['latest_fetch'])}")
@@ -459,6 +586,25 @@ def _print_human_status(payload: dict[str, Any]) -> None:
 
 def _lock_status(lock: dict[str, Any]) -> str:
     return "present" if lock["exists"] else "clear"
+
+
+def _swagger_status_text(status: dict[str, Any]) -> str:
+    if not status["exists"]:
+        return "missing"
+    if not status["meta_exists"]:
+        return "present, metadata missing"
+    if status["meta_error"]:
+        return "present, metadata unreadable"
+    if status["swagger_error"]:
+        return "present, schema unreadable"
+    counts = (
+        f"{_format_status_count(int(status['operation_count']))} operations, "
+        f"{_format_status_count(int(status['endpoint_count']))} endpoints"
+    )
+    if status["stale"]:
+        fetched = status["fetched_ago"] or "unknown refresh age"
+        return f"{counts}, stale ({fetched})"
+    return f"{counts}, refreshed {status['fetched_ago']}"
 
 
 def _latest_fetch_status(row: dict[str, Any] | None) -> str:
@@ -576,7 +722,7 @@ def _doctor_check_group(name: str) -> str:
         return "Downloads"
     if name.startswith("bundle_job:"):
         return "Bundles"
-    if name in {"fetch_lock", "download_lock", "bundle_lock"}:
+    if name in {"fetch_lock", "download_lock", "bundle_lock", "swagger"}:
         return "Runtime"
     return "Other"
 
@@ -597,6 +743,7 @@ def _doctor_check_label(check: dict[str, Any]) -> str:
         "fetch_lock": "fetch lock",
         "download_lock": "download lock",
         "bundle_lock": "bundle lock",
+        "swagger": "swagger",
     }
     if name.startswith("download_job:"):
         return f"download job {name.split(':', 1)[1]}"

@@ -533,6 +533,58 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
     status_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+    swagger_parser = subparsers.add_parser("swagger", help="Inspect local Centric Swagger schema")
+    swagger_actions = swagger_parser.add_subparsers(dest="action", required=True)
+
+    swagger_refresh_parser = swagger_actions.add_parser("refresh", help="Fetch Swagger JSON")
+    swagger_refresh_parser.add_argument(
+        "--fetch-config",
+        metavar="PATH",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Fetcher config path for credentials.",
+    )
+    swagger_refresh_parser.add_argument(
+        "--env-file", metavar="PATH", default=None, help="Credential env file."
+    )
+    swagger_refresh_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    swagger_status_parser = swagger_actions.add_parser("status", help="Show Swagger freshness")
+    swagger_status_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    swagger_endpoints_parser = swagger_actions.add_parser(
+        "endpoints",
+        help="List Swagger paths and methods",
+    )
+    swagger_endpoints_parser.add_argument(
+        "--endpoint", metavar="NAME", default=None, help="Filter by root endpoint."
+    )
+    swagger_endpoints_parser.add_argument(
+        "--json", action="store_true", help="Emit JSON Lines output."
+    )
+
+    swagger_diff_parser = swagger_actions.add_parser("diff", help="Show Swagger endpoint drift")
+    swagger_diff_parser.add_argument(
+        "--against",
+        metavar="PATH",
+        default=None,
+        help="Compare local Swagger against another Swagger JSON file.",
+    )
+    swagger_diff_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    swagger_coverage_parser = swagger_actions.add_parser(
+        "coverage",
+        help="Compare Swagger GET collections with fetch config",
+    )
+    swagger_coverage_parser.add_argument(
+        "--fetch-config",
+        metavar="PATH",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="Fetcher config path.",
+    )
+    swagger_coverage_parser.add_argument(
+        "--json", action="store_true", help="Emit one JSON object."
+    )
+
     doctor_parser = subparsers.add_parser("doctor", help="Check local Centric API setup")
     doctor_parser.add_argument(
         "--fetch-config",

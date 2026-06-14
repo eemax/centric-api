@@ -42,6 +42,10 @@ uv run centric-api validate run my-validator
 uv run centric-api units convert 1500 g kg
 uv run centric-api units basis gsm
 uv run centric-api status
+uv run centric-api swagger refresh
+uv run centric-api swagger status
+uv run centric-api swagger endpoints
+uv run centric-api swagger coverage
 uv run centric-api doctor
 uv run centric-api rebuild-db --yes
 uv run centric-api cron
@@ -134,10 +138,19 @@ Use `load check` and `load run --dry-run` before running with `--yes`. Real runs
 failed or validation-error rows from that review workbook. Load schemas live in `config/load.yml`
 plus private `CENTRIC_API_HOME/load.yml`.
 
-`status` gives a quick read-only overview of runtime home, DB path, locks, latest fetch/changelog,
-download, bundle, and endpoint counts. `doctor` validates local setup, config, credentials presence,
-SQLite state, cached endpoints required by download jobs, bundle/download wiring, stale locks, and
-missing current download files. It exits nonzero when any check fails.
+`status` gives a quick read-only overview of runtime home, DB path, locks, Swagger freshness, latest
+fetch/changelog, download, bundle, and endpoint counts. `doctor` validates local setup, config,
+credentials presence, SQLite state, local Swagger freshness, cached endpoints required by download
+jobs, bundle/download wiring, stale locks, and missing current download files. It exits nonzero when
+any check fails.
+
+`swagger` is optional local API-schema tooling. `swagger refresh` fetches the Centric Swagger JSON
+from `CENTRIC_BASE_URL/api/v2/swagger.json`, writes `CENTRIC_API_HOME/swagger.json`, and records
+freshness, SHA-256, operation counts, and the last added/removed/changed operation diff in
+`CENTRIC_API_HOME/swagger.meta.json`. `swagger endpoints` lists normalized paths and methods,
+`swagger diff` shows the last refresh diff or compares against another Swagger JSON file, and
+`swagger coverage` compares Swagger GET collection paths with the configured fetch endpoints. The
+local Swagger and metadata files always live at the root of `CENTRIC_API_HOME`.
 
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays raw evidence from `CENTRIC_API_HOME/raw` into a fresh DB, rebuilds changelog, and reinstalls

@@ -10,15 +10,18 @@ command:
 
 - `fetch --json`, `changelog --json`, `changelog fields --json`, `changelog actors --json`,
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
-  `bundle list --json`, `view list --json`, `load list --json`, and `model list --json` emit JSON
-  Lines. `validate list --json` and `validate run all --json` also emit JSON Lines.
+  `bundle list --json`, `view list --json`, `load list --json`, `model list --json`, and
+  `swagger endpoints --json` emit JSON Lines. `validate list --json` and `validate run all --json`
+  also emit JSON Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `changelog update --json`, `bundle run --json`, `bundle show --json`,
   `bundle changelog --json`, `status --json`, `doctor --json`, `rebuild-db --json`,
   `view show --json`, `view check --json`, `view export --json`, `load show --json`,
   `load check --json`, `load run --json`, `load retry --json`, `model show --json`,
   `model check --json`, `model run --json`, `validate show --json`,
-  `validate run NAME --json`, `map endpoints --json`, and units commands emit one JSON object.
+  `validate run NAME --json`, `map endpoints --json`, `swagger refresh --json`,
+  `swagger status --json`, `swagger diff --json`, `swagger coverage --json`, and units commands
+  emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used. Group config
 flags such as `--load-config`, `--models-dir`, `--validators-dir`, and `--units-config` can be
@@ -116,6 +119,41 @@ CENTRIC_API_HOME/maps/endpoints/{run_id}/endpoint-map.html
 
 The Markdown file is intended as a compact agent-readable map. The HTML file is a static local
 explorer for inspecting incoming and outgoing endpoint relationships.
+
+## Swagger
+
+```bash
+uv run centric-api swagger refresh
+uv run centric-api swagger status
+uv run centric-api swagger endpoints
+uv run centric-api swagger diff
+uv run centric-api swagger coverage
+```
+
+`swagger` is optional local API-schema tooling. It reads and writes:
+
+```text
+CENTRIC_API_HOME/swagger.json
+CENTRIC_API_HOME/swagger.meta.json
+```
+
+Actions:
+
+- `refresh`: fetches `CENTRIC_BASE_URL/api/v2/swagger.json`, writes the local Swagger JSON, and
+  records metadata including source URL, fetch time, SHA-256, operation count, endpoint count, and
+  the last added/removed/changed operation diff versus the previous local file.
+- `status`: reports whether the local Swagger JSON and metadata exist, plus freshness and counts
+  when available.
+- `endpoints`: lists normalized Swagger methods and paths. Use `--endpoint NAME` to filter by root
+  endpoint.
+- `diff`: shows the last refresh diff from metadata, or compares against another file with
+  `--against PATH`.
+- `coverage`: compares top-level Swagger GET collection paths with `config/fetcher.yml`, or another
+  config passed with `--fetch-config`.
+
+The local Swagger and metadata files always live at the root of `CENTRIC_API_HOME`. Swagger is an
+auditor, not the runtime source of truth: fetch/load config remains authoritative, and Swagger
+commands are meant to catch drift early.
 
 ## Changelog
 
@@ -392,8 +430,8 @@ uv run centric-api doctor
 uv run centric-api doctor --json
 ```
 
-`status` is read-only and summarizes runtime home, DB path, locks, latest fetch/changelog/download/
-bundle runs, and cached endpoint counts.
+`status` is read-only and summarizes runtime home, DB path, locks, Swagger freshness, latest
+fetch/changelog/download/bundle runs, and cached endpoint counts.
 
 `doctor` validates local setup:
 
@@ -401,6 +439,7 @@ bundle runs, and cached endpoint counts.
 - credential presence
 - SQLite schema version and required tables
 - dashboard schema shape
+- local Swagger presence and freshness
 - cached endpoints required by download jobs
 - current downloaded files on disk
 - bundle/download wiring

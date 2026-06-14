@@ -74,6 +74,7 @@ def top_level_help(*, color: bool = False) -> str:
             command("doctor", "Check local setup"),
             command("status", "Show cache and runtime state"),
             command("rebuild-db", "Rebuild SQLite from raw evidence"),
+            command("swagger", "Inspect and refresh local API schema"),
             command("cron", "Run scheduled delta fetches"),
             command("units", "Inspect and convert configured units"),
             command("model", "Run private calculated data models"),

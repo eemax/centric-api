@@ -19,6 +19,7 @@ def test_cli_help_commands(capsys) -> None:
     assert "validate" in output
     assert "model" in output
     assert "units" in output
+    assert "swagger" in output
     assert "CENTRIC API" in output
     assert "Recommended path:" in output
     assert "Core workflows:" in output

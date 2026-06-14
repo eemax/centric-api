@@ -15,6 +15,7 @@ from .commands.map import run_map_command
 from .commands.model import run_model_command
 from .commands.rebuild_db import run_rebuild_db
 from .commands.status import run_status
+from .commands.swagger import run_swagger
 from .commands.units import run_units
 from .commands.validate import run_validate_command
 from .commands.view import run_view
@@ -55,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_units(args)
         if args.command == "status":
             return run_status(args)
+        if args.command == "swagger":
+            return run_swagger(args)
         if args.command == "doctor":
             return run_doctor(args)
         if args.command == "rebuild-db":

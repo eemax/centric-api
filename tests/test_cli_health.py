@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 
 from centric_api.cli import main
 from centric_api.store import connect
@@ -110,6 +111,32 @@ def test_status_endpoint_state_fallback_includes_tombstone_only_endpoints(tmp_pa
     ]
 
 
+def test_status_reports_swagger_snapshot(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    (home / "swagger.json").write_text(
+        json.dumps({"swagger": "2.0", "paths": {"/styles": {"get": {}}}}),
+        encoding="utf-8",
+    )
+    fetched_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+    (home / "swagger.meta.json").write_text(
+        json.dumps({"fetched_at": fetched_at}),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["status", "--db", str(tmp_path / "missing.db"), "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["swagger"]["path"] == str(home / "swagger.json")
+    assert payload["swagger"]["exists"] is True
+    assert payload["swagger"]["meta_exists"] is True
+    assert payload["swagger"]["stale"] is False
+    assert payload["swagger"]["operation_count"] == 1
+    assert payload["swagger"]["endpoint_count"] == 1
+
+
 def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
     monkeypatch.setenv("CENTRIC_USERNAME", "user")
@@ -124,6 +151,32 @@ def test_doctor_reports_missing_db(tmp_path, monkeypatch, capsys) -> None:
         "name": "db",
         "message": f"SQLite database not found: {tmp_path / 'missing.db'}",
     } in checks
+
+
+def test_doctor_warns_when_swagger_is_missing(tmp_path, monkeypatch, capsys) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_applied_raw_file(conn, endpoint="documents")
+        _insert_applied_raw_file(conn, endpoint="document_revisions")
+
+    exit_code = main(["doctor", "--db", str(db_path), "--json"])
+
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    swagger_check = next(check for check in checks if check["name"] == "swagger")
+    assert exit_code == 0
+    assert swagger_check == {
+        "status": "WARN",
+        "name": "swagger",
+        "message": f"Swagger file not found: {home / 'swagger.json'}",
+        "repair": "centric-api swagger refresh",
+    }
+
 
 def test_doctor_json_shows_normalized_centric_base_url(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "example-brand")
