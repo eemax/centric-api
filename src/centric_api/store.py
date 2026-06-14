@@ -1,37 +1,50 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from .db_schema import ensure_dashboard_views, ensure_endpoint_state_table, ensure_feature_tables
-from .schema import DeleteCondition, EndpointSchema
+from .schema import EndpointSchema
+from .store_discovery import RawFile, _sha256, discover_raw_files
+from .store_ingest import (
+    DELETE_TYPE_HARD_DELETE,
+    DELETE_TYPE_TOMBSTONE,
+    HARD_DELETE_DELETED_AT_FIELD,
+    HARD_DELETE_SOURCE_FILE_FIELD,
+    HARD_DELETE_SOURCE_RUN_ID_FIELD,
+    HARD_DELETE_TYPE_FIELD,
+    MODIFIED_AT_FIELD,
+    PRIMARY_KEY_FIELD,
+    _apply_raw_file,
+    _utc_iso,
+)
 
-PRIMARY_KEY_FIELD = "id"
-MODIFIED_AT_FIELD = "_modified_at"
-HARD_DELETE_TYPE_FIELD = "_centric_api_delete_type"
-HARD_DELETE_DELETED_AT_FIELD = "_centric_api_deleted_at"
-HARD_DELETE_SOURCE_RUN_ID_FIELD = "_centric_api_source_run_id"
-HARD_DELETE_SOURCE_FILE_FIELD = "_centric_api_source_file"
-DELETE_TYPE_TOMBSTONE = "tombstone"
-DELETE_TYPE_HARD_DELETE = "hard_delete"
+# Keep repr/pickle/introspection compatible with the original public facade.
+RawFile.__module__ = __name__
 
-
-@dataclass(frozen=True)
-class RawFile:
-    path: Path
-    endpoint: str
-    is_delta: bool
-    source_run_id: str
-    run_mode: str | None = None
-    manifest_path: Path | None = None
-    manifest_sha256: str | None = None
+__all__ = [
+    "DELETE_TYPE_HARD_DELETE",
+    "DELETE_TYPE_TOMBSTONE",
+    "HARD_DELETE_DELETED_AT_FIELD",
+    "HARD_DELETE_SOURCE_FILE_FIELD",
+    "HARD_DELETE_SOURCE_RUN_ID_FIELD",
+    "HARD_DELETE_TYPE_FIELD",
+    "IngestResult",
+    "MODIFIED_AT_FIELD",
+    "PRIMARY_KEY_FIELD",
+    "RawFile",
+    "connect",
+    "connect_readonly",
+    "discover_raw_files",
+    "endpoint_has_cache_evidence",
+    "initialize_store",
+    "ingest_raw_dir",
+    "refresh_endpoint_state",
+    "table_exists",
+]
 
 
 @dataclass(frozen=True)
@@ -239,8 +252,8 @@ def ingest_raw_dir(
                     raw_file.endpoint,
                     raw_file.source_run_id,
                     int(raw_file.is_delta),
-                    file_result["records_read"],
-                    file_result["invalid_records"],
+                    file_result.records_read,
+                    file_result.invalid_records,
                     content_hash,
                     str(raw_file.manifest_path) if raw_file.manifest_path else None,
                     raw_file.manifest_sha256,
@@ -249,15 +262,15 @@ def ingest_raw_dir(
                 ],
             )
             applied_files += 1
-            records_read += file_result["records_read"]
-            records_upserted += file_result["records_upserted"]
-            records_deleted += file_result["records_deleted"]
-            records_hard_deleted += file_result["records_hard_deleted"]
-            invalid_records += file_result["invalid_records"]
-            endpoints[raw_file.endpoint] += file_result["records_read"]
-            upserted_ids[raw_file.endpoint].update(file_result["upserted_ids"])
-            deleted_ids[raw_file.endpoint].update(file_result["deleted_ids"])
-            deleted_types[raw_file.endpoint].update(file_result["deleted_types"])
+            records_read += file_result.records_read
+            records_upserted += file_result.records_upserted
+            records_deleted += file_result.records_deleted
+            records_hard_deleted += file_result.records_hard_deleted
+            invalid_records += file_result.invalid_records
+            endpoints[raw_file.endpoint] += file_result.records_read
+            upserted_ids[raw_file.endpoint].update(file_result.upserted_ids)
+            deleted_ids[raw_file.endpoint].update(file_result.deleted_ids)
+            deleted_types[raw_file.endpoint].update(file_result.deleted_types)
             touched_endpoints.add(raw_file.endpoint)
 
         if touched_endpoints and state_was_empty:
@@ -404,393 +417,6 @@ def _endpoint_state_is_empty(conn: sqlite3.Connection) -> bool:
     return row is None
 
 
-def discover_raw_files(raw_dir: Path) -> list[RawFile]:
-    if not raw_dir.exists():
-        return []
-    files: list[RawFile] = []
-    for path in raw_dir.rglob("*.jsonl"):
-        if path.name.startswith("."):
-            continue
-        endpoint, is_delta = _endpoint_from_filename(path.name)
-        if endpoint is None:
-            continue
-        manifest = _load_manifest(path.parent)
-        manifest_endpoint = _manifest_endpoint_for_file(manifest, path.name)
-        if _manifest_has_endpoint_records(manifest) and manifest_endpoint is None:
-            continue
-        if manifest_endpoint is not None:
-            endpoint, endpoint_manifest = manifest_endpoint
-        else:
-            endpoint_manifest = None
-        source_run_id = _manifest_run_id(manifest) or (
-            path.parent.name if path.parent != raw_dir else "root"
-        )
-        run_mode = _manifest_mode(manifest)
-        manifest_path = path.parent / "manifest.json" if manifest is not None else None
-        files.append(
-            RawFile(
-                path=path,
-                endpoint=endpoint,
-                is_delta=_manifest_file_is_delta(endpoint_manifest, default=is_delta),
-                source_run_id=source_run_id,
-                run_mode=run_mode,
-                manifest_path=manifest_path,
-                manifest_sha256=_sha256(manifest_path) if manifest_path else None,
-            )
-        )
-    return sorted(files, key=lambda item: (_run_sort_key(item), item.endpoint, str(item.path)))
-
-
-def _apply_raw_file(
-    conn: sqlite3.Connection,
-    *,
-    raw_file: RawFile,
-    schema: EndpointSchema,
-) -> dict[str, Any]:
-    winners: dict[str, tuple[dict[str, Any], int]] = {}
-    records_read = 0
-    invalid_records = 0
-    now = _utc_iso()
-
-    with raw_file.path.open("r", encoding="utf-8") as fh:
-        for line_number, raw_line in enumerate(fh, start=1):
-            text = raw_line.strip()
-            if not text:
-                continue
-            try:
-                payload = json.loads(text)
-            except json.JSONDecodeError as exc:
-                invalid_records += 1
-                _insert_warning(conn, raw_file, None, f"line {line_number}: invalid JSON ({exc})")
-                continue
-            if not isinstance(payload, dict):
-                invalid_records += 1
-                _insert_warning(conn, raw_file, None, f"line {line_number}: record is not object")
-                continue
-            record_id = payload.get(PRIMARY_KEY_FIELD)
-            if record_id is None or str(record_id).strip() == "":
-                invalid_records += 1
-                _insert_warning(conn, raw_file, None, f"line {line_number}: missing id")
-                continue
-            records_read += 1
-            record_key = str(record_id)
-            existing = winners.get(record_key)
-            if existing is None or _record_is_newer(payload, line_number, existing[0], existing[1]):
-                winners[record_key] = (payload, line_number)
-
-    upserted_ids: set[str] = set()
-    deleted_ids: set[str] = set()
-    deleted_types: dict[str, str] = {}
-    retained_ids: set[str] = set()
-    for record_id, (payload, _) in sorted(winners.items()):
-        payload_json = _canonical_json(payload)
-        payload_hash = _hash_text(payload_json)
-        modified_at = _string_value(payload.get(MODIFIED_AT_FIELD))
-        is_delete = _matches_delete(payload, schema.delete_when_any)
-        existing = conn.execute(
-            """
-            SELECT payload_json, payload_sha256, modified_at
-            FROM endpoint_records
-            WHERE endpoint = ? AND record_id = ?
-            """,
-            [raw_file.endpoint, record_id],
-        ).fetchone()
-
-        if is_delete:
-            if existing is not None and _incoming_can_replace(modified_at, existing["modified_at"]):
-                conn.execute(
-                    "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
-                    [raw_file.endpoint, record_id],
-                )
-                _upsert_tombstone(
-                    conn,
-                    raw_file=raw_file,
-                    record_id=record_id,
-                    payload_json=payload_json,
-                    payload_hash=payload_hash,
-                    modified_at=modified_at,
-                    ingested_at=now,
-                )
-                deleted_ids.add(record_id)
-                deleted_types[record_id] = DELETE_TYPE_TOMBSTONE
-            elif existing is None:
-                _upsert_tombstone(
-                    conn,
-                    raw_file=raw_file,
-                    record_id=record_id,
-                    payload_json=payload_json,
-                    payload_hash=payload_hash,
-                    modified_at=modified_at,
-                    ingested_at=now,
-                )
-            continue
-
-        retained_ids.add(record_id)
-
-        if existing is None:
-            _upsert_current_record(
-                conn,
-                raw_file=raw_file,
-                record_id=record_id,
-                payload_json=payload_json,
-                payload_hash=payload_hash,
-                modified_at=modified_at,
-                ingested_at=now,
-            )
-            upserted_ids.add(record_id)
-            continue
-
-        if not _incoming_can_replace(modified_at, existing["modified_at"]):
-            continue
-        if existing["payload_sha256"] == payload_hash:
-            continue
-        if modified_at is not None and modified_at == existing["modified_at"]:
-            _insert_warning(
-                conn,
-                raw_file,
-                record_id,
-                "same _modified_at with different payload; replaced by later raw file order",
-            )
-        _upsert_current_record(
-            conn,
-            raw_file=raw_file,
-            record_id=record_id,
-            payload_json=payload_json,
-            payload_hash=payload_hash,
-            modified_at=modified_at,
-            ingested_at=now,
-        )
-        upserted_ids.add(record_id)
-
-    hard_deleted_ids = _reconcile_full_snapshot_hard_deletes(
-        conn,
-        raw_file=raw_file,
-        retained_ids=retained_ids,
-        invalid_records=invalid_records,
-        ingested_at=now,
-    )
-    deleted_ids.update(hard_deleted_ids)
-    for record_id in hard_deleted_ids:
-        deleted_types[record_id] = DELETE_TYPE_HARD_DELETE
-
-    return {
-        "records_read": records_read,
-        "records_upserted": len(upserted_ids),
-        "records_deleted": len(deleted_ids) - len(hard_deleted_ids),
-        "records_hard_deleted": len(hard_deleted_ids),
-        "invalid_records": invalid_records,
-        "upserted_ids": upserted_ids,
-        "deleted_ids": deleted_ids,
-        "deleted_types": deleted_types,
-    }
-
-
-def _reconcile_full_snapshot_hard_deletes(
-    conn: sqlite3.Connection,
-    *,
-    raw_file: RawFile,
-    retained_ids: set[str],
-    invalid_records: int,
-    ingested_at: str,
-) -> set[str]:
-    if raw_file.run_mode != "full" or raw_file.is_delta or invalid_records:
-        return set()
-
-    rows = conn.execute(
-        """
-        SELECT record_id
-        FROM endpoint_records
-        WHERE endpoint = ?
-        """,
-        [raw_file.endpoint],
-    ).fetchall()
-    current_ids = {str(row["record_id"]) for row in rows}
-    hard_deleted_ids = current_ids - retained_ids
-    for record_id in sorted(hard_deleted_ids):
-        payload = {
-            PRIMARY_KEY_FIELD: record_id,
-            HARD_DELETE_TYPE_FIELD: "hard_delete",
-            HARD_DELETE_DELETED_AT_FIELD: ingested_at,
-            HARD_DELETE_SOURCE_RUN_ID_FIELD: raw_file.source_run_id,
-            HARD_DELETE_SOURCE_FILE_FIELD: str(raw_file.path),
-        }
-        payload_json = _canonical_json(payload)
-        payload_hash = _hash_text(payload_json)
-        conn.execute(
-            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
-            [raw_file.endpoint, record_id],
-        )
-        _upsert_tombstone(
-            conn,
-            raw_file=raw_file,
-            record_id=record_id,
-            payload_json=payload_json,
-            payload_hash=payload_hash,
-            modified_at=None,
-            ingested_at=ingested_at,
-        )
-    return hard_deleted_ids
-
-
-def _record_is_newer(
-    candidate: dict[str, Any],
-    candidate_line: int,
-    existing: dict[str, Any],
-    existing_line: int,
-) -> bool:
-    candidate_modified = _string_value(candidate.get(MODIFIED_AT_FIELD))
-    existing_modified = _string_value(existing.get(MODIFIED_AT_FIELD))
-    cmp = _compare_modified(candidate_modified, existing_modified)
-    if cmp != 0:
-        return cmp > 0
-    return candidate_line > existing_line
-
-
-def _incoming_can_replace(incoming_modified: str | None, existing_modified: str | None) -> bool:
-    if incoming_modified is None:
-        return existing_modified is None
-    if existing_modified is None:
-        return True
-    return _compare_modified(incoming_modified, existing_modified) >= 0
-
-
-def _compare_modified(left: str | None, right: str | None) -> int:
-    if left is None and right is None:
-        return 0
-    if left is None:
-        return -1
-    if right is None:
-        return 1
-    left_dt = _parse_datetime(left)
-    right_dt = _parse_datetime(right)
-    if left_dt is not None and right_dt is not None:
-        return (left_dt > right_dt) - (left_dt < right_dt)
-    return (left > right) - (left < right)
-
-
-def _parse_datetime(value: str) -> datetime | None:
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
-
-
-def _matches_delete(payload: dict[str, Any], conditions: tuple[DeleteCondition, ...]) -> bool:
-    return any(
-        _extract_path(payload, condition.field) == condition.equals for condition in conditions
-    )
-
-
-def _extract_path(payload: dict[str, Any], path: str) -> Any:
-    current: Any = payload
-    for part in path.split("."):
-        if not isinstance(current, dict) or part not in current:
-            return None
-        current = current[part]
-    return current
-
-
-def _upsert_current_record(
-    conn: sqlite3.Connection,
-    *,
-    raw_file: RawFile,
-    record_id: str,
-    payload_json: str,
-    payload_hash: str,
-    modified_at: str | None,
-    ingested_at: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO endpoint_records (
-            endpoint, record_id, payload_json, payload_sha256, modified_at,
-            source_file, source_run_id, ingested_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(endpoint, record_id) DO UPDATE SET
-            payload_json = excluded.payload_json,
-            payload_sha256 = excluded.payload_sha256,
-            modified_at = excluded.modified_at,
-            source_file = excluded.source_file,
-            source_run_id = excluded.source_run_id,
-            ingested_at = excluded.ingested_at
-        """,
-        [
-            raw_file.endpoint,
-            record_id,
-            payload_json,
-            payload_hash,
-            modified_at,
-            str(raw_file.path),
-            raw_file.source_run_id,
-            ingested_at,
-        ],
-    )
-    conn.execute(
-        "DELETE FROM endpoint_tombstones WHERE endpoint = ? AND record_id = ?",
-        [raw_file.endpoint, record_id],
-    )
-
-
-def _upsert_tombstone(
-    conn: sqlite3.Connection,
-    *,
-    raw_file: RawFile,
-    record_id: str,
-    payload_json: str,
-    payload_hash: str,
-    modified_at: str | None,
-    ingested_at: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO endpoint_tombstones (
-            endpoint, record_id, payload_json, payload_sha256, modified_at,
-            source_file, source_run_id, ingested_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(endpoint, record_id) DO UPDATE SET
-            payload_json = excluded.payload_json,
-            payload_sha256 = excluded.payload_sha256,
-            modified_at = excluded.modified_at,
-            source_file = excluded.source_file,
-            source_run_id = excluded.source_run_id,
-            ingested_at = excluded.ingested_at
-        """,
-        [
-            raw_file.endpoint,
-            record_id,
-            payload_json,
-            payload_hash,
-            modified_at,
-            str(raw_file.path),
-            raw_file.source_run_id,
-            ingested_at,
-        ],
-    )
-
-
-def _insert_warning(
-    conn: sqlite3.Connection,
-    raw_file: RawFile,
-    record_id: str | None,
-    warning: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO ingest_warnings (endpoint, record_id, source_file, warning, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        [raw_file.endpoint, record_id, str(raw_file.path), warning, _utc_iso()],
-    )
-
-
 def _applied_hashes(conn: sqlite3.Connection, path: Path) -> tuple[str | None, str | None]:
     row = conn.execute(
         "SELECT content_sha256, manifest_sha256 FROM applied_raw_files WHERE file_path = ?",
@@ -801,100 +427,3 @@ def _applied_hashes(conn: sqlite3.Connection, path: Path) -> tuple[str | None, s
     content_sha = str(row["content_sha256"])
     manifest_sha = row["manifest_sha256"]
     return content_sha, str(manifest_sha) if manifest_sha is not None else None
-
-
-def _endpoint_from_filename(filename: str) -> tuple[str | None, bool]:
-    if filename.endswith(".delta.jsonl"):
-        return filename[: -len(".delta.jsonl")], True
-    if filename.endswith(".jsonl"):
-        return filename[: -len(".jsonl")], False
-    return None, False
-
-
-def _load_manifest(directory: Path) -> dict[str, Any] | None:
-    path = directory / "manifest.json"
-    if not path.is_file():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def _manifest_run_id(manifest: dict[str, Any] | None) -> str | None:
-    value = manifest.get("run_id") if manifest else None
-    return str(value) if value else None
-
-
-def _manifest_mode(manifest: dict[str, Any] | None) -> str | None:
-    value = manifest.get("mode") if manifest else None
-    return str(value) if value else None
-
-
-def _manifest_endpoint_for_file(
-    manifest: dict[str, Any] | None,
-    filename: str,
-) -> tuple[str, dict[str, Any]] | None:
-    if manifest is None:
-        return None
-    endpoints = manifest.get("endpoints")
-    if not isinstance(endpoints, dict):
-        return None
-    for endpoint_name, endpoint in endpoints.items():
-        if not isinstance(endpoint, dict) or endpoint.get("file") != filename:
-            continue
-        return str(endpoint_name), endpoint
-    return None
-
-
-def _manifest_has_endpoint_records(manifest: dict[str, Any] | None) -> bool:
-    endpoints = manifest.get("endpoints") if manifest else None
-    return isinstance(endpoints, dict) and bool(endpoints)
-
-
-def _manifest_file_is_delta(
-    endpoint_manifest: dict[str, Any] | None,
-    *,
-    default: bool,
-) -> bool:
-    if endpoint_manifest is None:
-        return default
-    is_delta = endpoint_manifest.get("is_delta")
-    return bool(is_delta) if isinstance(is_delta, bool) else default
-
-
-def _run_sort_key(raw_file: RawFile) -> tuple[int, str]:
-    if raw_file.manifest_path and raw_file.manifest_path.is_file():
-        manifest = _load_manifest(raw_file.manifest_path.parent)
-        started_at = manifest.get("started_at") if manifest else None
-        if isinstance(started_at, str):
-            return (0, started_at)
-    return (1, str(raw_file.path))
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _hash_text(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def _string_value(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _utc_iso() -> str:
-    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
