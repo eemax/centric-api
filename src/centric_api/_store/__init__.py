@@ -1,0 +1,1 @@
+"""Internal store implementation."""

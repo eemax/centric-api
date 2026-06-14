@@ -6,10 +6,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .db_schema import ensure_dashboard_views, ensure_endpoint_state_table, ensure_feature_tables
-from .schema import EndpointSchema
-from .store_discovery import RawFile, _sha256, discover_raw_files
-from .store_ingest import (
+from ._store.discovery import RawFile, _sha256, discover_raw_files
+from ._store.ingest import (
     DELETE_TYPE_HARD_DELETE,
     DELETE_TYPE_TOMBSTONE,
     HARD_DELETE_DELETED_AT_FIELD,
@@ -21,6 +19,8 @@ from .store_ingest import (
     _apply_raw_file,
     _utc_iso,
 )
+from .db_schema import ensure_dashboard_views, ensure_endpoint_state_table, ensure_feature_tables
+from .schema import EndpointSchema
 
 # Keep repr/pickle/introspection compatible with the original public facade.
 RawFile.__module__ = __name__

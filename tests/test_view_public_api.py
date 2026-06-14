@@ -3,11 +3,23 @@ from __future__ import annotations
 import pickle
 from pathlib import Path
 
+import centric_api.view_export as view_export_module
+import centric_api.view_writers as view_writers_module
 from centric_api.view_export import (
     MissingJoinDetail,
     ViewCheckResult,
     ViewExportResult,
     ViewMaterialized,
+    materialize_view,
+)
+from centric_api.view_materialize import (
+    MissingJoinDetail as MaterializeMissingJoinDetail,
+)
+from centric_api.view_materialize import (
+    ViewMaterialized as MaterializeViewMaterialized,
+)
+from centric_api.view_materialize import (
+    materialize_view as shim_materialize_view,
 )
 
 
@@ -16,6 +28,13 @@ def test_view_export_result_types_keep_public_facade_identity() -> None:
     assert ViewMaterialized.__module__ == "centric_api.view_export"
     assert ViewExportResult.__module__ == "centric_api.view_export"
     assert ViewCheckResult.__module__ == "centric_api.view_export"
+
+
+def test_view_compatibility_shims_share_public_objects() -> None:
+    assert MaterializeMissingJoinDetail is MissingJoinDetail
+    assert MaterializeViewMaterialized is ViewMaterialized
+    assert shim_materialize_view is materialize_view
+    assert view_writers_module.csv is view_export_module.csv
 
 
 def test_view_export_result_types_pickle_through_public_facade() -> None:

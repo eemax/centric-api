@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from . import view_writers as _view_writers
+from ._view import writers as _view_writers
+from ._view.materialize import MissingJoinDetail, ViewMaterialized, materialize_view
 from .config import ConfigError
 from .view_config import ViewConfig, ViewDefinition
-from .view_materialize import MissingJoinDetail, ViewMaterialized, materialize_view
 
 ExportFormat = Literal["xlsx", "csv"]
 SUPPORTED_EXPORT_FORMATS = {"xlsx", "csv"}

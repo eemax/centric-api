@@ -4,11 +4,19 @@ import json
 import pickle
 from pathlib import Path
 
+from centric_api import store_discovery, store_ingest
 from centric_api.store import RawFile, discover_raw_files
+from centric_api.store_ingest import _apply_raw_file
 
 
 def test_raw_file_facade_keeps_public_module_identity() -> None:
     assert RawFile.__module__ == "centric_api.store"
+
+
+def test_store_compatibility_shims_share_public_objects() -> None:
+    assert store_discovery.RawFile is RawFile
+    assert store_discovery.discover_raw_files is discover_raw_files
+    assert store_ingest._apply_raw_file is _apply_raw_file
 
 
 def test_raw_file_pickle_round_trip_uses_public_facade(tmp_path: Path) -> None:
