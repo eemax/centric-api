@@ -4,17 +4,35 @@ import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ..record_constants import (
+    DELETE_TYPE_HARD_DELETE,
+    DELETE_TYPE_TOMBSTONE,
+    DELETE_TYPE_UNKNOWN,
+    MODIFIED_AT_FIELD,
+    MODIFIED_BY_FIELD,
+    USER_ENDPOINT,
+    USER_NAME_FIELD,
+)
+
 CHANGELOG_SOURCE = "full-payload"
 CHANGELOG_SOURCE_SHA = hashlib.sha256(CHANGELOG_SOURCE.encode("utf-8")).hexdigest()
-MODIFIED_BY_FIELD = "modified_by"
-MODIFIED_AT_FIELD = "_modified_at"
-USER_ENDPOINT = "users"
-USER_NAME_FIELD = "node_name"
-DELETE_TYPE_TOMBSTONE = "tombstone"
-DELETE_TYPE_HARD_DELETE = "hard_delete"
-DELETE_TYPE_UNKNOWN = "unknown"
 ACTIVITY_AT_SQL = "COALESCE(modified_at, changed_at)"
 ProgressCallback = Callable[[str], None]
+
+__all__ = [
+    "ACTIVITY_AT_SQL",
+    "CHANGELOG_SOURCE",
+    "CHANGELOG_SOURCE_SHA",
+    "ChangelogRun",
+    "DELETE_TYPE_HARD_DELETE",
+    "DELETE_TYPE_TOMBSTONE",
+    "DELETE_TYPE_UNKNOWN",
+    "MODIFIED_AT_FIELD",
+    "MODIFIED_BY_FIELD",
+    "ProgressCallback",
+    "USER_ENDPOINT",
+    "USER_NAME_FIELD",
+]
 
 
 @dataclass(frozen=True)

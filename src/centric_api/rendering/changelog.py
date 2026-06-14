@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..record_constants import (
+    DELETE_TYPE_HARD_DELETE,
+    DELETE_TYPE_TOMBSTONE,
+    MODIFIED_AT_FIELD,
+    MODIFIED_BY_FIELD,
+)
 from ..time_display import format_time_ago
 from .common import format_count, signed_count
 
@@ -265,9 +271,9 @@ def _changelog_endpoint_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
             endpoint_row["changed"] += count
         elif change_type == "removed":
             endpoint_row["removed"] += count
-            if delete_type == "tombstone":
+            if delete_type == DELETE_TYPE_TOMBSTONE:
                 endpoint_row["tombstone"] += count
-            elif delete_type == "hard_delete":
+            elif delete_type == DELETE_TYPE_HARD_DELETE:
                 endpoint_row["hard_delete"] += count
             else:
                 endpoint_row["unknown_delete"] += count
@@ -471,7 +477,7 @@ def _change_fields_label(row: dict[str, Any]) -> str:
 
 
 def _is_metadata_field(value: Any) -> bool:
-    return str(value) in {"_modified_at", "modified_by"}
+    return str(value) in {MODIFIED_AT_FIELD, MODIFIED_BY_FIELD}
 
 
 def _actor_label(row: dict[str, Any]) -> str:

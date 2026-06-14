@@ -37,6 +37,7 @@ from ..fetch_manifest import (
 )
 from ..fetcher import FetchError, run_endpoint
 from ..models import EndpointSpec, FetchProgressEvent, FetchRunResult
+from ..record_constants import MODIFIED_AT_FIELD
 from ..rendering.fetch import (
     print_delta_dry_run,
     print_human_fetch_run_header,
@@ -584,7 +585,7 @@ def _prepare_runtime_spec(
     delta_floor: str | None,
     modified_since: str | None,
 ) -> EndpointSpec:
-    runtime_spec = apply_data_sort(spec, sort_value="_modified_at", policy="force")
+    runtime_spec = apply_data_sort(spec, sort_value=MODIFIED_AT_FIELD, policy="force")
     if mode == "delta" and delta_floor is not None:
         return _apply_modified_since_filter(runtime_spec, delta_floor)
     if mode in {"days", "months"} and modified_since is not None:
@@ -594,9 +595,9 @@ def _prepare_runtime_spec(
 
 def _apply_modified_since_filter(spec: EndpointSpec, modified_since: str) -> EndpointSpec:
     query_params = strip_modified_at_filters(spec.query_params)
-    query_params["_modified_at=ge"] = modified_since
+    query_params[f"{MODIFIED_AT_FIELD}=ge"] = modified_since
     count_query_params = strip_modified_at_filters(spec.count_spec.query_params)
-    count_query_params["_modified_at=ge"] = modified_since
+    count_query_params[f"{MODIFIED_AT_FIELD}=ge"] = modified_since
     next_count_spec = replace(spec.count_spec, query_params=count_query_params)
     return replace(spec, query_params=query_params, count_spec=next_count_spec)
 

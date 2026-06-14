@@ -9,17 +9,18 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 from typing import Any
 
+from .record_constants import (
+    DELETE_TYPE_HARD_DELETE,
+    DELETE_TYPE_TOMBSTONE,
+    HARD_DELETE_DELETED_AT_FIELD,
+    HARD_DELETE_SOURCE_FILE_FIELD,
+    HARD_DELETE_SOURCE_RUN_ID_FIELD,
+    HARD_DELETE_TYPE_FIELD,
+    MODIFIED_AT_FIELD,
+    PRIMARY_KEY_FIELD,
+)
 from .schema import DeleteCondition, EndpointSchema
 from .store_discovery import RawFile
-
-PRIMARY_KEY_FIELD = "id"
-MODIFIED_AT_FIELD = "_modified_at"
-HARD_DELETE_TYPE_FIELD = "_centric_api_delete_type"
-HARD_DELETE_DELETED_AT_FIELD = "_centric_api_deleted_at"
-HARD_DELETE_SOURCE_RUN_ID_FIELD = "_centric_api_source_run_id"
-HARD_DELETE_SOURCE_FILE_FIELD = "_centric_api_source_file"
-DELETE_TYPE_TOMBSTONE = "tombstone"
-DELETE_TYPE_HARD_DELETE = "hard_delete"
 
 
 @dataclass(frozen=True)
@@ -202,7 +203,7 @@ def _reconcile_full_snapshot_hard_deletes(
     for record_id in sorted(hard_deleted_ids):
         payload = {
             PRIMARY_KEY_FIELD: record_id,
-            HARD_DELETE_TYPE_FIELD: "hard_delete",
+            HARD_DELETE_TYPE_FIELD: DELETE_TYPE_HARD_DELETE,
             HARD_DELETE_DELETED_AT_FIELD: ingested_at,
             HARD_DELETE_SOURCE_RUN_ID_FIELD: raw_file.source_run_id,
             HARD_DELETE_SOURCE_FILE_FIELD: str(raw_file.path),
