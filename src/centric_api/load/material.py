@@ -3,31 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from openpyxl import load_workbook
-
 from ..auth import AuthContext
-from ..config import ConfigError, runtime_path
+from ..config import ConfigError
 from ..load_config import LoadConfig, LoadJob
-from .artifacts import (
-    _emit_progress,
-    _execute_chained_load_request,
-    _has_row_issues,
-    _response_field,
-    _write_requests,
-    _write_responses,
-    _write_review_workbook,
-    _write_summary,
-)
-from .excel import (
-    _include_retry_row,
-    _iter_data_rows,
-    _map_headers,
-    _retry_status_index,
-    _select_sheet,
-)
+from .artifacts import _execute_chained_load_request, _response_field
 from .models import (
-    LOAD_RUNS_DIR,
-    REVIEW_WORKBOOK_NAME,
     LoadIssue,
     LoadMaterialized,
     LoadProgressCallback,
@@ -38,7 +18,6 @@ from .models import (
     MaterialCreateCompositionRow,
     MaterialSupplierQuoteRow,
 )
-from .references import _build_reference_indexes, _build_value_set_indexes, _row_values
 from .style_supplier_quote import (
     _resolve_style_supplier_quote_memberships,
     _style_supplier_quote_references,
@@ -47,7 +26,8 @@ from .style_supplier_quote import (
     _supplier_quote_production_request,
     _supplier_quote_revision_request,
 )
-from .utils import _is_blank, _run_id, _utc_iso
+from .utils import _is_blank
+from .workflow import materialize_chained_workflow, parse_workflow_rows, run_chained_workflow
 
 
 def materialize_material_create_with_composition_workflow(
@@ -61,7 +41,7 @@ def materialize_material_create_with_composition_workflow(
     retry_statuses: set[str] | None = None,
     progress_callback: LoadProgressCallback | None = None,
 ) -> LoadMaterialized:
-    parsed = _material_create_composition_rows(
+    return materialize_chained_workflow(
         db_path,
         job,
         workbook_path,
@@ -70,28 +50,8 @@ def materialize_material_create_with_composition_workflow(
         mode=mode,
         retry_statuses=retry_statuses,
         progress_callback=progress_callback,
-    )
-    requests = _material_create_composition_planned_requests(parsed["rows"])
-    _emit_progress(
-        progress_callback,
-        {
-            "event": "load_validate",
-            "scanned": parsed["rows_scanned"],
-            "valid": len(parsed["rows"]),
-            "errors": parsed["error_rows"],
-        },
-    )
-    return LoadMaterialized(
-        job_name=job.name,
-        title=job.title,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        header_row=job.input.header_row,
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=int(parsed["error_rows"]),
-        issues=tuple(parsed["issues"]),
-        requests=tuple(requests),
+        parse_rows=_material_create_composition_rows,
+        planned_requests=_material_create_composition_planned_requests,
     )
 
 
@@ -106,7 +66,7 @@ def materialize_material_create_with_composition_and_quote_workflow(
     retry_statuses: set[str] | None = None,
     progress_callback: LoadProgressCallback | None = None,
 ) -> LoadMaterialized:
-    parsed = _material_create_composition_quote_rows(
+    return materialize_chained_workflow(
         db_path,
         job,
         workbook_path,
@@ -115,28 +75,8 @@ def materialize_material_create_with_composition_and_quote_workflow(
         mode=mode,
         retry_statuses=retry_statuses,
         progress_callback=progress_callback,
-    )
-    requests = _material_create_composition_quote_planned_requests(parsed["rows"])
-    _emit_progress(
-        progress_callback,
-        {
-            "event": "load_validate",
-            "scanned": parsed["rows_scanned"],
-            "valid": len(parsed["rows"]),
-            "errors": parsed["error_rows"],
-        },
-    )
-    return LoadMaterialized(
-        job_name=job.name,
-        title=job.title,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        header_row=job.input.header_row,
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=int(parsed["error_rows"]),
-        issues=tuple(parsed["issues"]),
-        requests=tuple(requests),
+        parse_rows=_material_create_composition_quote_rows,
+        planned_requests=_material_create_composition_quote_planned_requests,
     )
 
 
@@ -155,117 +95,23 @@ def run_material_create_with_composition_workflow(
     auth_ctx: AuthContext | None = None,
     progress_callback: LoadProgressCallback | None = None,
 ) -> LoadRunResult:
-    if not dry_run and not yes:
-        raise ConfigError("Non-dry-run load requires --yes.")
-    mode = (
-        "retry-dry-run"
-        if retry_statuses and dry_run
-        else ("retry" if retry_statuses else ("dry-run" if dry_run else "run"))
-    )
-    parsed = _material_create_composition_rows(
+    return run_chained_workflow(
         db_path,
+        config,
         job,
         workbook_path,
         sheet=sheet,
         limit=limit,
-        mode=mode,
-        retry_statuses=retry_statuses,
-        progress_callback=progress_callback,
-    )
-    started_at = _utc_iso()
-    run_id = _run_id(job.name)
-    run_dir = runtime_path(LOAD_RUNS_DIR / run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    materialized = materialized or LoadMaterialized(
-        job_name=job.name,
-        title=job.title,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        header_row=job.input.header_row,
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=int(parsed["error_rows"]),
-        issues=tuple(parsed["issues"]),
-        requests=tuple(_material_create_composition_planned_requests(parsed["rows"])),
-    )
-    requests = list(materialized.requests)
-    responses: list[LoadResponse] = []
-    issues = list(materialized.issues)
-    workflow_issues: list[LoadIssue] = []
-    if dry_run:
-        _write_requests(run_dir / "requests.jsonl", tuple(requests))
-    else:
-        if parsed["rows"] and auth_ctx is None:
-            raise ConfigError("Load run requires an auth context.")
-        requests = []
-        responses = []
-        if parsed["rows"]:
-            workflow_issues = _execute_material_create_composition_workflow(
-                auth_ctx,
-                parsed["rows"],
-                requests=requests,
-                responses=responses,
-                progress_callback=progress_callback,
-            )
-            issues.extend(workflow_issues)
-        _write_requests(run_dir / "requests.jsonl", tuple(requests))
-        _write_responses(run_dir / "responses.jsonl", tuple(responses))
-    _emit_progress(
-        progress_callback,
-        {
-            "event": "load_artifacts",
-            "run_dir": str(run_dir),
-            "requests": len(requests),
-        },
-    )
-
-    finished_at = _utc_iso()
-    materialized = LoadMaterialized(
-        job_name=job.name,
-        title=job.title,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        header_row=job.input.header_row,
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=int(parsed["error_rows"]) + len(workflow_issues if not dry_run else ()),
-        issues=tuple(issues),
-        requests=tuple(requests),
-    )
-    review_path = None
-    if responses or _has_row_issues(materialized.issues):
-        review_path = _write_review_workbook(
-            materialized,
-            responses=tuple(responses),
-            run_id=run_id,
-            processed_at=finished_at,
-            output_path=run_dir / REVIEW_WORKBOOK_NAME,
-        )
-    result = LoadRunResult(
-        run_id=run_id,
-        job_name=job.name,
-        title=job.title,
-        mode=mode,
         dry_run=dry_run,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=materialized.error_rows,
-        request_count=len(requests),
-        success_count=sum(1 for response in responses if response.ok),
-        failure_count=sum(1 for response in responses if not response.ok),
-        issues=tuple(issues),
-        requests=tuple(requests),
-        responses=tuple(responses),
-        run_dir=run_dir,
-        review_path=review_path,
-        started_at=started_at,
-        finished_at=finished_at,
+        yes=yes,
+        retry_statuses=retry_statuses,
+        materialized=materialized,
+        auth_ctx=auth_ctx,
+        progress_callback=progress_callback,
+        parse_rows=_material_create_composition_rows,
+        planned_requests=_material_create_composition_planned_requests,
+        execute_rows=_execute_material_create_composition_workflow,
     )
-    _write_summary(run_dir / "summary.json", result, config)
-    return result
 
 
 def run_material_create_with_composition_and_quote_workflow(
@@ -283,117 +129,23 @@ def run_material_create_with_composition_and_quote_workflow(
     auth_ctx: AuthContext | None = None,
     progress_callback: LoadProgressCallback | None = None,
 ) -> LoadRunResult:
-    if not dry_run and not yes:
-        raise ConfigError("Non-dry-run load requires --yes.")
-    mode = (
-        "retry-dry-run"
-        if retry_statuses and dry_run
-        else ("retry" if retry_statuses else ("dry-run" if dry_run else "run"))
-    )
-    parsed = _material_create_composition_quote_rows(
+    return run_chained_workflow(
         db_path,
+        config,
         job,
         workbook_path,
         sheet=sheet,
         limit=limit,
-        mode=mode,
-        retry_statuses=retry_statuses,
-        progress_callback=progress_callback,
-    )
-    started_at = _utc_iso()
-    run_id = _run_id(job.name)
-    run_dir = runtime_path(LOAD_RUNS_DIR / run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    materialized = materialized or LoadMaterialized(
-        job_name=job.name,
-        title=job.title,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        header_row=job.input.header_row,
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=int(parsed["error_rows"]),
-        issues=tuple(parsed["issues"]),
-        requests=tuple(_material_create_composition_quote_planned_requests(parsed["rows"])),
-    )
-    requests = list(materialized.requests)
-    responses: list[LoadResponse] = []
-    issues = list(materialized.issues)
-    workflow_issues: list[LoadIssue] = []
-    if dry_run:
-        _write_requests(run_dir / "requests.jsonl", tuple(requests))
-    else:
-        if parsed["rows"] and auth_ctx is None:
-            raise ConfigError("Load run requires an auth context.")
-        requests = []
-        responses = []
-        if parsed["rows"]:
-            workflow_issues = _execute_material_create_composition_quote_workflow(
-                auth_ctx,
-                parsed["rows"],
-                requests=requests,
-                responses=responses,
-                progress_callback=progress_callback,
-            )
-            issues.extend(workflow_issues)
-        _write_requests(run_dir / "requests.jsonl", tuple(requests))
-        _write_responses(run_dir / "responses.jsonl", tuple(responses))
-    _emit_progress(
-        progress_callback,
-        {
-            "event": "load_artifacts",
-            "run_dir": str(run_dir),
-            "requests": len(requests),
-        },
-    )
-
-    finished_at = _utc_iso()
-    materialized = LoadMaterialized(
-        job_name=job.name,
-        title=job.title,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        header_row=job.input.header_row,
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=int(parsed["error_rows"]) + len(workflow_issues if not dry_run else ()),
-        issues=tuple(issues),
-        requests=tuple(requests),
-    )
-    review_path = None
-    if responses or _has_row_issues(materialized.issues):
-        review_path = _write_review_workbook(
-            materialized,
-            responses=tuple(responses),
-            run_id=run_id,
-            processed_at=finished_at,
-            output_path=run_dir / REVIEW_WORKBOOK_NAME,
-        )
-    result = LoadRunResult(
-        run_id=run_id,
-        job_name=job.name,
-        title=job.title,
-        mode=mode,
         dry_run=dry_run,
-        workbook_path=Path(workbook_path).expanduser(),
-        sheet=str(parsed["sheet"]),
-        rows_scanned=int(parsed["rows_scanned"]),
-        valid_rows=len(parsed["rows"]),
-        error_rows=materialized.error_rows,
-        request_count=len(requests),
-        success_count=sum(1 for response in responses if response.ok),
-        failure_count=sum(1 for response in responses if not response.ok),
-        issues=tuple(issues),
-        requests=tuple(requests),
-        responses=tuple(responses),
-        run_dir=run_dir,
-        review_path=review_path,
-        started_at=started_at,
-        finished_at=finished_at,
+        yes=yes,
+        retry_statuses=retry_statuses,
+        materialized=materialized,
+        auth_ctx=auth_ctx,
+        progress_callback=progress_callback,
+        parse_rows=_material_create_composition_quote_rows,
+        planned_requests=_material_create_composition_quote_planned_requests,
+        execute_rows=_execute_material_create_composition_quote_workflow,
     )
-    _write_summary(run_dir / "summary.json", result, config)
-    return result
 
 
 def _material_create_composition_rows(
@@ -407,83 +159,21 @@ def _material_create_composition_rows(
     retry_statuses: set[str] | None,
     progress_callback: LoadProgressCallback | None,
 ) -> dict[str, Any]:
-    _require_material_create_composition_columns(job)
-    workbook_path = workbook_path.expanduser()
-    if not workbook_path.is_file():
-        raise FileNotFoundError(f"Workbook not found: {workbook_path}")
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    try:
-        worksheet = _select_sheet(workbook, sheet)
-        _emit_progress(
-            progress_callback,
-            {
-                "event": "load_planning",
-                "job": job.name,
-                "mode": mode,
-                "workbook": str(workbook_path),
-                "sheet": worksheet.title,
-            },
-        )
-        header_map, header_issues, header_stats = _map_headers(job, worksheet)
-        retry_status_index = _retry_status_index(
-            worksheet,
-            job.input.header_row,
-            retry_statuses=retry_statuses,
-        )
-        _emit_progress(
-            progress_callback,
-            {
-                "event": "load_headers",
-                "matched": header_stats["matched"],
-                "columns": len(job.columns),
-                "required_matched": header_stats["required_matched"],
-                "required": header_stats["required"],
-                "aliases": header_stats["aliases"],
-                "issues": len(header_issues),
-            },
-        )
-        reference_indexes = _build_reference_indexes(
-            db_path,
-            job,
-            progress_callback=progress_callback,
-        )
-        value_set_indexes = _build_value_set_indexes(
-            job,
-            progress_callback=progress_callback,
-        )
-        rows: list[MaterialCreateCompositionRow] = []
-        issues: list[LoadIssue] = list(header_issues)
-        rows_scanned = 0
-        error_rows = 0
-        if not header_issues:
-            for row_number, row_values in _iter_data_rows(worksheet, job.input.header_row):
-                if not _include_retry_row(row_values, retry_status_index, retry_statuses):
-                    continue
-                if limit is not None and rows_scanned >= limit:
-                    break
-                rows_scanned += 1
-                values, row_issues = _row_values(
-                    job,
-                    row_number=row_number,
-                    row_values=row_values,
-                    header_map=header_map,
-                    reference_indexes=reference_indexes,
-                    value_set_indexes=value_set_indexes,
-                )
-                if row_issues:
-                    error_rows += 1
-                    issues.extend(row_issues)
-                    continue
-                rows.append(MaterialCreateCompositionRow(row=row_number, values=values))
-        return {
-            "sheet": worksheet.title,
-            "rows_scanned": rows_scanned,
-            "error_rows": error_rows,
-            "issues": issues,
-            "rows": tuple(rows),
-        }
-    finally:
-        workbook.close()
+    return parse_workflow_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+        require_columns=_require_material_create_composition_columns,
+        row_factory=lambda row_number, values: MaterialCreateCompositionRow(
+            row=row_number,
+            values=values,
+        ),
+    )
 
 
 def _material_create_composition_quote_rows(
@@ -497,92 +187,27 @@ def _material_create_composition_quote_rows(
     retry_statuses: set[str] | None,
     progress_callback: LoadProgressCallback | None,
 ) -> dict[str, Any]:
-    _require_material_create_composition_quote_columns(job)
-    workbook_path = workbook_path.expanduser()
-    if not workbook_path.is_file():
-        raise FileNotFoundError(f"Workbook not found: {workbook_path}")
     supplier_refs = _style_supplier_quote_references(db_path)
-    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
-    try:
-        worksheet = _select_sheet(workbook, sheet)
-        _emit_progress(
-            progress_callback,
-            {
-                "event": "load_planning",
-                "job": job.name,
-                "mode": mode,
-                "workbook": str(workbook_path),
-                "sheet": worksheet.title,
-            },
-        )
-        header_map, header_issues, header_stats = _map_headers(job, worksheet)
-        retry_status_index = _retry_status_index(
-            worksheet,
-            job.input.header_row,
-            retry_statuses=retry_statuses,
-        )
-        _emit_progress(
-            progress_callback,
-            {
-                "event": "load_headers",
-                "matched": header_stats["matched"],
-                "columns": len(job.columns),
-                "required_matched": header_stats["required_matched"],
-                "required": header_stats["required"],
-                "aliases": header_stats["aliases"],
-                "issues": len(header_issues),
-            },
-        )
-        reference_indexes = _build_reference_indexes(
-            db_path,
-            job,
-            progress_callback=progress_callback,
-        )
-        value_set_indexes = _build_value_set_indexes(
-            job,
-            progress_callback=progress_callback,
-        )
-        rows: list[MaterialCreateCompositionQuoteRow] = []
-        issues: list[LoadIssue] = list(header_issues)
-        rows_scanned = 0
-        error_rows = 0
-        if not header_issues:
-            for row_number, row_values in _iter_data_rows(worksheet, job.input.header_row):
-                if not _include_retry_row(row_values, retry_status_index, retry_statuses):
-                    continue
-                if limit is not None and rows_scanned >= limit:
-                    break
-                rows_scanned += 1
-                values, row_issues = _row_values(
-                    job,
-                    row_number=row_number,
-                    row_values=row_values,
-                    header_map=header_map,
-                    reference_indexes=reference_indexes,
-                    value_set_indexes=value_set_indexes,
-                )
-                if not row_issues:
-                    row_issues.extend(
-                        _resolve_style_supplier_quote_memberships(
-                            values,
-                            row_number=row_number,
-                            refs=supplier_refs,
-                        )
-                    )
-                if row_issues:
-                    error_rows += 1
-                    issues.extend(row_issues)
-                    continue
-                rows.append(MaterialCreateCompositionQuoteRow(row=row_number, values=values))
-        return {
-            "sheet": worksheet.title,
-            "rows_scanned": rows_scanned,
-            "error_rows": error_rows,
-            "issues": issues,
-            "rows": tuple(rows),
-        }
-    finally:
-        workbook.close()
+    return parse_workflow_rows(
+        db_path,
+        job,
+        workbook_path,
+        sheet=sheet,
+        limit=limit,
+        mode=mode,
+        retry_statuses=retry_statuses,
+        progress_callback=progress_callback,
+        require_columns=_require_material_create_composition_quote_columns,
+        row_factory=lambda row_number, values: MaterialCreateCompositionQuoteRow(
+            row=row_number,
+            values=values,
+        ),
+        validate_values=lambda values, row_number: _resolve_style_supplier_quote_memberships(
+            values,
+            row_number=row_number,
+            refs=supplier_refs,
+        ),
+    )
 
 
 def _require_material_create_composition_columns(job: LoadJob) -> None:
