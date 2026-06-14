@@ -10,8 +10,9 @@ command:
 
 - `fetch --json`, `changelog --json`, `changelog fields --json`, `changelog actors --json`,
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
-  `bundle list --json`, `view list --json`, `load list --json`, `model list --json`, and
-  `swagger endpoints --json` emit JSON Lines. `validate list --json` and `validate run all --json`
+  `bundle list --json`, `view list --json`, `load list --json`, `model list --json`,
+  `swagger history --json`, `swagger endpoints --json`, `swagger fields --json`, and
+  `swagger field --json` emit JSON Lines. `validate list --json` and `validate run all --json`
   also emit JSON Lines.
 - `download --json` emits JSON progress records followed by one JSON summary object.
 - `changelog update --json`, `bundle run --json`, `bundle show --json`,
@@ -125,33 +126,60 @@ explorer for inspecting incoming and outgoing endpoint relationships.
 ```bash
 uv run centric-api swagger refresh
 uv run centric-api swagger status
+uv run centric-api swagger history
+uv run centric-api swagger history --diffs
 uv run centric-api swagger endpoints
+uv run centric-api swagger fields --endpoint styles --method get
+uv run centric-api swagger field 42
+uv run centric-api swagger field --endpoint styles nwg_style_brand_category_enum
 uv run centric-api swagger diff
+uv run centric-api swagger diff --history 0 1
 uv run centric-api swagger coverage
 ```
 
 `swagger` is optional local API-schema tooling. It reads and writes:
 
 ```text
-CENTRIC_API_HOME/swagger.json
-CENTRIC_API_HOME/swagger.meta.json
+CENTRIC_API_HOME/swagger/current.json
+CENTRIC_API_HOME/swagger/current.meta.json
+CENTRIC_API_HOME/swagger/history/{snapshot_id}.json
+CENTRIC_API_HOME/swagger/history/{snapshot_id}.meta.json
 ```
 
 Actions:
 
 - `refresh`: fetches `CENTRIC_BASE_URL/api/v2/swagger.json`, writes the local Swagger JSON, and
-  records metadata including source URL, fetch time, SHA-256, operation count, endpoint count, and
-  the last added/removed/changed operation diff versus the previous local file.
+  records metadata including source URL, fetch time, SHA-256, operation count, endpoint count,
+  field counts, and the last field/operation diff versus the previous local file. Each refresh also
+  writes an immutable timestamped schema and metadata snapshot under `swagger/history/`.
 - `status`: reports whether the local Swagger JSON and metadata exist, plus freshness and counts
   when available.
-- `endpoints`: lists normalized Swagger methods and paths. Use `--endpoint NAME` to filter by root
-  endpoint.
-- `diff`: shows the last refresh diff from metadata, or compares against another file with
-  `--against PATH`.
+- `history`: lists timestamped snapshots newest first. Index `0` is the latest snapshot, index `1`
+  is the previous snapshot, and so on. Use `--diffs` to show adjacent drift counts across the
+  saved snapshots, such as `0` compared with `1`, `1` compared with `2`, and onward.
+- `endpoints`: lists normalized Swagger methods and paths with request/response schema names and
+  field counts. Use `--endpoint NAME` to filter by root endpoint.
+- `fields`: lists request and response payload fields with a global field index. Use
+  `--endpoint NAME` and `--method get|post|put|patch|delete|all`; the default method is `get`.
+  When `--endpoint` is set, only the root endpoint path is shown unless `--include-nested` is
+  passed. Use `--required-only` to focus on required payload fields.
+- `field`: inspects one field without truncating enum values. Without `--endpoint`, the selector
+  must be a global field index copied from `swagger fields`, such as `swagger field 42`. With
+  `--endpoint`, the selector is interpreted as a field name, such as
+  `swagger field --endpoint styles nwg_style_brand_category_enum`; numeric-looking names remain
+  names in this mode. Use `--method` or `--include-nested` to narrow endpoint-scoped name matches.
+- `diff`: shows field-first schema drift from metadata, compares the current Swagger against another
+  file with `--against PATH`, or compares two history snapshots with
+  `--history CURRENT_INDEX BASELINE_INDEX`. History indexes are newest first, so `--history 0 1`
+  means "show what changed in the latest snapshot compared with the previous snapshot." Human diff
+  output intentionally does not truncate changed field values or enum values. Use `--endpoint NAME`,
+  `--method get|post|put|patch|delete|all`, `--include-nested`, `--fields-only`, or
+  `--operations-only` to focus the report.
 - `coverage`: compares top-level Swagger GET collection paths with `config/fetcher.yml`, or another
-  config passed with `--fetch-config`.
+  config passed with `--fetch-config`. Human output lists covered endpoints, configured endpoints
+  missing from Swagger, and all Swagger-only collections with response/POST field counts.
 
-The local Swagger and metadata files always live at the root of `CENTRIC_API_HOME`. Swagger is an
+The current Swagger and metadata files live under `CENTRIC_API_HOME/swagger/`. Swagger is an
 auditor, not the runtime source of truth: fetch/load config remains authoritative, and Swagger
 commands are meant to catch drift early.
 

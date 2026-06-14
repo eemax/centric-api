@@ -199,14 +199,11 @@ def _swagger_status() -> dict[str, Any]:
         meta = None
         meta_error = str(exc)
     fetched_at = (
-        str(meta.get("fetched_at"))
-        if isinstance(meta, dict) and meta.get("fetched_at")
-        else None
+        str(meta.get("fetched_at")) if isinstance(meta, dict) and meta.get("fetched_at") else None
     )
     fetched_at_datetime = _parse_iso_datetime(fetched_at)
     is_stale = (
-        fetched_at_datetime is None
-        or datetime.now(UTC) - fetched_at_datetime > SWAGGER_STALE_AFTER
+        fetched_at_datetime is None or datetime.now(UTC) - fetched_at_datetime > SWAGGER_STALE_AFTER
     )
     operation_count = _meta_int(meta, "operation_count")
     endpoint_count = _meta_int(meta, "endpoint_count")

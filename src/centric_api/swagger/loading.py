@@ -6,8 +6,10 @@ from typing import Any
 
 from ..config import ConfigError, runtime_path
 
-DEFAULT_SWAGGER_PATH = Path("swagger.json")
-DEFAULT_SWAGGER_META_PATH = Path("swagger.meta.json")
+DEFAULT_SWAGGER_DIR = Path("swagger")
+DEFAULT_SWAGGER_PATH = DEFAULT_SWAGGER_DIR / "current.json"
+DEFAULT_SWAGGER_META_PATH = DEFAULT_SWAGGER_DIR / "current.meta.json"
+DEFAULT_SWAGGER_HISTORY_DIR = DEFAULT_SWAGGER_DIR / "history"
 
 
 def resolve_swagger_path() -> Path:
@@ -16,6 +18,18 @@ def resolve_swagger_path() -> Path:
 
 def resolve_swagger_meta_path() -> Path:
     return runtime_path(DEFAULT_SWAGGER_META_PATH)
+
+
+def resolve_swagger_history_dir() -> Path:
+    return runtime_path(DEFAULT_SWAGGER_HISTORY_DIR)
+
+
+def resolve_swagger_history_path(snapshot_id: str) -> Path:
+    return resolve_swagger_history_dir() / f"{snapshot_id}.json"
+
+
+def resolve_swagger_history_meta_path(snapshot_id: str) -> Path:
+    return resolve_swagger_history_dir() / f"{snapshot_id}.meta.json"
 
 
 def load_swagger_document(path: str | Path | None = None) -> dict[str, Any]:

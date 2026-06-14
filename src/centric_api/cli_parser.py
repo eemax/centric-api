@@ -551,6 +551,19 @@ def build_parser() -> argparse.ArgumentParser:
     swagger_status_parser = swagger_actions.add_parser("status", help="Show Swagger freshness")
     swagger_status_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+    swagger_history_parser = swagger_actions.add_parser(
+        "history",
+        help="List local Swagger history snapshots",
+    )
+    swagger_history_parser.add_argument(
+        "--diffs",
+        action="store_true",
+        help="Show adjacent history diff counts instead of snapshot rows.",
+    )
+    swagger_history_parser.add_argument(
+        "--json", action="store_true", help="Emit JSON Lines output."
+    )
+
     swagger_endpoints_parser = swagger_actions.add_parser(
         "endpoints",
         help="List Swagger paths and methods",
@@ -562,12 +575,95 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Emit JSON Lines output."
     )
 
-    swagger_diff_parser = swagger_actions.add_parser("diff", help="Show Swagger endpoint drift")
-    swagger_diff_parser.add_argument(
+    swagger_fields_parser = swagger_actions.add_parser(
+        "fields",
+        help="List Swagger request and response fields",
+    )
+    swagger_fields_parser.add_argument(
+        "--endpoint", metavar="NAME", default=None, help="Filter by root endpoint."
+    )
+    swagger_fields_parser.add_argument(
+        "--method",
+        choices=["get", "post", "put", "patch", "delete", "all"],
+        default="get",
+        help="HTTP method to inspect. Default: get.",
+    )
+    swagger_fields_parser.add_argument(
+        "--include-nested",
+        action="store_true",
+        help="Include nested/action paths under the endpoint.",
+    )
+    swagger_fields_parser.add_argument(
+        "--required-only", action="store_true", help="Only show required fields."
+    )
+    swagger_fields_parser.add_argument(
+        "--json", action="store_true", help="Emit JSON Lines output."
+    )
+
+    swagger_field_parser = swagger_actions.add_parser(
+        "field",
+        help="Inspect one Swagger field without truncating enum values",
+    )
+    swagger_field_parser.add_argument(
+        "selector",
+        metavar="INDEX_OR_FIELD",
+        help="Global field index, or field name when --endpoint is passed.",
+    )
+    swagger_field_parser.add_argument(
+        "--endpoint",
+        metavar="NAME",
+        default=None,
+        help="Filter by root endpoint and interpret selector as a field name.",
+    )
+    swagger_field_parser.add_argument(
+        "--method",
+        choices=["get", "post", "put", "patch", "delete", "all"],
+        default="all",
+        help="HTTP method to inspect. Default: all.",
+    )
+    swagger_field_parser.add_argument(
+        "--include-nested",
+        action="store_true",
+        help="Include nested/action paths under the endpoint.",
+    )
+    swagger_field_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
+
+    swagger_diff_parser = swagger_actions.add_parser("diff", help="Show Swagger schema drift")
+    swagger_diff_source = swagger_diff_parser.add_mutually_exclusive_group()
+    swagger_diff_source.add_argument(
         "--against",
         metavar="PATH",
         default=None,
         help="Compare local Swagger against another Swagger JSON file.",
+    )
+    swagger_diff_source.add_argument(
+        "--history",
+        metavar=("CURRENT_INDEX", "BASELINE_INDEX"),
+        nargs=2,
+        type=_parse_nonnegative_int,
+        default=None,
+        help="Compare two history snapshots by newest-first index, e.g. --history 0 1.",
+    )
+    swagger_diff_parser.add_argument(
+        "--endpoint", metavar="NAME", default=None, help="Filter by root endpoint."
+    )
+    swagger_diff_parser.add_argument(
+        "--method",
+        choices=["get", "post", "put", "patch", "delete", "all"],
+        default="all",
+        help="HTTP method to inspect. Default: all.",
+    )
+    swagger_diff_parser.add_argument(
+        "--include-nested",
+        action="store_true",
+        help="Include nested/action paths under the endpoint.",
+    )
+    swagger_diff_mode = swagger_diff_parser.add_mutually_exclusive_group()
+    swagger_diff_mode.add_argument(
+        "--fields-only", action="store_true", help="Only show field drift."
+    )
+    swagger_diff_mode.add_argument(
+        "--operations-only", action="store_true", help="Only show operation drift."
     )
     swagger_diff_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
@@ -687,6 +783,16 @@ def _parse_positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("value must be an integer.") from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError("value must be a positive integer.")
+    return parsed
+
+
+def _parse_nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be an integer.") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be zero or a positive integer.")
     return parsed
 
 

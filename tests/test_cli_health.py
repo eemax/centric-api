@@ -21,6 +21,7 @@ def test_status_reports_missing_db(tmp_path, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["db_exists"] is False
 
+
 def test_status_human_output_is_operational_snapshot(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -113,14 +114,16 @@ def test_status_endpoint_state_fallback_includes_tombstone_only_endpoints(tmp_pa
 
 def test_status_reports_swagger_snapshot(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
-    home.mkdir()
+    current_path = home / "swagger" / "current.json"
+    current_meta_path = home / "swagger" / "current.meta.json"
+    current_path.parent.mkdir(parents=True)
     monkeypatch.setenv("CENTRIC_API_HOME", str(home))
-    (home / "swagger.json").write_text(
+    current_path.write_text(
         json.dumps({"swagger": "2.0", "paths": {"/styles": {"get": {}}}}),
         encoding="utf-8",
     )
     fetched_at = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-    (home / "swagger.meta.json").write_text(
+    current_meta_path.write_text(
         json.dumps({"fetched_at": fetched_at}),
         encoding="utf-8",
     )
@@ -129,7 +132,7 @@ def test_status_reports_swagger_snapshot(tmp_path, monkeypatch, capsys) -> None:
 
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert payload["swagger"]["path"] == str(home / "swagger.json")
+    assert payload["swagger"]["path"] == str(current_path)
     assert payload["swagger"]["exists"] is True
     assert payload["swagger"]["meta_exists"] is True
     assert payload["swagger"]["stale"] is False
@@ -173,7 +176,7 @@ def test_doctor_warns_when_swagger_is_missing(tmp_path, monkeypatch, capsys) -> 
     assert swagger_check == {
         "status": "WARN",
         "name": "swagger",
-        "message": f"Swagger file not found: {home / 'swagger.json'}",
+        "message": f"Swagger file not found: {home / 'swagger' / 'current.json'}",
         "repair": "centric-api swagger refresh",
     }
 
@@ -192,10 +195,10 @@ def test_doctor_json_shows_normalized_centric_base_url(tmp_path, monkeypatch, ca
         "status": "OK",
         "name": "credentials",
         "message": (
-            "found credentials for "
-            "https://example-brand.centricsoftware.com/csi-requesthandler"
+            "found credentials for https://example-brand.centricsoftware.com/csi-requesthandler"
         ),
     }
+
 
 def test_doctor_human_shows_normalized_centric_base_url(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "example-brand")
@@ -208,6 +211,7 @@ def test_doctor_human_shows_normalized_centric_base_url(tmp_path, monkeypatch, c
     assert exit_code == 1
     assert "credentials" in output
     assert "https://example-brand.centricsoftware.com/csi-requesthandler" in output
+
 
 def test_doctor_uses_fetch_evidence_for_empty_download_endpoints(
     tmp_path, monkeypatch, capsys
@@ -243,6 +247,7 @@ jobs:
         "message": "required endpoints cached",
     } in checks
 
+
 def test_doctor_reports_stale_schema_shape(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
     monkeypatch.setenv("CENTRIC_USERNAME", "user")
@@ -266,6 +271,7 @@ def test_doctor_reports_stale_schema_shape(tmp_path, monkeypatch, capsys) -> Non
     assert schema_check["status"] == "FAIL"
     assert "run centric-api rebuild-db --yes" in schema_check["message"]
     assert schema_check["repair"] == "centric-api rebuild-db --yes"
+
 
 def test_doctor_human_output_is_grouped_with_repair(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
@@ -295,6 +301,7 @@ def test_doctor_human_output_is_grouped_with_repair(tmp_path, monkeypatch, capsy
     assert "repair: centric-api rebuild-db --yes" in output
     assert "db_schema_shape" not in output
 
+
 def test_doctor_reports_stale_dashboard_view_shape(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
     monkeypatch.setenv("CENTRIC_USERNAME", "user")
@@ -313,11 +320,13 @@ def test_doctor_reports_stale_dashboard_view_shape(tmp_path, monkeypatch, capsys
     assert schema_check["status"] == "FAIL"
     assert "missing view dashboard_recent_changes" in schema_check["message"]
 
+
 def test_rebuild_db_requires_yes(tmp_path, capsys) -> None:
     exit_code = main(["rebuild-db", "--db", str(tmp_path / "centric.db")])
 
     assert exit_code == 1
     assert "rerun with --yes" in capsys.readouterr().err
+
 
 def test_rebuild_db_replays_raw_evidence(tmp_path, capsys) -> None:
     raw_dir = tmp_path / "raw"
@@ -353,6 +362,7 @@ def test_rebuild_db_replays_raw_evidence(tmp_path, capsys) -> None:
     with sqlite3.connect(db_path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
     assert count == 1
+
 
 def test_failed_rebuild_keeps_existing_db_active(tmp_path, monkeypatch, capsys) -> None:
     db_path = tmp_path / "centric.db"
@@ -398,6 +408,7 @@ def test_failed_rebuild_keeps_existing_db_active(tmp_path, monkeypatch, capsys) 
             ["styles"],
         ).fetchall()
     assert [row[0] for row in rows] == ["S-old"]
+
 
 def test_rebuild_db_reports_human_progress(tmp_path, capsys) -> None:
     raw_dir = tmp_path / "raw"

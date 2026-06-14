@@ -44,7 +44,13 @@ uv run centric-api units basis gsm
 uv run centric-api status
 uv run centric-api swagger refresh
 uv run centric-api swagger status
+uv run centric-api swagger history
+uv run centric-api swagger history --diffs
 uv run centric-api swagger endpoints
+uv run centric-api swagger fields --endpoint styles --method get
+uv run centric-api swagger field 42
+uv run centric-api swagger diff
+uv run centric-api swagger diff --history 0 1
 uv run centric-api swagger coverage
 uv run centric-api doctor
 uv run centric-api rebuild-db --yes
@@ -145,12 +151,18 @@ jobs, bundle/download wiring, stale locks, and missing current download files. I
 any check fails.
 
 `swagger` is optional local API-schema tooling. `swagger refresh` fetches the Centric Swagger JSON
-from `CENTRIC_BASE_URL/api/v2/swagger.json`, writes `CENTRIC_API_HOME/swagger.json`, and records
-freshness, SHA-256, operation counts, and the last added/removed/changed operation diff in
-`CENTRIC_API_HOME/swagger.meta.json`. `swagger endpoints` lists normalized paths and methods,
-`swagger diff` shows the last refresh diff or compares against another Swagger JSON file, and
-`swagger coverage` compares Swagger GET collection paths with the configured fetch endpoints. The
-local Swagger and metadata files always live at the root of `CENTRIC_API_HOME`.
+from `CENTRIC_BASE_URL/api/v2/swagger.json`, writes `CENTRIC_API_HOME/swagger/current.json`, records
+freshness, SHA-256, operation/field counts, and the last field/operation diff in
+`CENTRIC_API_HOME/swagger/current.meta.json`, and stores timestamped snapshots under
+`CENTRIC_API_HOME/swagger/history/`. `swagger history` lists snapshots newest first, so
+`swagger diff --history 0 1` compares the previous snapshot against the latest snapshot, and
+`swagger history --diffs` shows adjacent snapshot drift counts across the stored history. `swagger
+endpoints` lists normalized paths and methods, `swagger fields` inspects request/response payload
+fields by endpoint and HTTP method with copy/paste field indexes, `swagger field` inspects one
+field by global index or endpoint-scoped name with full enum values, `swagger diff` shows full
+field-first schema drift plus operation drift without truncating changed values, and
+`swagger coverage` compares Swagger GET collection paths with the configured fetch endpoints while
+showing covered and Swagger-only schema field counts.
 
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays raw evidence from `CENTRIC_API_HOME/raw` into a fresh DB, rebuilds changelog, and reinstalls
