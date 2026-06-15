@@ -62,6 +62,9 @@ def write_progress_line(event: FetchProgressEvent) -> None:
         ]
         if event.delta_floor is not None:
             pieces.append(f"delta_floor={event.delta_floor}")
+        elif event.delta_floor_reason is not None:
+            pieces.append("delta_floor=none")
+            pieces.append(f"reason={event.delta_floor_reason}")
         elif event.modified_since is not None:
             pieces.append(f"modified_since={event.modified_since}")
         pieces.append(f"elapsed={format_duration(event.elapsed_seconds)}")

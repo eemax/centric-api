@@ -125,7 +125,7 @@ def _log_key_order(event: str, record: LogEvent) -> list[str]:
         "run_partial": _run_log_keys(),
         "run_failed": _run_log_keys(),
         "manifest_failed": ["error"],
-        "endpoint_start": ["endpoint", "mode", "delta_floor"],
+        "endpoint_start": ["endpoint", "mode", "delta_floor", "delta_floor_reason"],
         "endpoint_ok": [
             "endpoint",
             "status",

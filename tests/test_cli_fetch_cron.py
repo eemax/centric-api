@@ -20,7 +20,14 @@ from centric_api.commands.common import (
 from centric_api.commands.cron import run_cron_fetch_once
 from centric_api.commands.fetch import _allocate_run_id, run_fetch
 from centric_api.fetch_common import FetchError
-from centric_api.models import AuthSettings, CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
+from centric_api.models import (
+    AuthSettings,
+    CountSpec,
+    EndpointSpec,
+    FetcherConfig,
+    FetchProgressEvent,
+    FetchRunResult,
+)
 from centric_api.rendering.fetch import print_human_fetch_summary
 from centric_api.rendering.logs import render_log_line
 from centric_api.runtime_io import parse_jsonl
@@ -144,6 +151,50 @@ def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsy
     assert "last_successful_fetch_start" in endpoint_state
     assert "last_successful_fetch_end" in endpoint_state
 
+def test_fetch_delta_progress_reports_missing_floor_reason(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    _patch_fetch_pipeline(monkeypatch, tmp_path)
+
+    def fake_run_endpoint(*_args, progress_callback=None, delta_floor_reason=None, **_kwargs):
+        if progress_callback is not None:
+            progress_callback(
+                FetchProgressEvent(
+                    kind="endpoint_start",
+                    endpoint="styles",
+                    delta_floor_reason=delta_floor_reason,
+                    limit=50,
+                    start_skip=0,
+                    expected_count=1,
+                    retries_used=0,
+                    elapsed_seconds=0.0,
+                )
+            )
+        return FetchRunResult(
+            endpoint="styles",
+            pages_fetched=1,
+            items_fetched=1,
+            expected_count=1,
+            retries_used=0,
+            start_skip=0,
+            next_skip=50,
+            duration_seconds=0.1,
+            output_file=tmp_path / "raw" / "styles.jsonl",
+            checkpoint_file=tmp_path / "checkpoints" / "styles.json",
+        )
+
+    monkeypatch.setattr("centric_api.commands.fetch.run_endpoint", fake_run_endpoint)
+
+    exit_code = main(["fetch", "--db", str(tmp_path / "centric.db")])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "[styles] START" in captured.err
+    assert "delta_floor=none" in captured.err
+    assert "reason=delta_state_missing" in captured.err
+
 def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     tmp_path,
     monkeypatch,
@@ -256,6 +307,8 @@ def test_fetch_failure_reports_elapsed_and_log_path(tmp_path, monkeypatch, capsy
     captured = capsys.readouterr()
     assert exit_code == 1
     assert "[styles] ERROR  elapsed=" in captured.err
+    assert "delta_floor=none" in captured.err
+    assert "reason=delta_state_missing" in captured.err
     assert "HTTP 429 Too Many Requests" in captured.err
     assert "Fetch finished with failures" in captured.out
     assert f"Log: {tmp_path / 'logs' / 'fetch.log'}" in captured.out

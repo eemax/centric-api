@@ -20,10 +20,10 @@ def test_load_retry_processes_failed_review_rows(tmp_path, monkeypatch) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
+        headers=["Code", "Material Type", "Description"],
         rows=[
-            ["MAT-001", "Fabric"],
-            ["MAT-002", "Fabric"],
+            ["MAT-001", "Fabric", "Test fabric 1"],
+            ["MAT-002", "Fabric", "Test fabric 2"],
         ],
     )
     with connect(db_path) as conn:
@@ -72,10 +72,10 @@ def test_load_retry_review_clears_unprocessed_old_statuses(tmp_path, monkeypatch
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
+        headers=["Code", "Material Type", "Description"],
         rows=[
-            ["MAT-001", "Fabric"],
-            ["MAT-002", "Fabric"],
+            ["MAT-001", "Fabric", "Test fabric 1"],
+            ["MAT-002", "Fabric", "Test fabric 2"],
         ],
     )
     with connect(db_path) as conn:

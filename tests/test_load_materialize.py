@@ -178,8 +178,8 @@ def test_load_reference_resolution_requires_cached_resolve_endpoints(
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -666,8 +666,8 @@ def test_load_check_fails_ambiguous_alias_headers(tmp_path, monkeypatch) -> None
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Product Type", "Material Type"],
-        rows=[["MAT-001", "Fabric", "Fabric"]],
+        headers=["Code", "Product Type", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(

@@ -88,6 +88,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     fetcher_cfg.output_dir = raw_root_dir / "runs" / run_id
     selected_specs = _select_endpoints(endpoint_specs, args.endpoint)
     delta_state_file = resolve_private_config_path(DEFAULT_DELTA_STATE_PATH, args.delta_state_file)
+    delta_state_exists = delta_state_file.is_file()
     delta_state = load_delta_state(delta_state_file)
     overlap_minutes = normalize_int(delta_state.get("overlap_minutes"), DEFAULT_OVERLAP_MINUTES)
     overlap_days = normalize_int(delta_state.get("overlap_days"), DEFAULT_OVERLAP_DAYS)
@@ -182,6 +183,11 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     if mode == "delta"
                     else None
                 )
+                delta_floor_reason = (
+                    _delta_floor_reason(delta_state, spec.name, delta_state_exists)
+                    if mode == "delta" and delta_floor is None
+                    else None
+                )
                 runtime_spec = _prepare_runtime_spec(
                     spec,
                     mode=mode,
@@ -197,6 +203,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                                 "endpoint": spec.name,
                                 "mode": mode,
                                 "delta_floor": delta_floor,
+                                "delta_floor_reason": delta_floor_reason,
                             }
                         )
                     result = run_endpoint(
@@ -208,6 +215,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         output_file_suffix=".delta" if mode == "delta" else "",
                         create_empty_output=mode == "full",
                         delta_floor=delta_floor if mode == "delta" else None,
+                        delta_floor_reason=delta_floor_reason,
                         modified_since=modified_since,
                         progress_callback=fetch_progress,
                         api_log_callback=log_callback,
@@ -262,11 +270,17 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     message = str(exc)
                     failures.append((spec.name, message))
                     attempt_duration = (datetime.now(UTC) - attempt_start_dt).total_seconds()
-                    print(
-                        f"[{spec.name}] ERROR  elapsed={format_duration(attempt_duration)}  "
-                        f"{message}",
-                        file=sys.stderr,
+                    error_pieces = [f"elapsed={format_duration(attempt_duration)}"]
+                    window_context = _endpoint_window_context(
+                        mode=mode,
+                        delta_floor=delta_floor,
+                        delta_floor_reason=delta_floor_reason,
+                        modified_since=modified_since,
                     )
+                    if window_context is not None:
+                        error_pieces.append(window_context)
+                    error_pieces.append(message)
+                    print(f"[{spec.name}] ERROR  {'  '.join(error_pieces)}", file=sys.stderr)
                     attempt_end = utc_iso()
                     if log_callback:
                         log_callback(
@@ -405,6 +419,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                 )
         if ingest_result is not None:
             _emit_pipeline_progress(pipeline_progress, "changelog=running")
+            changelog_started = time.time()
             try:
                 changelog_run, changelog_skipped = _run_changelog_after_ingest(
                     db_path,
@@ -414,7 +429,14 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             except Exception as exc:
                 changelog_status = "failed"
                 pipeline_error = f"changelog failed after ingest: {exc}"
-                _emit_pipeline_progress(pipeline_progress, f"changelog=failed error={exc}")
+                _emit_pipeline_progress(
+                    pipeline_progress,
+                    (
+                        "changelog=failed "
+                        f"elapsed={format_duration(time.time() - changelog_started)} "
+                        f"error={exc}"
+                    ),
+                )
                 if log_callback:
                     log_callback(
                         {
@@ -428,7 +450,11 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     changelog_status = "skipped"
                     _emit_pipeline_progress(
                         pipeline_progress,
-                        f"changelog=skipped reason={changelog_skipped}",
+                        (
+                            f"changelog=skipped "
+                            f"elapsed={format_duration(time.time() - changelog_started)} "
+                            f"reason={changelog_skipped}"
+                        ),
                     )
                 elif changelog_run is not None:
                     changelog_status = "ok"
@@ -436,7 +462,8 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         pipeline_progress,
                         (
                             f"changelog=ok events={_fmt_cli_int(changelog_run.event_count)} "
-                            f"scoped={_fmt_cli_int(changelog_run.scoped_record_count)}"
+                            f"scoped={_fmt_cli_int(changelog_run.scoped_record_count)} "
+                            f"elapsed={format_duration(time.time() - changelog_started)}"
                         ),
                     )
                 if log_callback:
@@ -693,6 +720,40 @@ def _apply_successful_delta_updates(
             error=pipeline_error,
         )
     write_delta_state(delta_state_file, delta_state)
+
+
+def _delta_floor_reason(
+    delta_state: dict[str, Any],
+    endpoint_name: str,
+    delta_state_exists: bool,
+) -> str:
+    if not delta_state_exists:
+        return "delta_state_missing"
+    endpoints = delta_state.get("endpoints")
+    if not isinstance(endpoints, dict) or endpoint_name not in endpoints:
+        return "endpoint_not_tracked"
+    endpoint_state = endpoints.get(endpoint_name)
+    if not isinstance(endpoint_state, dict):
+        return "endpoint_state_invalid"
+    if not endpoint_state.get("last_successful_fetch_start"):
+        return "no_successful_fetch_start"
+    return "invalid_successful_fetch_start"
+
+
+def _endpoint_window_context(
+    *,
+    mode: str,
+    delta_floor: str | None,
+    delta_floor_reason: str | None,
+    modified_since: str | None,
+) -> str | None:
+    if mode == "delta":
+        if delta_floor is not None:
+            return f"delta_floor={delta_floor}"
+        return f"delta_floor=none reason={delta_floor_reason or 'unknown'}"
+    if modified_since is not None:
+        return f"modified_since={modified_since}"
+    return None
 
 
 def _write_pipeline_progress(message: str) -> None:

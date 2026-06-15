@@ -67,6 +67,7 @@ class FetchProgressEvent:
     kind: Literal["endpoint_start", "page_fetched", "warning", "endpoint_finish"]
     endpoint: str
     delta_floor: str | None = None
+    delta_floor_reason: str | None = None
     modified_since: str | None = None
     resumed: bool | None = None
     page_index: int | None = None

@@ -25,8 +25,8 @@ def test_load_run_emits_send_progress(tmp_path, monkeypatch) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -71,8 +71,8 @@ def test_load_run_records_request_exceptions_as_failures(tmp_path, monkeypatch) 
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -132,8 +132,8 @@ def test_load_review_workbook_escapes_formula_like_messages(tmp_path, monkeypatc
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -171,8 +171,8 @@ def test_load_review_workbook_save_failure_removes_partial_file(
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Missing Type"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Missing Type", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -235,8 +235,8 @@ def test_load_run_writes_validation_error_review(tmp_path, monkeypatch) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Missing Type"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Missing Type", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -279,8 +279,8 @@ def test_load_run_with_only_validation_errors_does_not_require_auth(
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Missing Type"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Missing Type", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -341,8 +341,48 @@ def test_load_run_header_errors_do_not_write_empty_review_file(tmp_path, monkeyp
     )
 
     assert result.requests == ()
-    assert [issue.code for issue in result.issues] == ["missing_required_header"]
+    assert [issue.code for issue in result.issues] == [
+        "missing_required_header",
+        "missing_required_header",
+    ]
     assert result.review_path is None
+
+
+def test_material_create_requires_description_value(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    db_path = tmp_path / "centric.db"
+    workbook_path = tmp_path / "materials.xlsx"
+    _write_material_workbook(
+        workbook_path,
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", None]],
+    )
+    with connect(db_path) as conn:
+        _insert_record(
+            conn,
+            endpoint="material_types",
+            record_id="MT1",
+            payload={"id": "MT1", "node_name": "Fabric", "available": True},
+        )
+    config = load_load_config()
+
+    result = run_load(
+        db_path,
+        config,
+        select_load_job(config, "material-create"),
+        workbook_path,
+        sheet=None,
+        limit=None,
+        dry_run=False,
+        yes=True,
+        auth_ctx=None,
+    )
+
+    assert result.requests == ()
+    assert [issue.code for issue in result.issues] == ["missing_required_value"]
+    assert result.issues[0].column == "description"
 
 
 def test_load_run_sends_valid_rows_when_other_rows_have_validation_errors(
@@ -356,10 +396,10 @@ def test_load_run_sends_valid_rows_when_other_rows_have_validation_errors(
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
+        headers=["Code", "Material Type", "Description"],
         rows=[
-            ["MAT-001", "Missing Type"],
-            ["MAT-002", "Fabric"],
+            ["MAT-001", "Missing Type", "Test fabric 1"],
+            ["MAT-002", "Fabric", "Test fabric 2"],
         ],
     )
     with connect(db_path) as conn:

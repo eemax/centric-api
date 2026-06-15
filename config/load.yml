@@ -32,6 +32,7 @@ jobs:
         headers:
           - Desc
         type: text
+        required: true
     body:
       code: code
       product_type: product_type
@@ -106,6 +107,7 @@ jobs:
         headers:
           - Desc
         type: text
+        required: true
       compositions:
         header: Composition
         headers:
@@ -223,6 +225,7 @@ jobs:
           - Material Desc
           - Desc
         type: text
+        required: true
       compositions:
         header: Composition
         headers:

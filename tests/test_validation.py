@@ -55,7 +55,9 @@ def test_validate_cli_runs_private_validator_and_writes_artifacts(
         == 0
     )
 
-    payload = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
     assert payload["run_status"] == "completed"
     assert payload["validation_outcome"] == "failed"
     assert payload["status"] == "failed"
@@ -220,7 +222,13 @@ def test_validate_human_output_distinguishes_run_from_outcome(
         == 0
     )
 
-    output = capsys.readouterr().out
+    captured = capsys.readouterr()
+    output = captured.out
+    progress = captured.err
+    assert "Validation run: validators=1 mode=cache db=" in progress
+    assert "[style-name-check] START  1/1" in progress
+    assert "[style-name-check] DONE   status=failed findings=1 elapsed=" in progress
+    assert "validation=done validators=1 findings=1 elapsed=" in progress
     assert "Run:      completed" in output
     assert "Outcome:  failed" in output
     assert "ID:       " in output

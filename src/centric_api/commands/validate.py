@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
+import time
 
 from ..config import ConfigError
 from ..defaults import db_path as resolve_db_path
 from ..rendering.common import print_rows
+from ..rendering.logs import format_duration
 from ..rendering.validate import (
     print_human_validation_summary,
     print_human_validator_list,
@@ -44,17 +47,42 @@ def run_validate_command(args: argparse.Namespace) -> int:
     mode = args.mode or ("excel" if args.input_file else "cache")
     if args.input_file and args.mode == "cache":
         raise ConfigError("--input-file requires --mode excel or no --mode.")
-    summaries = [
-        run_validator(
-            resolve_db_path(args.db),
-            select_validator(validators, name),
+    db_path = resolve_db_path(args.db)
+    started = time.time()
+    if not args.json:
+        _print_validate_progress(
+            f"Validation run: validators={len(names)} mode={mode} db={db_path}"
+        )
+    summaries = []
+    for index, name in enumerate(names, start=1):
+        validator = select_validator(validators, name)
+        validator_started = time.time()
+        if not args.json:
+            _print_validate_progress(
+                f"[{validator.definition.name}] START  {index}/{len(names)}"
+            )
+        summary = run_validator(
+            db_path,
+            validator,
             output_root=args.output_dir,
             units_config=args.units_config,
             mode=mode,
             input_file=args.input_file,
         )
-        for name in names
-    ]
+        summaries.append(summary)
+        if not args.json:
+            _print_validate_progress(
+                f"[{summary.validator_name}] DONE   status={summary.status} "
+                f"findings={summary.finding_count} "
+                f"elapsed={format_duration(time.time() - validator_started)}"
+            )
+    if not args.json:
+        total_findings = sum(summary.finding_count for summary in summaries)
+        _print_validate_progress(
+            f"validation=done validators={len(summaries)} "
+            f"findings={total_findings} elapsed={format_duration(time.time() - started)}"
+        )
+        _print_validate_progress("")
     if args.json:
         for summary in summaries:
             print(json.dumps(validation_summary_record(summary), default=str))
@@ -64,3 +92,7 @@ def run_validate_command(args: argparse.Namespace) -> int:
                 print()
             print_human_validation_summary(summary)
     return 0
+
+
+def _print_validate_progress(message: str) -> None:
+    print(message, file=sys.stderr)

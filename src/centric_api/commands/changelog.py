@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 
 from ..changelog import (
     list_actor_leaderboard,
@@ -24,12 +25,14 @@ from ..rendering.changelog import (
     print_human_changelog_summary,
 )
 from ..rendering.common import print_or_json, print_rows
+from ..rendering.logs import format_duration
 
 
 def run_changelog(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args.db)
     since = parse_since(args.since)
     if args.action == "update":
+        started = time.time()
         if not args.json:
             print("Updating changelog...")
             print(f"DB:    {db_path}")
@@ -43,6 +46,7 @@ def run_changelog(args: argparse.Namespace) -> int:
         )
         if not args.json:
             print()
+        elapsed_seconds = time.time() - started
         print_or_json(
             args.json,
             {
@@ -52,10 +56,12 @@ def run_changelog(args: argparse.Namespace) -> int:
                 "event_count": run.event_count,
                 "full_refresh": run.full_refresh,
                 "scoped_record_count": run.scoped_record_count,
+                "elapsed_seconds": round(elapsed_seconds, 3),
             },
             (
                 f"Changelog updated: {run.record_count} records tracked across "
-                f"{run.endpoint_count} endpoints, {run.event_count} events. Run: {run.run_id}"
+                f"{run.endpoint_count} endpoints, {run.event_count} events. "
+                f"Elapsed: {format_duration(elapsed_seconds)}. Run: {run.run_id}"
             ),
         )
         return 0

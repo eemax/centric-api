@@ -16,8 +16,8 @@ def test_load_cli_dry_run_writes_request_artifacts(tmp_path, monkeypatch, capsys
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -62,12 +62,12 @@ def test_load_cli_json_request_samples_are_capped_at_three(tmp_path, monkeypatch
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
+        headers=["Code", "Material Type", "Description"],
         rows=[
-            ["MAT-001", "Fabric"],
-            ["MAT-002", "Fabric"],
-            ["MAT-003", "Fabric"],
-            ["MAT-004", "Fabric"],
+            ["MAT-001", "Fabric", "Test fabric 1"],
+            ["MAT-002", "Fabric", "Test fabric 2"],
+            ["MAT-003", "Fabric", "Test fabric 3"],
+            ["MAT-004", "Fabric", "Test fabric 4"],
         ],
     )
     with connect(db_path) as conn:
@@ -165,8 +165,8 @@ def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(
@@ -204,8 +204,8 @@ def test_load_cli_json_suppresses_human_progress(tmp_path, monkeypatch, capsys) 
     workbook_path = tmp_path / "materials.xlsx"
     _write_material_workbook(
         workbook_path,
-        headers=["Code", "Material Type"],
-        rows=[["MAT-001", "Fabric"]],
+        headers=["Code", "Material Type", "Description"],
+        rows=[["MAT-001", "Fabric", "Test fabric"]],
     )
     with connect(db_path) as conn:
         _insert_record(

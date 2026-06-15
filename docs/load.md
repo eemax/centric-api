@@ -93,6 +93,7 @@ jobs:
         header: Description
         headers: [Desc]
         type: text
+        required: true
     body:
       code: code
       product_type: product_type
@@ -149,13 +150,13 @@ Expected workbook columns:
 Code, Product Type, Description, Composition
 ```
 
-`Code`, `Product Type`, and `Composition` are required. `Description` is optional. `Product Type`
+`Code`, `Product Type`, `Description`, and `Composition` are required. `Product Type`
 resolves through cached available `material_types.node_name`, and `Composition` uses the same parser
 as `material-composition-create`.
 
 For each valid row the workflow:
 
-- posts the material to `/v2/materials` with `code`, `product_type`, and optional `description`.
+- posts the material to `/v2/materials` with `code`, `product_type`, and `description`.
 - reads `id` from the material create response.
 - posts the parsed composition array to `/v2/materials/{material}/technical_compositions`.
 
@@ -177,8 +178,8 @@ Expected workbook columns:
 Code, Product Type, Material Description, Composition, Supplier, Agent, Supplier Item, Quote Description, Quote Factory, Set Default Quote
 ```
 
-`Code`, `Product Type`, `Composition`, `Supplier`, and `Supplier Item` are required. `Agent`,
-`Material Description`, `Quote Description`, `Quote Factory`, and `Set Default Quote` are optional.
+`Code`, `Product Type`, `Material Description`, `Composition`, `Supplier`, and `Supplier Item` are
+required. `Agent`, `Quote Description`, `Quote Factory`, and `Set Default Quote` are optional.
 Use `Material Description` for the material body and `Quote Description` for the supplier item body.
 
 For each valid row the workflow:

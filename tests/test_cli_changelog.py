@@ -105,6 +105,7 @@ def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
     assert "Writing changelog tables..." in output
     assert "Preparing changelog read indexes..." in output
     assert "Changelog updated:" in output
+    assert "Elapsed:" in output
 
 
 def test_changelog_update_json_suppresses_progress(tmp_path, capsys) -> None:
@@ -128,6 +129,7 @@ def test_changelog_update_json_suppresses_progress(tmp_path, capsys) -> None:
     assert payload["endpoint_count"] == 1
     assert payload["record_count"] == 1
     assert payload["event_count"] == 1
+    assert isinstance(payload["elapsed_seconds"], float)
 
 
 def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
