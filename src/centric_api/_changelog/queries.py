@@ -54,6 +54,18 @@ def ensure_changelog_read_schema(
             ensure_changelog_read_indexes(conn, include_field_indexes=include_field_indexes)
 
 
+def _try_ensure_changelog_read_schema(
+    db_path: Path,
+    *,
+    include_field_indexes: bool = False,
+) -> None:
+    try:
+        ensure_changelog_read_schema(db_path, include_field_indexes=include_field_indexes)
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc).lower():
+            raise
+
+
 def list_change_summary(
     db_path: Path,
     *,
@@ -411,30 +423,32 @@ def list_changes(
     endpoint: str | None = None,
     since: datetime | None = None,
     limit: int = 50,
+    include_payloads: bool = True,
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    _try_ensure_changelog_read_schema(db_path)
     clauses: list[str] = []
     params: list[Any] = []
     if endpoint:
         clauses.append("endpoint = ?")
         params.append(endpoint)
     if since is not None:
-        ensure_changelog_read_schema(db_path)
         clauses.append(f"{ACTIVITY_AT_SQL} >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
-    table_ref = "endpoint_change_events"
-    if since is not None:
-        table_ref += " INDEXED BY idx_endpoint_change_events_activity_at"
+    payload_columns = ""
+    if include_payloads:
+        payload_columns = ", previous_payload_json, current_payload_json"
     with connect_readonly(db_path) as conn:
         if not table_exists(conn, "endpoint_change_events"):
             return []
+        table_ref = _change_events_table_ref(conn, endpoint=endpoint)
         rows = conn.execute(
             f"""
             SELECT run_id, endpoint, record_id, changed_at, change_type,
                    delete_type, modified_at, modified_by_id, modified_by_name,
-                   changed_fields_json, previous_payload_json, current_payload_json
+                   changed_fields_json{payload_columns}
             FROM {table_ref}
             {clause}
             ORDER BY COALESCE(modified_at, changed_at) DESC, changed_at DESC, endpoint, record_id
@@ -446,11 +460,44 @@ def list_changes(
         {
             **dict(row),
             "changed_fields": json.loads(row["changed_fields_json"]),
-            "previous_payload": _json_dict(row["previous_payload_json"]),
-            "current_payload": _json_dict(row["current_payload_json"]),
+            **_change_payloads(row, include_payloads=include_payloads),
         }
         for row in rows
     ]
+
+
+def _change_payloads(row: sqlite3.Row, *, include_payloads: bool) -> dict[str, Any]:
+    if not include_payloads:
+        return {}
+    return {
+        "previous_payload": _json_dict(row["previous_payload_json"]),
+        "current_payload": _json_dict(row["current_payload_json"]),
+    }
+
+
+def _change_events_table_ref(conn: sqlite3.Connection, *, endpoint: str | None) -> str:
+    if endpoint and _index_exists(conn, "idx_endpoint_change_events_endpoint_activity_sort"):
+        return "endpoint_change_events INDEXED BY idx_endpoint_change_events_endpoint_activity_sort"
+    if _index_exists(conn, "idx_endpoint_change_events_activity_sort"):
+        return "endpoint_change_events INDEXED BY idx_endpoint_change_events_activity_sort"
+    if _index_exists(conn, "idx_endpoint_change_events_activity_at"):
+        return "endpoint_change_events INDEXED BY idx_endpoint_change_events_activity_at"
+    return "endpoint_change_events"
+
+
+def _index_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return (
+        conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = ?
+            """,
+            [name],
+        ).fetchone()
+        is not None
+    )
 
 
 def _actor_leaderboard_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -572,5 +619,3 @@ def _activity_clauses(
         clauses.insert(0, "endpoint = ?")
         params.insert(0, endpoint)
     return clauses, params
-
-

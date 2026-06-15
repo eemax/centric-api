@@ -614,6 +614,22 @@ def ensure_changelog_read_indexes(
 
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_activity_at
         ON endpoint_change_events(COALESCE(modified_at, changed_at));
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_activity_sort
+        ON endpoint_change_events(
+            COALESCE(modified_at, changed_at) DESC,
+            changed_at DESC,
+            endpoint,
+            record_id
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_endpoint_activity_sort
+        ON endpoint_change_events(
+            endpoint,
+            COALESCE(modified_at, changed_at) DESC,
+            changed_at DESC,
+            record_id
+        );
         """
     )
     if include_field_indexes:

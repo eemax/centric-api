@@ -139,6 +139,18 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     assert changed_event["current_payload"]["extra"] == "after"
     assert changed_event["modified_by_id"] == "U1"
     assert changed_event["modified_by_name"] == "Ava Admin"
+    lightweight_changes = list_changes(
+        db_path,
+        endpoint="styles",
+        limit=10,
+        include_payloads=False,
+    )
+    lightweight_changed_event = next(
+        change for change in lightweight_changes if change["change_type"] == "changed"
+    )
+    assert lightweight_changed_event["changed_fields"] == ["_modified_at", "extra"]
+    assert "previous_payload" not in lightweight_changed_event
+    assert "current_payload" not in lightweight_changed_event
     assert field_summary_since
     assert {
         (row["modified_by_id"], row["modified_by_name"], row["change_type"]): row["count"]
@@ -613,3 +625,20 @@ def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> No
         "older-detection-newer-modified",
         "newer-detection-older-modified",
     ]
+
+    with sqlite3.connect(db_path) as conn:
+        index_names = {
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'index'
+                  AND name LIKE 'idx_endpoint_change_events%activity_sort'
+                """
+            ).fetchall()
+        }
+    assert index_names == {
+        "idx_endpoint_change_events_activity_sort",
+        "idx_endpoint_change_events_endpoint_activity_sort",
+    }

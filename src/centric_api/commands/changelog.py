@@ -83,6 +83,7 @@ def run_changelog(args: argparse.Namespace) -> int:
             endpoint=endpoint,
             since=since,
             limit=args.limit,
+            include_payloads=args.json,
         )
         if args.json:
             return print_rows(rows, True, empty_message="No changelog changes found.")
