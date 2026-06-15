@@ -76,6 +76,8 @@ def list_change_summary(
     if not db_path.is_file():
         return []
     if since is not None:
+        if _since_covers_all_activity(db_path, since, endpoint=endpoint):
+            return list_change_summary(db_path, endpoint=endpoint, limit=limit)
         return _list_change_summary_by_activity(
             db_path,
             endpoint=endpoint,
@@ -145,6 +147,8 @@ def list_actor_totals(
     if not db_path.is_file():
         return []
     if since is not None:
+        if _since_covers_all_activity(db_path, since, endpoint=endpoint):
+            return list_actor_totals(db_path, endpoint=endpoint, limit=limit)
         return _list_actor_totals_by_activity(
             db_path,
             endpoint=endpoint,
@@ -214,6 +218,8 @@ def list_field_summary(
     if not db_path.is_file():
         return []
     if since is not None:
+        if _since_covers_all_activity(db_path, since, endpoint=endpoint):
+            return list_field_summary(db_path, endpoint=endpoint, limit=limit)
         return _list_field_summary_by_activity(
             db_path,
             endpoint=endpoint,
@@ -292,6 +298,8 @@ def list_actor_summary(
     if not db_path.is_file():
         return []
     if since is not None:
+        if _since_covers_all_activity(db_path, since, endpoint=endpoint):
+            return list_actor_summary(db_path, endpoint=endpoint, limit=limit)
         return _list_actor_summary_by_activity(
             db_path,
             endpoint=endpoint,
@@ -362,6 +370,8 @@ def list_actor_leaderboard(
     if not db_path.is_file():
         return []
     if since is not None:
+        if _since_covers_all_activity(db_path, since, endpoint=endpoint):
+            return list_actor_leaderboard(db_path, endpoint=endpoint)
         return _list_actor_leaderboard_by_activity(
             db_path,
             endpoint=endpoint,
@@ -427,6 +437,8 @@ def list_changes(
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
+    if since is not None and _since_covers_all_activity(db_path, since, endpoint=endpoint):
+        since = None
     _try_ensure_changelog_read_schema(db_path)
     clauses: list[str] = []
     params: list[Any] = []
@@ -498,6 +510,37 @@ def _index_exists(conn: sqlite3.Connection, name: str) -> bool:
         ).fetchone()
         is not None
     )
+
+
+def _since_covers_all_activity(
+    db_path: Path,
+    since: datetime,
+    *,
+    endpoint: str | None = None,
+) -> bool:
+    since_value = _datetime_to_db(since)
+    clauses: list[str] = []
+    params: list[Any] = []
+    if endpoint:
+        clauses.append("endpoint = ?")
+        params.append(endpoint)
+    clause = "WHERE " + " AND ".join(clauses) if clauses else ""
+    with connect_readonly(db_path) as conn:
+        if not table_exists(conn, "endpoint_change_events"):
+            return True
+        row = conn.execute(
+            f"""
+            SELECT {ACTIVITY_AT_SQL} AS activity_at
+            FROM endpoint_change_events
+            {clause}
+            ORDER BY {ACTIVITY_AT_SQL} ASC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+    if row is None:
+        return True
+    return since_value <= str(row["activity_at"])
 
 
 def _actor_leaderboard_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

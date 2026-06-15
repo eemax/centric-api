@@ -8,12 +8,14 @@ from pathlib import Path
 from centric_api.changelog import (
     list_actor_leaderboard,
     list_actor_summary,
+    list_actor_totals,
     list_change_summary,
     list_changelog_runs,
     list_changes,
     list_field_summary,
     record_changelog,
 )
+from centric_api.db_schema import ensure_changelog_tables
 from centric_api.store import connect
 
 
@@ -213,6 +215,134 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     assert sorted(field_summary, key=lambda row: (row["field"], row["field_change_type"])) == (
         expected_field_summary
     )
+
+
+def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        ensure_changelog_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO endpoint_change_events (
+                run_id, endpoint, record_id, changed_at, change_type, delete_type,
+                modified_at, modified_by_id, modified_by_name, previous_hash,
+                current_hash, changed_fields_json, previous_payload_json,
+                current_payload_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "run-1",
+                "styles",
+                "S1",
+                "2026-01-02T00:00:00Z",
+                "changed",
+                None,
+                "2026-01-02T00:00:00Z",
+                "U1",
+                "Ava Admin",
+                "before",
+                "after",
+                json.dumps(["code"]),
+                json.dumps({"id": "S1", "code": "A"}),
+                json.dumps({"id": "S1", "code": "B"}),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_change_summary (
+                run_id, changed_at, endpoint, change_type, delete_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ["run-1", "2026-01-02T00:00:00Z", "styles", "changed", None, 7],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_field_change_summary (
+                run_id, changed_at, endpoint, field, field_change_type,
+                event_change_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "run-1",
+                "2026-01-02T00:00:00Z",
+                "styles",
+                "code",
+                "changed_field",
+                "changed",
+                5,
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_actor_change_summary (
+                run_id, changed_at, endpoint, modified_by_id, modified_by_name,
+                change_type, delete_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "run-1",
+                "2026-01-02T00:00:00Z",
+                "styles",
+                "U1",
+                "Ava Admin",
+                "changed",
+                None,
+                3,
+            ],
+        )
+
+    wide_since = datetime(1970, 1, 1, tzinfo=UTC)
+
+    assert list_change_summary(db_path, since=wide_since, limit=10) == [
+        {
+            "endpoint": "styles",
+            "change_type": "changed",
+            "delete_type": None,
+            "count": 7,
+        }
+    ]
+    assert list_field_summary(db_path, since=wide_since, limit=10) == [
+        {
+            "endpoint": "styles",
+            "field": "code",
+            "field_change_type": "changed_field",
+            "event_change_type": "changed",
+            "count": 5,
+        }
+    ]
+    assert list_actor_totals(db_path, since=wide_since, limit=10) == [
+        {
+            "modified_by_id": "U1",
+            "modified_by_name": "Ava Admin",
+            "count": 3,
+        }
+    ]
+    assert list_actor_summary(db_path, since=wide_since, limit=10) == [
+        {
+            "endpoint": "styles",
+            "modified_by_id": "U1",
+            "modified_by_name": "Ava Admin",
+            "change_type": "changed",
+            "delete_type": None,
+            "count": 3,
+        }
+    ]
+    assert list_actor_leaderboard(db_path, since=wide_since)[0]["total"] == 3
+
+    with sqlite3.connect(db_path) as conn:
+        activity_index = conn.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'index'
+              AND name = 'idx_endpoint_change_events_activity_at'
+            """
+        ).fetchone()
+    assert activity_index is None
 
 
 def test_changelog_scoped_refresh_falls_back_when_index_source_is_stale(tmp_path: Path) -> None:
