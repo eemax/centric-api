@@ -65,7 +65,9 @@ delta state after successful endpoint fetches. `--days` and `--months` run expli
 windows.
 
 Raw JSONL, checkpoints, logs, `delta.yml`, and the canonical SQLite cache live under
-`~/.centric-api`. The local database defaults to `~/.centric-api/centric.db`.
+`~/.centric-api`. Fetches write in-progress evidence under `raw/active`, promote completed and
+trusted runs to `raw/runs`, and quarantine failed runs under `raw/failed`. The local database
+defaults to `~/.centric-api/centric.db`.
 Manual fetches append human-readable run logs to `~/.centric-api/logs/fetch.log` by default. The
 default `--log-level summary` writes run, endpoint, ingest, and changelog summary lines. Use
 `--log-level http` to include API request/response diagnostics, `--log-level debug` for
@@ -167,13 +169,14 @@ field-first schema drift plus operation drift without truncating changed values,
 showing covered and Swagger-only schema field counts.
 
 `ingest` is the operator path for already-captured raw evidence. `ingest check RAW_RUN` validates a
-run directory under `CENTRIC_API_HOME/raw/runs` or an explicit path, checks JSONL readability, and
-reports whether its files are already applied to the selected DB. `ingest raw-run RAW_RUN` applies
-one raw run to SQLite; pass `--changelog` to run the normal scoped changelog from the ingest result.
+run directory under `CENTRIC_API_HOME/raw/runs` or an explicit path, checks JSONL readability,
+reports lifecycle state, and reports whether its files are already applied to the selected DB.
+`ingest raw-run RAW_RUN` applies only completed evidence to SQLite; pass `--changelog` to run the
+normal scoped changelog from the ingest result.
 
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
-replays raw evidence from `CENTRIC_API_HOME/raw` into a fresh DB, rebuilds changelog, and reinstalls
-dashboard views. Use `--raw-dir` or `--db` to override the defaults.
+replays completed raw evidence from `CENTRIC_API_HOME/raw/runs` into a fresh DB, rebuilds changelog,
+and reinstalls dashboard views. Use `--raw-dir` or `--db` to override the defaults.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed

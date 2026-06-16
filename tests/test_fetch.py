@@ -130,18 +130,18 @@ def test_fetcher_marks_checkpoint_for_restart_on_count_mismatch(tmp_path: Path) 
 def test_fetcher_accepts_tiny_count_drift_on_large_endpoint(tmp_path: Path) -> None:
     cfg = _fetcher_config(tmp_path)
     auth = _PagedAuth(
-        count=1001,
+        count=10001,
         pages={
-            0: [{"id": f"S{i}"} for i in range(500)],
-            500: [{"id": f"S{i}"} for i in range(500, 1000)],
-            1000: [],
+            0: [{"id": f"S{i}"} for i in range(5000)],
+            5000: [{"id": f"S{i}"} for i in range(5000, 10000)],
+            10000: [],
         },
     )
 
-    result = run_endpoint(_endpoint(limit=500), auth, cfg)
+    result = run_endpoint(_endpoint(limit=5000), auth, cfg)
 
-    assert result.items_fetched == 1000
-    assert result.expected_count == 1001
+    assert result.items_fetched == 10000
+    assert result.expected_count == 10001
     assert result.count_validation_status == "warning"
     assert result.count_validation_reason is not None
     assert "Accepted as small count drift" in result.count_validation_reason
@@ -153,21 +153,52 @@ def test_fetcher_accepts_tiny_count_drift_on_large_endpoint(tmp_path: Path) -> N
 def test_fetcher_accepts_tiny_overfetch_count_drift_on_last_page(tmp_path: Path) -> None:
     cfg = _fetcher_config(tmp_path)
     auth = _PagedAuth(
-        count=1498,
+        count=14998,
         pages={
-            0: [{"id": f"S{i}"} for i in range(500)],
-            500: [{"id": f"S{i}"} for i in range(500, 1000)],
-            1000: [{"id": f"S{i}"} for i in range(1000, 1499)],
+            0: [{"id": f"S{i}"} for i in range(5000)],
+            5000: [{"id": f"S{i}"} for i in range(5000, 10000)],
+            10000: [{"id": f"S{i}"} for i in range(10000, 14999)],
         },
     )
 
-    result = run_endpoint(_endpoint(limit=500), auth, cfg)
+    result = run_endpoint(_endpoint(limit=5000), auth, cfg)
 
-    assert result.items_fetched == 1499
-    assert result.expected_count == 1498
+    assert result.items_fetched == 14999
+    assert result.expected_count == 14998
     assert result.count_validation_status == "warning"
     assert result.count_validation_reason is not None
     assert "Accepted as small count drift" in result.count_validation_reason
+
+
+def test_fetcher_rejects_count_drift_above_absolute_cap(tmp_path: Path) -> None:
+    cfg = _fetcher_config(tmp_path)
+    auth = _PagedAuth(
+        count=20000,
+        pages={
+            0: [{"id": f"S{i}"} for i in range(5000)],
+            5000: [{"id": f"S{i}"} for i in range(5000, 10000)],
+            10000: [{"id": f"S{i}"} for i in range(10000, 15000)],
+            15000: [{"id": f"S{i}"} for i in range(15000, 19989)],
+        },
+    )
+
+    with pytest.raises(FetchError, match="fetching 19989 of expected 20000"):
+        run_endpoint(_endpoint(limit=5000), auth, cfg)
+
+
+def test_fetcher_rejects_count_drift_above_relative_tolerance(tmp_path: Path) -> None:
+    cfg = _fetcher_config(tmp_path)
+    auth = _PagedAuth(
+        count=3000,
+        pages={
+            0: [{"id": f"S{i}"} for i in range(1000)],
+            1000: [{"id": f"S{i}"} for i in range(1000, 2000)],
+            2000: [{"id": f"S{i}"} for i in range(2000, 2999)],
+        },
+    )
+
+    with pytest.raises(FetchError, match="fetching 2999 of expected 3000"):
+        run_endpoint(_endpoint(limit=1000), auth, cfg)
 
 
 def test_fetcher_rejects_tiny_overfetch_count_drift_on_full_page(tmp_path: Path) -> None:

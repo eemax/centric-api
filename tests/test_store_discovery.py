@@ -82,16 +82,24 @@ def test_discover_raw_files_applies_manifest_scope_and_sorting(tmp_path: Path) -
 
     files = discover_raw_files(raw_dir)
 
-    assert [file.endpoint for file in files] == ["colors", "catalog_styles", "styles"]
-    assert [file.source_run_id for file in files] == ["run-early", "run-late", "root"]
-    assert [file.run_mode for file in files] == ["delta", "full", None]
-    assert [file.is_delta for file in files] == [True, False, True]
+    assert [file.endpoint for file in files] == ["colors", "catalog_styles"]
+    assert [file.source_run_id for file in files] == ["run-early", "run-late"]
+    assert [file.run_mode for file in files] == ["delta", "full"]
+    assert [file.is_delta for file in files] == [True, False]
     assert [file.path.name for file in files] == [
         "colors.jsonl",
         "styles.jsonl",
-        "styles.delta.jsonl",
     ]
     assert files[0].manifest_path == early_run / "manifest.json"
     assert files[1].manifest_path == late_run / "manifest.json"
-    assert files[2].manifest_path is None
     assert all(type(file) is RawFile for file in files)
+
+
+def test_discover_raw_files_ignores_loose_root_files_without_runs_dir(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "styles.delta.jsonl").write_text("{}\n", encoding="utf-8")
+
+    files = discover_raw_files(raw_dir)
+
+    assert files == []

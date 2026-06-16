@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from centric_api.schema import load_endpoint_schemas
-from centric_api.store import connect, ingest_raw_dir
+from centric_api.store import connect, discover_raw_files, ingest_raw_dir
 
 
 def test_ingest_applies_endpoint_tombstone_rules(tmp_path: Path) -> None:
@@ -155,6 +155,34 @@ def test_default_schema_tombstones_compositions_not_ok_for_material(tmp_path: Pa
     assert current == 0
     assert tombstone is not None
     assert json.loads(tombstone[0])["ok_for_material"] is False
+
+
+def test_discover_raw_files_ignores_active_and_failed_when_raw_root_has_runs(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw"
+    for bucket in ("active", "failed", "runs"):
+        run_dir = raw_dir / bucket / "run-1"
+        run_dir.mkdir(parents=True)
+        (run_dir / "styles.jsonl").write_text(
+            json.dumps({"id": bucket, "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+            encoding="utf-8",
+        )
+        (run_dir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "run_id": f"{bucket}-run",
+                    "mode": "full",
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    files = discover_raw_files(raw_dir)
+
+    assert [file.source_run_id for file in files] == ["runs-run"]
 
 
 def test_ingest_rejects_manifest_drift_for_applied_raw_file(tmp_path: Path) -> None:

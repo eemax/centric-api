@@ -13,6 +13,7 @@ from .._store.discovery import _sha256
 from ..changelog import ChangelogRun
 from ..config import ConfigError, runtime_path
 from ..defaults import db_path as resolve_db_path
+from ..raw_lifecycle import raw_run_lifecycle
 from ..rendering.logs import format_duration
 from ..schema import load_endpoint_schemas
 from ..store import (
@@ -32,6 +33,7 @@ class _RawRun:
     path: Path
     manifest: dict[str, Any]
     manifest_sha256: str
+    lifecycle: str
     files: list[_RawRunFile]
 
 
@@ -74,6 +76,11 @@ def _run_raw_run(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args.db)
     schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
     raw_run = _inspect_raw_run(args.raw_run, db_path=db_path, known_endpoints=set(schemas))
+    if raw_run.lifecycle != "completed":
+        raise ConfigError(
+            f"Raw run is not completed evidence: {raw_run.path} "
+            f"(lifecycle={raw_run.lifecycle})."
+        )
     error_count = len(_raw_run_error_records(raw_run))
     if error_count:
         raise ConfigError(
@@ -207,6 +214,7 @@ def _inspect_raw_run(
         path=run_path,
         manifest=manifest,
         manifest_sha256=manifest_sha256,
+        lifecycle=raw_run_lifecycle(run_path),
         files=files,
     )
 
@@ -351,6 +359,7 @@ def _raw_run_record(raw_run: _RawRun) -> dict[str, Any]:
         "path": str(raw_run.path),
         "run_id": raw_run.manifest.get("run_id"),
         "mode": _manifest_mode(raw_run.manifest),
+        "lifecycle": raw_run.lifecycle,
         "manifest_sha256": raw_run.manifest_sha256,
         "file_count": len(raw_run.files),
         "endpoints": [file.endpoint for file in raw_run.files],
@@ -407,6 +416,7 @@ def _print_check(raw_run: _RawRun, payload: dict[str, Any]) -> None:
     print(f"Raw:      {raw_run.path}")
     print(f"Run:      {raw_run.manifest.get('run_id') or raw_run.path.name}")
     print(f"Mode:     {_manifest_mode(raw_run.manifest)}")
+    print(f"Lifecycle: {raw_run.lifecycle}")
     print(f"Files:    {len(raw_run.files):,}")
     print(f"DB:       {payload['db']}")
     print()

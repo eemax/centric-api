@@ -37,6 +37,15 @@ from ..fetch_manifest import (
 )
 from ..fetcher import FetchError, run_endpoint
 from ..models import EndpointSpec, FetchProgressEvent, FetchRunResult
+from ..raw_lifecycle import (
+    active_run_dir,
+    completed_run_dir,
+    failed_run_dir,
+    promote_run_dir,
+    write_completed_marker,
+    write_failed_marker,
+    write_running_marker,
+)
 from ..record_constants import MODIFIED_AT_FIELD
 from ..rendering.fetch import (
     print_delta_dry_run,
@@ -84,9 +93,6 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     mode, modified_since = _resolve_fetch_mode(args, run_started_dt)
     fetcher_cfg, auth_settings, endpoint_specs = load_fetcher_settings(args.fetch_config)
 
-    raw_root_dir = fetcher_cfg.output_dir
-    run_id = _allocate_run_id(raw_root_dir, run_started_dt, mode, args.days or args.months)
-    fetcher_cfg.output_dir = raw_root_dir / "runs" / run_id
     selected_specs = _select_endpoints(endpoint_specs, args.endpoint)
     delta_state_file = resolve_private_config_path(DEFAULT_DELTA_STATE_PATH, args.delta_state_file)
     delta_state_exists = delta_state_file.is_file()
@@ -118,6 +124,16 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                 overlap_minutes=overlap_minutes,
             )
         return 0
+
+    raw_root_dir = fetcher_cfg.output_dir
+    run_id = _allocate_run_id(raw_root_dir, run_started_dt, mode, args.days or args.months)
+    fetcher_cfg.output_dir = active_run_dir(raw_root_dir, run_id)
+    write_running_marker(
+        fetcher_cfg.output_dir,
+        run_id=run_id,
+        mode=mode,
+        started_at=utc_iso(run_started_dt),
+    )
 
     fetch_log_file: TextIO | None = None
     fetch_log_path: Path | None = None
@@ -337,6 +353,19 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             fetch_log_file = None
         raise
 
+    raw_run_failed = bool(failures)
+    if raw_run_failed:
+        fetcher_cfg.output_dir = promote_run_dir(
+            fetcher_cfg.output_dir,
+            failed_run_dir(raw_root_dir, run_id),
+        )
+    else:
+        fetcher_cfg.output_dir = promote_run_dir(
+            fetcher_cfg.output_dir,
+            completed_run_dir(raw_root_dir, run_id),
+        )
+    _remap_result_output_files(results, fetcher_cfg.output_dir)
+
     pipeline_started = time.time()
     _emit_pipeline_progress(pipeline_progress, "")
     _emit_pipeline_progress(pipeline_progress, "Pipeline")
@@ -365,6 +394,23 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     except Exception as exc:
         pipeline_error = f"manifest failed: {exc}"
         _emit_pipeline_progress(pipeline_progress, f"manifest=failed error={exc}")
+        if not raw_run_failed:
+            fetcher_cfg.output_dir = promote_run_dir(
+                fetcher_cfg.output_dir,
+                failed_run_dir(raw_root_dir, run_id),
+            )
+            _remap_result_output_files(results, fetcher_cfg.output_dir)
+            raw_run_failed = True
+        write_failed_marker(
+            fetcher_cfg.output_dir,
+            run_id=run_id,
+            mode=mode,
+            started_at=utc_iso(run_started_dt),
+            failed_at=utc_iso(),
+            manifest_path=None,
+            reason=pipeline_error,
+            failures=[{"endpoint": endpoint, "error": message} for endpoint, message in failures],
+        )
         if log_callback:
             log_callback(
                 {
@@ -375,8 +421,30 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             )
     else:
         _emit_pipeline_progress(pipeline_progress, f"manifest=ok path={manifest_path}")
+        if raw_run_failed:
+            write_failed_marker(
+                fetcher_cfg.output_dir,
+                run_id=run_id,
+                mode=mode,
+                started_at=utc_iso(run_started_dt),
+                failed_at=utc_iso(),
+                manifest_path=manifest_path,
+                reason="endpoint fetch failures",
+                failures=[
+                    {"endpoint": endpoint, "error": message} for endpoint, message in failures
+                ],
+            )
+        else:
+            write_completed_marker(
+                fetcher_cfg.output_dir,
+                run_id=run_id,
+                mode=mode,
+                started_at=utc_iso(run_started_dt),
+                completed_at=utc_iso(),
+                manifest_path=manifest_path,
+            )
 
-    if results and pipeline_error is None:
+    if results and not raw_run_failed and pipeline_error is None:
         db_path = resolve_db_path(args.db)
         _emit_pipeline_progress(pipeline_progress, "ingest=running")
         try:
@@ -488,6 +556,8 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                         )
     else:
         skipped_reason = "no successful endpoint fetches"
+        if raw_run_failed:
+            skipped_reason = "endpoint fetch failures"
         if pipeline_error is not None:
             skipped_reason = pipeline_error
         _emit_pipeline_progress(
@@ -508,7 +578,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             delta_state,
             delta_state_file=delta_state_file,
             updates=pending_successful_delta_updates,
-            pipeline_error=pipeline_error,
+            pipeline_error="endpoint fetch failures" if raw_run_failed else pipeline_error,
         )
 
     _emit_pipeline_progress(
@@ -667,10 +737,20 @@ def _allocate_run_id(
     for index in range(100):
         suffix = "" if index == 0 else f"-{index + 1}"
         run_id = f"{base}{suffix}"
-        if (runs_dir / run_id).exists():
+        if (
+            active_run_dir(raw_root_dir, run_id).exists()
+            or (runs_dir / run_id).exists()
+            or failed_run_dir(raw_root_dir, run_id).exists()
+        ):
             continue
         return run_id
     raise RuntimeError("Could not allocate fetch run id.")
+
+
+def _remap_result_output_files(results: list[FetchRunResult], run_dir: Path) -> None:
+    for result in results:
+        if result.output_file_created:
+            result.output_file = run_dir / result.output_file.name
 
 
 def _apply_successful_delta_updates(

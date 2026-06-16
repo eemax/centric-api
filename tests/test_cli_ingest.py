@@ -114,6 +114,49 @@ def test_ingest_raw_run_refuses_invalid_evidence(
     assert "Raw run check failed for 1 file(s)" in captured.err
 
 
+def test_ingest_raw_run_refuses_failed_lifecycle_path(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    run_dir = _write_raw_run(tmp_path, "run-1")
+    failed_dir = tmp_path / "raw" / "failed" / "run-1"
+    failed_dir.parent.mkdir(parents=True)
+    run_dir.rename(failed_dir)
+    (failed_dir / ".completed.json").unlink()
+    (failed_dir / ".failed.json").write_text(
+        json.dumps({"status": "failed", "run_id": "run-1"}),
+        encoding="utf-8",
+    )
+
+    assert main(["ingest", "check", str(failed_dir), "--json"]) == 0
+    check_payload = json.loads(capsys.readouterr().out)
+    assert check_payload["raw_run"]["lifecycle"] == "failed"
+
+    assert main(["ingest", "raw-run", str(failed_dir), "--db", str(tmp_path / "db.sqlite")]) == 1
+    captured = capsys.readouterr()
+    assert "Raw run is not completed evidence" in captured.err
+
+
+def test_ingest_raw_run_refuses_markerless_completed_folder(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    run_dir = _write_raw_run(tmp_path, "run-1")
+    (run_dir / ".completed.json").unlink()
+
+    assert main(["ingest", "check", "run-1", "--json"]) == 0
+    check_payload = json.loads(capsys.readouterr().out)
+    assert check_payload["raw_run"]["lifecycle"] == "unknown"
+
+    assert main(["ingest", "raw-run", "run-1", "--db", str(tmp_path / "db.sqlite")]) == 1
+    captured = capsys.readouterr()
+    assert "lifecycle=unknown" in captured.err
+
+
 def _write_raw_run(tmp_path: Path, run_id: str) -> Path:
     run_dir = tmp_path / "raw" / "runs" / run_id
     run_dir.mkdir(parents=True)
@@ -145,6 +188,10 @@ def _write_raw_run(tmp_path: Path, run_id: str) -> Path:
             },
             sort_keys=True,
         ),
+        encoding="utf-8",
+    )
+    (run_dir / ".completed.json").write_text(
+        json.dumps({"status": "completed", "run_id": run_id}),
         encoding="utf-8",
     )
     return run_dir

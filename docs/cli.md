@@ -41,8 +41,9 @@ uv run centric-api fetch --resume
 ```
 
 `fetch` reads endpoint definitions from `config/fetcher.yml` by default. It writes raw JSONL into a
-run directory under `CENTRIC_API_HOME/raw/runs`, ingests successful endpoint files into SQLite, and
-then updates changelog tables for changed records.
+run directory under `CENTRIC_API_HOME/raw/active`, promotes completed and trusted runs to
+`CENTRIC_API_HOME/raw/runs`, quarantines failed endpoint runs under `CENTRIC_API_HOME/raw/failed`,
+ingests completed endpoint files into SQLite, and then updates changelog tables for changed records.
 
 Human fetch output starts with run context, including mode, selected endpoint count, raw output
 directory, and delta state or explicit modified window. Endpoint progress uses `START`, page, and
@@ -57,7 +58,7 @@ Example human progress shape:
 ```text
 Fetch run
 run=2026-05-27T001500Z-delta  mode=delta  endpoints=2
-raw=/path/to/raw/runs/2026-05-27T001500Z-delta
+raw=/path/to/raw/active/2026-05-27T001500Z-delta
 delta_state=/path/to/delta.yml  overlap=10m
 
 [styles] START  expected=1,000  limit=50  skip=0  retries=0  delta_floor=2026-05-26T23:50:00Z  elapsed=420ms
@@ -86,6 +87,14 @@ Modes:
 - `--delta-dry-run` prints the derived delta filters without taking the fetch lock, fetching, logging,
   ingesting, or updating changelog.
 - `--resume` resumes from checkpoint files when possible.
+
+Raw run lifecycle:
+
+- `raw/active/RUN_ID`: in-progress or interrupted fetch with `.running.json`.
+- `raw/runs/RUN_ID`: completed and trusted raw evidence with `.completed.json`; this is the default
+  source for `ingest raw-run RUN_ID` and `rebuild-db`.
+- `raw/failed/RUN_ID`: failed or partial fetch evidence with `.failed.json`; this is intentionally
+  skipped by raw-root ingest/rebuild discovery and can be inspected or deleted as a group.
 
 Useful options:
 
@@ -239,10 +248,13 @@ Raw runs must include `manifest.json`.
 
 Actions:
 
-- `check`: validates the raw-run manifest, listed JSONL files, JSONL parseability, endpoint schema
-  coverage, and whether each file is new, already applied, or drifted in the selected DB.
-- `raw-run`: applies one raw run to SQLite. With `--changelog`, it runs the normal scoped changelog
-  from the ingest result and skips changelog clearly when the raw files were already applied.
+- `check`: validates the raw-run manifest, listed JSONL files, JSONL parseability, lifecycle state,
+  endpoint schema coverage, and whether each file is new, already applied, or drifted in the
+  selected DB.
+- `raw-run`: applies one completed raw run to SQLite. With `--changelog`, it runs the normal scoped
+  changelog from the ingest result and skips changelog clearly when the raw files were already
+  applied. Explicit `raw/active` and `raw/failed` paths are inspectable with `check`, but refused by
+  `raw-run`.
 
 Useful options:
 

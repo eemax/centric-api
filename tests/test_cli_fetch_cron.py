@@ -127,6 +127,7 @@ def test_fetch_delta_dry_run_skips_lock_and_log(tmp_path, monkeypatch, capsys) -
     assert '"status": "delta_dry_run"' in output
     assert lock_path.exists()
     assert not (tmp_path / "logs" / "fetch.log").exists()
+    assert not (tmp_path / "raw").exists()
 
 def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsys) -> None:
     _patch_fetch_pipeline(monkeypatch, tmp_path)
@@ -150,6 +151,11 @@ def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsy
     assert endpoint_state["last_attempted_status"] == "OK"
     assert "last_successful_fetch_start" in endpoint_state
     assert "last_successful_fetch_end" in endpoint_state
+    completed_runs = list((tmp_path / "raw" / "runs").iterdir())
+    assert len(completed_runs) == 1
+    assert (completed_runs[0] / ".completed.json").is_file()
+    assert not list((tmp_path / "raw" / "active").glob("*"))
+    assert not (tmp_path / "raw" / "failed").exists()
 
 def test_fetch_delta_progress_reports_missing_floor_reason(
     tmp_path,
@@ -312,6 +318,11 @@ def test_fetch_failure_reports_elapsed_and_log_path(tmp_path, monkeypatch, capsy
     assert "HTTP 429 Too Many Requests" in captured.err
     assert "Fetch finished with failures" in captured.out
     assert f"Log: {tmp_path / 'logs' / 'fetch.log'}" in captured.out
+    failed_runs = list((tmp_path / "raw" / "failed").iterdir())
+    assert len(failed_runs) == 1
+    assert (failed_runs[0] / ".failed.json").is_file()
+    assert not list((tmp_path / "raw" / "active").glob("*"))
+    assert not (tmp_path / "raw" / "runs").exists()
 
 def test_fetch_quiet_suppresses_progress_but_reports_errors(
     tmp_path,
@@ -441,6 +452,16 @@ def test_fetch_partial_result_reports_partial_status(
     assert "boms" in captured.out
     assert "failed" in captured.out
     assert "- boms\n  HTTP 400 Bad Request" in captured.out
+    assert "ingest=skipped reason=endpoint fetch failures" in captured.err
+    delta_state = yaml.safe_load((tmp_path / "delta.yml").read_text(encoding="utf-8"))
+    endpoint_state = delta_state["endpoints"]["styles"]
+    assert endpoint_state["last_attempted_status"] == "PIPELINE_FAILED"
+    assert endpoint_state["last_attempted_error"] == "endpoint fetch failures"
+    assert "last_successful_fetch_start" not in endpoint_state
+    failed_runs = list((tmp_path / "raw" / "failed").iterdir())
+    assert len(failed_runs) == 1
+    assert (failed_runs[0] / ".failed.json").is_file()
+    assert not (tmp_path / "raw" / "runs").exists()
 
 def test_fetch_summary_shows_count_drift_warning(tmp_path, capsys) -> None:
     print_human_fetch_summary(

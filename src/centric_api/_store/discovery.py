@@ -22,37 +22,43 @@ def discover_raw_files(raw_dir: Path) -> list[RawFile]:
     if not raw_dir.exists():
         return []
     files: list[RawFile] = []
-    for path in raw_dir.rglob("*.jsonl"):
-        if path.name.startswith("."):
+    search_roots = [raw_dir] if (raw_dir / "manifest.json").is_file() else [raw_dir / "runs"]
+    for search_root in search_roots:
+        if not search_root.is_dir():
             continue
-        endpoint, is_delta = _endpoint_from_filename(path.name)
-        if endpoint is None:
-            continue
-        manifest = _load_manifest(path.parent)
-        manifest_endpoint = _manifest_endpoint_for_file(manifest, path.name)
-        if _manifest_has_endpoint_records(manifest) and manifest_endpoint is None:
-            continue
-        if manifest_endpoint is not None:
-            endpoint, endpoint_manifest = manifest_endpoint
-        else:
-            endpoint_manifest = None
-        source_run_id = _manifest_run_id(manifest) or (
-            path.parent.name if path.parent != raw_dir else "root"
-        )
-        run_mode = _manifest_mode(manifest)
-        manifest_path = path.parent / "manifest.json" if manifest is not None else None
-        files.append(
-            RawFile(
-                path=path,
-                endpoint=endpoint,
-                is_delta=_manifest_file_is_delta(endpoint_manifest, default=is_delta),
-                source_run_id=source_run_id,
-                run_mode=run_mode,
-                manifest_path=manifest_path,
-                manifest_sha256=_sha256(manifest_path) if manifest_path else None,
-            )
-        )
+        for path in search_root.rglob("*.jsonl"):
+            _append_raw_file(files, raw_dir=raw_dir, path=path)
     return sorted(files, key=lambda item: (_run_sort_key(item), item.endpoint, str(item.path)))
+
+
+def _append_raw_file(files: list[RawFile], *, raw_dir: Path, path: Path) -> None:
+    if path.name.startswith("."):
+        return
+    endpoint, is_delta = _endpoint_from_filename(path.name)
+    if endpoint is None:
+        return
+    manifest = _load_manifest(path.parent)
+    manifest_endpoint = _manifest_endpoint_for_file(manifest, path.name)
+    if _manifest_has_endpoint_records(manifest) and manifest_endpoint is None:
+        return
+    if manifest_endpoint is not None:
+        endpoint, endpoint_manifest = manifest_endpoint
+    else:
+        endpoint_manifest = None
+    source_run_id = _manifest_run_id(manifest) or path.parent.name
+    run_mode = _manifest_mode(manifest)
+    manifest_path = path.parent / "manifest.json" if manifest is not None else None
+    files.append(
+        RawFile(
+            path=path,
+            endpoint=endpoint,
+            is_delta=_manifest_file_is_delta(endpoint_manifest, default=is_delta),
+            source_run_id=source_run_id,
+            run_mode=run_mode,
+            manifest_path=manifest_path,
+            manifest_sha256=_sha256(manifest_path) if manifest_path else None,
+        )
+    )
 
 
 def _endpoint_from_filename(filename: str) -> tuple[str | None, bool]:

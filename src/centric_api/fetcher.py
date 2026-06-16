@@ -27,7 +27,8 @@ from .fetch_common import (
 from .fetch_pagination import get_expected_count, iter_pages
 from .models import EndpointSpec, FetcherConfig, FetchProgressEvent, FetchRunResult
 
-COUNT_DRIFT_RELATIVE_TOLERANCE = 0.001
+COUNT_DRIFT_RELATIVE_TOLERANCE = 0.00025
+COUNT_DRIFT_ABSOLUTE_CAP = 10
 
 
 def run_endpoint(
@@ -290,7 +291,7 @@ def run_endpoint(
             completed=False,
             restart_from_zero=True,
             window_start_line=0,
-            output_file=output_path,
+            output_file=None,
         )
         _emit_api_log(
             api_log_callback,
@@ -696,6 +697,8 @@ def _is_acceptable_count_drift(
         return False
     delta = abs(expected_count - items_fetched)
     if delta == 0:
+        return False
+    if delta > COUNT_DRIFT_ABSOLUTE_CAP:
         return False
     if delta > limit:
         return False

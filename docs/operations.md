@@ -15,7 +15,9 @@ Common paths:
 | `centric.db` | canonical SQLite cache |
 | `local.env` | private credentials |
 | `delta.yml` | per-endpoint delta state |
-| `raw/runs/` | fetch run evidence and manifests |
+| `raw/active/` | in-progress or interrupted fetch evidence |
+| `raw/runs/` | completed and trusted fetch evidence and manifests |
+| `raw/failed/` | failed or quarantined fetch evidence |
 | `checkpoints/` | fetch checkpoint files |
 | `downloads/files/` | downloaded binary files |
 | `downloads/runs/` | download run manifests |
@@ -188,7 +190,8 @@ uv run centric-api rebuild-db --yes --json
 The command:
 
 1. Backs up the current database, WAL, and SHM files with timestamped suffixes.
-2. Replays raw evidence from `CENTRIC_API_HOME/raw` or `--raw-dir`.
+2. Replays completed raw evidence from `CENTRIC_API_HOME/raw/runs` when using the default
+   `CENTRIC_API_HOME/raw` root, or from `--raw-dir`.
 3. Rebuilds changelog from current cached records.
 4. Reinstalls feature tables and dashboard views.
 
