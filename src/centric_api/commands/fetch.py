@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ..auth import AuthError, init_auth_context
-from ..changelog import ChangelogRun, record_changelog
+from ..changelog import ChangelogRun
 from ..config import ConfigError, load_fetcher_settings, resolve_private_config_path, runtime_path
 from ..defaults import (
     DEFAULT_DELTA_STATE_PATH,
@@ -49,6 +49,7 @@ from ..rendering.logs import LogCallback, build_log_callback, format_duration
 from ..schema import load_endpoint_schemas
 from ..store import IngestResult, ingest_raw_dir
 from .common import release_fetch_lock, try_acquire_fetch_lock, utc_iso, utc_now
+from .pipeline import run_changelog_after_ingest
 
 PipelineProgressCallback = Callable[[str], None]
 
@@ -421,7 +422,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
             _emit_pipeline_progress(pipeline_progress, "changelog=running")
             changelog_started = time.time()
             try:
-                changelog_run, changelog_skipped = _run_changelog_after_ingest(
+                changelog_run, changelog_skipped = run_changelog_after_ingest(
                     db_path,
                     ingest_result,
                     progress=_indented_pipeline_progress(pipeline_progress),
@@ -627,34 +628,6 @@ def _apply_modified_since_filter(spec: EndpointSpec, modified_since: str) -> End
     count_query_params[f"{MODIFIED_AT_FIELD}=ge"] = modified_since
     next_count_spec = replace(spec.count_spec, query_params=count_query_params)
     return replace(spec, query_params=query_params, count_spec=next_count_spec)
-
-
-def _run_changelog_after_ingest(
-    db_path: Path,
-    ingest_result: IngestResult,
-    *,
-    progress: PipelineProgressCallback | None = None,
-) -> tuple[ChangelogRun | None, str | None]:
-    changed_endpoints = set(ingest_result.changed_record_ids_by_endpoint)
-    if not changed_endpoints:
-        return None, "no current-record changes"
-    return (
-        record_changelog(
-            db_path,
-            endpoints=changed_endpoints,
-            record_ids_by_endpoint={
-                endpoint: set(record_ids)
-                for endpoint, record_ids in ingest_result.upserted_record_ids_by_endpoint.items()
-            },
-            deleted_record_ids_by_endpoint={
-                endpoint: set(record_ids)
-                for endpoint, record_ids in ingest_result.deleted_record_ids_by_endpoint.items()
-            },
-            deleted_record_delete_types_by_endpoint=ingest_result.deleted_record_delete_types_by_endpoint,
-            progress=progress,
-        ),
-        None,
-    )
 
 
 def _select_endpoints(all_specs: list[EndpointSpec], names: list[str]) -> list[EndpointSpec]:

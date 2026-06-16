@@ -5,6 +5,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+import centric_api._changelog.recording as recording
 from centric_api.changelog import (
     list_actor_leaderboard,
     list_actor_summary,
@@ -395,6 +396,107 @@ def test_changelog_scoped_refresh_falls_back_when_index_source_is_stale(tmp_path
 
     assert run.full_refresh is True
     assert run.event_count == 1
+
+
+def test_changelog_scoped_refresh_chunks_large_record_id_sets(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(recording, "SQL_IN_CHUNK_SIZE", 2)
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        for index in range(5):
+            conn.execute(
+                """
+                INSERT INTO endpoint_records (
+                    endpoint, record_id, payload_json, payload_sha256, modified_at,
+                    source_file, source_run_id, ingested_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    "styles",
+                    f"S{index}",
+                    json.dumps({"id": f"S{index}", "code": "A"}, sort_keys=True),
+                    f"hash-before-{index}",
+                    "2026-01-01T00:00:00Z",
+                    "raw.jsonl",
+                    "run-1",
+                    "2026-01-01T00:00:00Z",
+                ],
+            )
+    record_changelog(db_path, endpoints={"styles"}, full=True)
+    with connect(db_path) as conn:
+        for index in range(5):
+            conn.execute(
+                """
+                UPDATE endpoint_records
+                SET payload_json = ?, payload_sha256 = ?
+                WHERE endpoint = ? AND record_id = ?
+                """,
+                [
+                    json.dumps({"id": f"S{index}", "code": "B"}, sort_keys=True),
+                    f"hash-after-{index}",
+                    "styles",
+                    f"S{index}",
+                ],
+            )
+
+    run = record_changelog(
+        db_path,
+        record_ids_by_endpoint={"styles": {f"S{index}" for index in range(5)}},
+    )
+
+    assert run.full_refresh is False
+    assert run.scoped_record_count == 5
+    assert run.event_count == 5
+
+    with connect(db_path) as conn:
+        for index in range(5):
+            conn.execute(
+                "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+                ["styles", f"S{index}"],
+            )
+            conn.execute(
+                """
+                INSERT INTO endpoint_tombstones (
+                    endpoint, record_id, payload_json, payload_sha256, modified_at,
+                    source_file, source_run_id, ingested_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    "styles",
+                    f"S{index}",
+                    json.dumps(
+                        {
+                            "id": f"S{index}",
+                            "code": "B",
+                            "modified_by": "U1",
+                        },
+                        sort_keys=True,
+                    ),
+                    f"hash-tombstone-{index}",
+                    "2026-01-02T00:00:00Z",
+                    "styles.jsonl",
+                    "run-2",
+                    "2026-01-02T00:00:00Z",
+                ],
+            )
+
+    delete_run = record_changelog(
+        db_path,
+        deleted_record_ids_by_endpoint={"styles": {f"S{index}" for index in range(5)}},
+    )
+
+    assert delete_run.full_refresh is False
+    assert delete_run.scoped_record_count == 5
+    assert delete_run.event_count == 5
+    assert {
+        row["delete_type"]
+        for row in list_changes(db_path, endpoint="styles", limit=20)
+        if row["change_type"] == "removed"
+    } == {"tombstone"}
 
 
 def test_changelog_actor_leaderboard_rolls_up_endpoint_footprint(tmp_path: Path) -> None:

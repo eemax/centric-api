@@ -10,6 +10,7 @@ from .commands.cron import run_cron
 from .commands.doctor import run_doctor
 from .commands.download import run_download
 from .commands.fetch import run_fetch
+from .commands.ingest import run_ingest_command
 from .commands.load import run_load_command
 from .commands.map import run_map_command
 from .commands.model import run_model_command
@@ -34,6 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "fetch":
             return run_fetch(args)
+        if args.command == "ingest":
+            return run_ingest_command(args)
         if args.command == "changelog":
             return run_changelog(args)
         if args.command == "cron":

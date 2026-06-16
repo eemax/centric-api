@@ -178,7 +178,7 @@ def _patch_fetch_pipeline(monkeypatch, tmp_path) -> None:
             scoped_record_count=1,
         )
 
-    monkeypatch.setattr("centric_api.commands.fetch.record_changelog", fake_record_changelog)
+    monkeypatch.setattr("centric_api.commands.pipeline.record_changelog", fake_record_changelog)
 
 def _insert_bundle_item(
     conn,

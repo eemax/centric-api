@@ -73,6 +73,7 @@ def top_level_help(*, color: bool = False) -> str:
             paint("System & advanced:", BOLD),
             command("doctor", "Check local setup"),
             command("status", "Show cache and runtime state"),
+            command("ingest", "Inspect or ingest raw evidence"),
             command("rebuild-db", "Rebuild SQLite from raw evidence"),
             command("swagger", "Inspect and refresh local API schema"),
             command("cron", "Run scheduled delta fetches"),

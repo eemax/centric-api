@@ -53,6 +53,8 @@ uv run centric-api swagger diff
 uv run centric-api swagger diff --history 0 1
 uv run centric-api swagger coverage
 uv run centric-api doctor
+uv run centric-api ingest check 2026-06-16T124501Z-full
+uv run centric-api ingest raw-run 2026-06-16T124501Z-full --changelog
 uv run centric-api rebuild-db --yes
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
@@ -163,6 +165,11 @@ field by global index or endpoint-scoped name with full enum values, `swagger di
 field-first schema drift plus operation drift without truncating changed values, and
 `swagger coverage` compares Swagger GET collection paths with the configured fetch endpoints while
 showing covered and Swagger-only schema field counts.
+
+`ingest` is the operator path for already-captured raw evidence. `ingest check RAW_RUN` validates a
+run directory under `CENTRIC_API_HOME/raw/runs` or an explicit path, checks JSONL readability, and
+reports whether its files are already applied to the selected DB. `ingest raw-run RAW_RUN` applies
+one raw run to SQLite; pass `--changelog` to run the normal scoped changelog from the ingest result.
 
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays raw evidence from `CENTRIC_API_HOME/raw` into a fresh DB, rebuilds changelog, and reinstalls

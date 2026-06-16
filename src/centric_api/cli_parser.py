@@ -90,6 +90,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fetch log verbosity.",
     )
 
+    ingest_parser = subparsers.add_parser("ingest", help="Inspect or ingest raw evidence")
+    ingest_actions = ingest_parser.add_subparsers(dest="action", required=True)
+
+    ingest_check_parser = ingest_actions.add_parser("check", help="Validate a raw run")
+    ingest_check_parser.add_argument("raw_run", metavar="RAW_RUN", help="Raw run id or path.")
+    ingest_check_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    ingest_check_parser.add_argument(
+        "--schema",
+        metavar="PATH",
+        default=None,
+        help="Endpoint schema config path.",
+    )
+    ingest_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    ingest_raw_run_parser = ingest_actions.add_parser("raw-run", help="Ingest one raw run")
+    ingest_raw_run_parser.add_argument("raw_run", metavar="RAW_RUN", help="Raw run id or path.")
+    ingest_raw_run_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    ingest_raw_run_parser.add_argument(
+        "--schema",
+        metavar="PATH",
+        default=None,
+        help="Endpoint schema config path.",
+    )
+    ingest_raw_run_parser.add_argument(
+        "--changelog",
+        action="store_true",
+        help="Run the normal scoped changelog after ingest.",
+    )
+    ingest_raw_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
     changelog_parser = subparsers.add_parser("changelog", help="Inspect or update changelog")
     changelog_parser.add_argument(
         "action",

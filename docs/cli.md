@@ -20,9 +20,9 @@ command:
   `view show --json`, `view check --json`, `view export --json`, `load show --json`,
   `load check --json`, `load run --json`, `load retry --json`, `model show --json`,
   `model check --json`, `model run --json`, `validate show --json`,
-  `validate run NAME --json`, `map endpoints --json`, `swagger refresh --json`,
-  `swagger status --json`, `swagger diff --json`, `swagger coverage --json`, and units commands
-  emit one JSON object.
+  `validate run NAME --json`, `ingest check --json`, `ingest raw-run --json`,
+  `map endpoints --json`, `swagger refresh --json`, `swagger status --json`,
+  `swagger diff --json`, `swagger coverage --json`, and units commands emit one JSON object.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used. Group config
 flags such as `--load-config`, `--models-dir`, `--validators-dir`, and `--units-config` can be
@@ -223,6 +223,32 @@ Actions:
 Removal breakdowns are always present in `leaderboard --json` as `tombstone`, `hard_delete`, and
 `unknown_delete`. Human output keeps tombstone-only removals folded into `Removed`; it adds `Tomb`,
 `Hard`, or `Unknown` columns only when the displayed rows need them.
+
+## Ingest
+
+```bash
+uv run centric-api ingest check 2026-06-16T124501Z-full
+uv run centric-api ingest check /path/to/raw/runs/2026-06-16T124501Z-full --db scratch.db
+uv run centric-api ingest raw-run 2026-06-16T124501Z-full
+uv run centric-api ingest raw-run 2026-06-16T124501Z-full --changelog
+```
+
+`ingest` is an operator command for already-captured raw evidence. It does not fetch from Centric.
+`RAW_RUN` can be either a run id under `CENTRIC_API_HOME/raw/runs` or an explicit run directory path.
+Raw runs must include `manifest.json`.
+
+Actions:
+
+- `check`: validates the raw-run manifest, listed JSONL files, JSONL parseability, endpoint schema
+  coverage, and whether each file is new, already applied, or drifted in the selected DB.
+- `raw-run`: applies one raw run to SQLite. With `--changelog`, it runs the normal scoped changelog
+  from the ingest result and skips changelog clearly when the raw files were already applied.
+
+Useful options:
+
+- `--db PATH`: target SQLite database; defaults to `CENTRIC_API_HOME/centric.db`.
+- `--schema PATH`: endpoint tombstone schema overlay.
+- `--json`: emits one JSON object.
 
 ## Download
 

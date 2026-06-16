@@ -417,7 +417,7 @@ def test_fetch_partial_result_reports_partial_status(
         ),
     )
     monkeypatch.setattr(
-        "centric_api.commands.fetch.record_changelog",
+        "centric_api.commands.pipeline.record_changelog",
         lambda *_args, **_kwargs: ChangelogRun(
             run_id="changelog-1",
             endpoint_count=1,

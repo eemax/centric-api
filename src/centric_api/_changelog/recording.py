@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,10 @@ from .models import (
     _IndexRow,
 )
 from .utils import _datetime_to_db, _json_dict, _json_or_none, _string_value
+
+# Keep room for the endpoint bind parameter on SQLite builds with the classic
+# 999-variable ceiling.
+SQL_IN_CHUNK_SIZE = 900
 
 
 def record_changelog(
@@ -228,19 +233,18 @@ def _build_scoped_current_index(
 ) -> dict[tuple[str, str], _IndexRow]:
     index: dict[tuple[str, str], _IndexRow] = {}
     for endpoint, record_ids in sorted(record_ids_by_endpoint.items()):
-        if not record_ids:
-            continue
-        rows = conn.execute(
-            f"""
-            SELECT endpoint, record_id, payload_json, payload_sha256
-            FROM endpoint_records
-            WHERE endpoint = ?
-              AND record_id IN ({",".join("?" for _ in record_ids)})
-            ORDER BY endpoint, record_id
-            """,
-            [endpoint, *sorted(record_ids)],
-        ).fetchall()
-        index.update(_index_from_rows(rows, hash_column="payload_sha256"))
+        for record_id_chunk in _record_id_chunks(record_ids):
+            rows = conn.execute(
+                f"""
+                SELECT endpoint, record_id, payload_json, payload_sha256
+                FROM endpoint_records
+                WHERE endpoint = ?
+                  AND record_id IN ({",".join("?" for _ in record_id_chunk)})
+                ORDER BY endpoint, record_id
+                """,
+                [endpoint, *record_id_chunk],
+            ).fetchall()
+            index.update(_index_from_rows(rows, hash_column="payload_sha256"))
     return index
 
 
@@ -270,19 +274,18 @@ def _build_scoped_tombstone_index(
 ) -> dict[tuple[str, str], _IndexRow]:
     index: dict[tuple[str, str], _IndexRow] = {}
     for endpoint, record_ids in sorted(deleted_record_ids_by_endpoint.items()):
-        if not record_ids:
-            continue
-        rows = conn.execute(
-            f"""
-            SELECT endpoint, record_id, payload_json, payload_sha256
-            FROM endpoint_tombstones
-            WHERE endpoint = ?
-              AND record_id IN ({",".join("?" for _ in record_ids)})
-            ORDER BY endpoint, record_id
-            """,
-            [endpoint, *sorted(record_ids)],
-        ).fetchall()
-        index.update(_index_from_rows(rows, hash_column="payload_sha256"))
+        for record_id_chunk in _record_id_chunks(record_ids):
+            rows = conn.execute(
+                f"""
+                SELECT endpoint, record_id, payload_json, payload_sha256
+                FROM endpoint_tombstones
+                WHERE endpoint = ?
+                  AND record_id IN ({",".join("?" for _ in record_id_chunk)})
+                ORDER BY endpoint, record_id
+                """,
+                [endpoint, *record_id_chunk],
+            ).fetchall()
+            index.update(_index_from_rows(rows, hash_column="payload_sha256"))
     return index
 
 
@@ -311,19 +314,24 @@ def _load_current_index_for_keys(
 ) -> dict[tuple[str, str], _IndexRow]:
     index: dict[tuple[str, str], _IndexRow] = {}
     for endpoint, record_ids in sorted(keys.items()):
-        if not record_ids:
-            continue
-        rows = conn.execute(
-            f"""
-            SELECT endpoint, record_id, payload_hash, payload_json
-            FROM endpoint_changelog_index_current
-            WHERE endpoint = ?
-              AND record_id IN ({",".join("?" for _ in record_ids)})
-            """,
-            [endpoint, *sorted(record_ids)],
-        ).fetchall()
-        index.update(_index_from_rows(rows, hash_column="payload_hash"))
+        for record_id_chunk in _record_id_chunks(record_ids):
+            rows = conn.execute(
+                f"""
+                SELECT endpoint, record_id, payload_hash, payload_json
+                FROM endpoint_changelog_index_current
+                WHERE endpoint = ?
+                  AND record_id IN ({",".join("?" for _ in record_id_chunk)})
+                """,
+                [endpoint, *record_id_chunk],
+            ).fetchall()
+            index.update(_index_from_rows(rows, hash_column="payload_hash"))
     return index
+
+
+def _record_id_chunks(record_ids: set[str]) -> Iterator[list[str]]:
+    sorted_ids = sorted(record_ids)
+    for index in range(0, len(sorted_ids), SQL_IN_CHUNK_SIZE):
+        yield sorted_ids[index : index + SQL_IN_CHUNK_SIZE]
 
 
 def _index_from_rows(
@@ -764,4 +772,3 @@ def _scoped_record_count(record_ids_by_endpoint: dict[str, set[str]] | None) -> 
     if not record_ids_by_endpoint:
         return 0
     return sum(len(record_ids) for record_ids in record_ids_by_endpoint.values())
-
