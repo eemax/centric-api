@@ -130,7 +130,7 @@ Views are read-only and local: they do not call the Centric API.
 `validate` runs private cache validation reports and writes timestamped artifacts under
 `CENTRIC_API_HOME/validation/runs`. The main repo provides the command, cache helpers, and standard
 `report.xlsx`, `summary.json`, `findings.json`, and `history.json` artifact writer. The
-`validate history` command refreshes HTML, XLSX, and JSON history output from those first-class
+`validate history` command refreshes HTML and JSON history output from those first-class
 history metrics. Validators that should trend over time should emit explicit aggregated
 `ValidationHistoryMetric` values; use one metric per trend series, include `numerator` and
 `denominator` for percentages, set `trend` to `up`, `down`, or `neutral`, and emit both overall and

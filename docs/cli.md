@@ -376,7 +376,7 @@ uv run centric-api validate history --group month
 tables. A run writes `report.xlsx`, `summary.json`, `findings.json`, and `history.json` under
 `CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/`.
 `validate history` refreshes `CENTRIC_API_HOME/validation/history/history.html`,
-`history.xlsx`, and `history.json` from first-class run `history.json` files.
+and `history.json` from first-class run `history.json` files.
 
 Useful options:
 

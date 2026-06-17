@@ -239,6 +239,9 @@ def test_validate_human_output_distinguishes_run_from_outcome(
     assert "ID:       " in output
     assert "Findings\nTotal:" in output
     assert "Blocking: 1" in output
+    assert "Value Sets:" in output
+    assert "Product Group: enabled (104 values)" in output
+    assert "'Product Group':" not in output
     assert "BLOCKING STYLE_NAME_MISSING" in output
     assert "ERROR STYLE_NAME_MISSING" not in output
 
@@ -736,6 +739,14 @@ class StyleNameValidator:
                 "styles_missing_name": len(findings),
                 "mode": ctx.mode,
                 "input_file": str(ctx.input_file) if ctx.input_file else None,
+                "value_sets": {
+                    "Product Group": {
+                        "path": "/tmp/styles.nwg_style_product_group.xlsx",
+                        "found": True,
+                        "validation": "enabled",
+                        "value_count": 104,
+                    }
+                },
             },
             findings=tuple(findings),
             sheets=(ValidationSheet("Styles", tuple(rows)),),

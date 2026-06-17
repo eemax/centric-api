@@ -34,7 +34,6 @@ def run_validate_command(args: argparse.Namespace) -> int:
             "runs_dir": str(summary.runs_dir),
             "output_dir": str(summary.output_dir),
             "json_path": str(summary.json_path),
-            "workbook_path": str(summary.workbook_path),
             "html_path": str(summary.html_path),
             "raw_metric_count": summary.raw_metric_count,
             "point_count": summary.point_count,
@@ -51,7 +50,6 @@ def run_validate_command(args: argparse.Namespace) -> int:
             print(f"Runs:      {summary.run_count}")
             print(f"Metrics:   {summary.raw_metric_count} raw, {summary.point_count} grouped")
             print(f"HTML:      {summary.html_path}")
-            print(f"Workbook:  {summary.workbook_path}")
             print(f"JSON:      {summary.json_path}")
         return 0
 

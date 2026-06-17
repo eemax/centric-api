@@ -46,6 +46,11 @@ th { background: #f1f4f7; font-size: 12px; color: #4b5967; }
   <label>Validator<select id="validator"></select></label>
   <label>Metric<select id="metric"></select></label>
   <label>Scope<select id="scope"></select></label>
+  <label class="brand-control">Concepts<select id="conceptSelect" multiple size="6"></select></label>
+  <div class="filter-actions">
+    <button id="allConcepts" type="button">All</button>
+    <button id="noConcepts" type="button">None</button>
+  </div>
   <label class="brand-control">Brands<select id="brandSelect" multiple size="6"></select></label>
   <div class="filter-actions">
     <button id="allBrands" type="button">All</button>
@@ -74,6 +79,9 @@ const colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"
 const validatorSelect = document.getElementById("validator");
 const metricSelect = document.getElementById("metric");
 const scopeSelect = document.getElementById("scope");
+const conceptSelect = document.getElementById("conceptSelect");
+const allConceptsButton = document.getElementById("allConcepts");
+const noConceptsButton = document.getElementById("noConcepts");
 const brandSelect = document.getElementById("brandSelect");
 const allBrandsButton = document.getElementById("allBrands");
 const noBrandsButton = document.getElementById("noBrands");
@@ -153,18 +161,30 @@ function refreshScopes() {
   const validator = validatorSelect.value;
   const metric = metricSelect.value;
   const subset = points.filter(p => p.validator === validator && p.metric === metric);
-  fill(scopeSelect, unique(subset.map(p => p.scope)), "brand_season");
+  fill(scopeSelect, unique(subset.map(p => p.scope)), "concept_brand_season");
   refreshSeasonTypes();
+  refreshConcepts();
   refreshBrands();
 }
-function refreshBrands() {
+function refreshConcepts() {
   const selectedType = seasonTypeSelect.value;
   const seasons = selectedSeasons();
   const subset = selectedBasePoints().filter(p =>
     (!selectedType || seasonType(p) === selectedType) &&
     (!selectedType || seasons.has(seasonLabel(p)))
   );
-  fillBrands(unique(subset.map(p => p.brand || "Overall")));
+  fillConcepts(unique(subset.map(p => conceptLabel(p))));
+}
+function refreshBrands() {
+  const concepts = selectedConcepts();
+  const selectedType = seasonTypeSelect.value;
+  const seasons = selectedSeasons();
+  const subset = selectedBasePoints().filter(p =>
+    concepts.has(conceptLabel(p)) &&
+    (!selectedType || seasonType(p) === selectedType) &&
+    (!selectedType || seasons.has(seasonLabel(p)))
+  );
+  fillBrands(unique(subset.map(p => brandLabel(p))));
 }
 function refreshSeasonTypes() {
   const subset = selectedBasePoints();
@@ -193,6 +213,30 @@ function selectedBasePoints() {
 function selectedBrands() {
   return new Set([...brandSelect.selectedOptions].map(option => option.value));
 }
+function selectedConcepts() {
+  return new Set([...conceptSelect.selectedOptions].map(option => option.value));
+}
+function fillConcepts(values) {
+  const previous = new Set([...conceptSelect.selectedOptions].map(option => option.value));
+  conceptSelect.innerHTML = "";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    option.selected = previous.size === 0 || previous.has(value);
+    conceptSelect.appendChild(option);
+  }
+  conceptSelect.disabled = values.length === 0;
+  allConceptsButton.disabled = values.length === 0;
+  noConceptsButton.disabled = values.length === 0;
+  if (values.length && ![...conceptSelect.options].some(option => option.selected)) selectAllConcepts();
+}
+function selectAllConcepts() {
+  [...conceptSelect.options].forEach(option => { option.selected = true; });
+}
+function selectNoConcepts() {
+  [...conceptSelect.options].forEach(option => { option.selected = false; });
+}
 function selectAllBrands() {
   [...brandSelect.options].forEach(option => { option.selected = true; });
 }
@@ -209,6 +253,7 @@ function selectNoSeasons() {
   [...seasonSelect.options].forEach(option => { option.selected = false; });
 }
 function filteredPoints() {
+  const concepts = selectedConcepts();
   const brands = selectedBrands();
   const selectedType = seasonTypeSelect.value;
   const seasons = selectedSeasons();
@@ -216,7 +261,8 @@ function filteredPoints() {
     p.validator === validatorSelect.value &&
     p.metric === metricSelect.value &&
     p.scope === scopeSelect.value &&
-    brands.has(p.brand || "Overall") &&
+    concepts.has(conceptLabel(p)) &&
+    brands.has(brandLabel(p)) &&
     (!selectedType || seasonType(p) === selectedType) &&
     (!selectedType || seasons.has(seasonLabel(p)))
   );
@@ -235,7 +281,8 @@ function draw() {
   const height = chart.clientHeight || 520;
   const margin = {left: 56, right: 24, top: 24, bottom: 54};
   const buckets = unique(selected.map(p => p.bucket));
-  const seriesKeys = unique(selected.map(seriesKey));
+  const seriesMap = groupedSeries(selected);
+  const seriesKeys = [...seriesMap.keys()].sort();
   const domain = valueDomain(selected);
   const trend = selected[0]?.trend || "neutral";
   const x = bucket => buckets.length === 1
@@ -263,8 +310,9 @@ function draw() {
     label.textContent = buckets.length > 12 && index % Math.ceil(buckets.length / 12) ? "" : bucket;
   });
   const latest = new Map();
+  const previousLatest = new Map();
   seriesKeys.forEach((key, index) => {
-    const series = selected.filter(p => seriesKey(p) === key);
+    const series = seriesMap.get(key) || [];
     const d = series.map(p => `${x(p.bucket)},${y(p.value)}`).join(" ");
     const color = colors[index % colors.length];
     el("polyline", {points: d, fill: "none", stroke: color, "stroke-width": 2.2});
@@ -277,9 +325,9 @@ function draw() {
         stroke: "#ffffff",
         "stroke-width": 1.6,
       });
-      const previous = latest.get(key);
-      if (!previous || point.bucket_start > previous.bucket_start) latest.set(key, point);
     }
+    latest.set(key, series[series.length - 1]);
+    previousLatest.set(key, series.length > 1 ? series[series.length - 2] : null);
     const item = document.createElement("span");
     const swatch = document.createElement("i");
     swatch.className = "swatch";
@@ -290,7 +338,7 @@ function draw() {
   });
   trendNote.textContent = trendHelp(trend);
   [...latest.entries()].sort((a, b) => seriesLabel(a[1]).localeCompare(seriesLabel(b[1]))).forEach(([_key, point]) => {
-    const previous = previousPoint(selected, point);
+    const previous = previousLatest.get(_key);
     const movement = movementStatus(point, previous);
     const row = document.createElement("tr");
     const values = [
@@ -350,12 +398,20 @@ function trendHelp(trend) {
   if (trend === "down") return "Trend intent: lower values are better.";
   return "Trend intent: neutral context metric.";
 }
-function previousPoint(selected, latest) {
-  const series = selected
-    .filter(p => seriesKey(p) === seriesKey(latest))
-    .sort((a, b) => a.bucket_start.localeCompare(b.bucket_start));
-  const index = series.findIndex(p => p.bucket_start === latest.bucket_start && p.run_id === latest.run_id);
-  return index > 0 ? series[index - 1] : null;
+function groupedSeries(selected) {
+  const grouped = new Map();
+  for (const point of selected) {
+    const key = seriesKey(point);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(point);
+  }
+  for (const series of grouped.values()) {
+    series.sort((a, b) =>
+      a.bucket_start.localeCompare(b.bucket_start) ||
+      String(a.run_id || "").localeCompare(String(b.run_id || ""))
+    );
+  }
+  return grouped;
 }
 function seasonType(point) {
   return point.dimensions?.season_type || "";
@@ -363,13 +419,24 @@ function seasonType(point) {
 function seasonLabel(point) {
   return point.dimensions?.season_label || "";
 }
+function conceptLabel(point) {
+  return point.dimensions?.concept || "All Concepts";
+}
+function brandLabel(point) {
+  return point.brand || point.dimensions?.brand || "Overall";
+}
 function seriesKey(point) {
-  return `${point.brand || "Overall"}\\u0000${seasonType(point)}\\u0000${seasonLabel(point)}`;
+  return `${conceptLabel(point)}\\u0000${brandLabel(point)}\\u0000${seasonType(point)}\\u0000${seasonLabel(point)}`;
 }
 function seriesLabel(point) {
-  const brand = point.brand || "Overall";
+  const concept = conceptLabel(point);
+  const brand = brandLabel(point);
   const season = seasonLabel(point);
-  return season ? `${brand} · ${season}` : brand;
+  const parts = [];
+  if (concept !== "All Concepts") parts.push(concept);
+  if (brand !== "Overall") parts.push(brand);
+  if (season) parts.push(season);
+  return parts.length ? parts.join(" · ") : "Overall";
 }
 function seasonTypeLabel(value) {
   if (value === "cycle") return "Cycle";
@@ -417,14 +484,17 @@ function movementStatus(point, previous) {
 }
 validatorSelect.addEventListener("change", () => { refreshMetrics(); draw(); });
 metricSelect.addEventListener("change", () => { refreshScopes(); draw(); });
-scopeSelect.addEventListener("change", () => { refreshSeasonTypes(); refreshBrands(); draw(); });
+scopeSelect.addEventListener("change", () => { refreshSeasonTypes(); refreshConcepts(); refreshBrands(); draw(); });
+conceptSelect.addEventListener("change", () => { refreshBrands(); draw(); });
+allConceptsButton.addEventListener("click", () => { selectAllConcepts(); refreshBrands(); draw(); });
+noConceptsButton.addEventListener("click", () => { selectNoConcepts(); refreshBrands(); draw(); });
 brandSelect.addEventListener("change", draw);
 allBrandsButton.addEventListener("click", () => { selectAllBrands(); draw(); });
 noBrandsButton.addEventListener("click", () => { selectNoBrands(); draw(); });
-seasonTypeSelect.addEventListener("change", () => { refreshSeasons(); refreshBrands(); draw(); });
-seasonSelect.addEventListener("change", () => { refreshBrands(); draw(); });
-allSeasonsButton.addEventListener("click", () => { selectAllSeasons(); refreshBrands(); draw(); });
-noSeasonsButton.addEventListener("click", () => { selectNoSeasons(); refreshBrands(); draw(); });
+seasonTypeSelect.addEventListener("change", () => { refreshSeasons(); refreshConcepts(); refreshBrands(); draw(); });
+seasonSelect.addEventListener("change", () => { refreshConcepts(); refreshBrands(); draw(); });
+allSeasonsButton.addEventListener("click", () => { selectAllSeasons(); refreshConcepts(); refreshBrands(); draw(); });
+noSeasonsButton.addEventListener("click", () => { selectNoSeasons(); refreshConcepts(); refreshBrands(); draw(); });
 window.addEventListener("resize", draw);
 init();
 </script>

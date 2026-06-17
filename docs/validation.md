@@ -367,15 +367,13 @@ validator/metric/scope/brand, the latest run in that bucket wins. The command wr
 ```text
 CENTRIC_API_HOME/validation/history/
   history.html
-  history.xlsx
   history.json
 ```
 
 The HTML file is a self-contained graph and latest-value table. It scales the selected metric around
 its observed range and uses `trend` to label whether the latest movement is good, worse, flat, or
-neutral. Brand and season filters are exact multi-select controls. The XLSX file has grouped
-history, latest values with previous/change/movement and season dimension columns, and source runs.
-The JSON file is the canonical aggregated data for other tools.
+neutral. Brand and season filters are exact multi-select controls. The JSON file is the canonical
+aggregated data for other tools.
 Only run artifacts that contain schema version `2` `history.json` files participate; old runs and
 runs without history files are ignored by design.
 

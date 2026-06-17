@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Any
 
@@ -102,9 +103,45 @@ def _print_summary_metrics(summary: ValidationRunSummary) -> None:
     print("Metrics")
     for key, value in rows:
         label = key.replace("_", " ").title()
-        if isinstance(value, int):
-            value = format_count(value)
-        print(f"  {label}: {value}")
+        _print_summary_metric(label, value)
+
+
+def _print_summary_metric(label: str, value: Any) -> None:
+    if isinstance(value, Mapping):
+        print(f"  {label}:")
+        for nested_key, nested_value in value.items():
+            nested_label = str(nested_key).replace("_", " ").title()
+            if isinstance(nested_value, Mapping) and _is_value_set_summary(nested_value):
+                print(f"    {nested_key}: {_value_set_summary_text(nested_value)}")
+            elif isinstance(nested_value, Mapping):
+                print(f"    {nested_label}:")
+                for key, item in nested_value.items():
+                    item_label = str(key).replace("_", " ").title()
+                    print(f"      {item_label}: {_summary_value_text(item)}")
+            else:
+                print(f"    {nested_label}: {_summary_value_text(nested_value)}")
+        return
+    print(f"  {label}: {_summary_value_text(value)}")
+
+
+def _is_value_set_summary(value: Mapping[Any, Any]) -> bool:
+    return "validation" in value and "value_count" in value
+
+
+def _value_set_summary_text(value: Mapping[Any, Any]) -> str:
+    validation = str(value.get("validation") or "unknown")
+    count = value.get("value_count")
+    if isinstance(count, int):
+        return f"{validation} ({format_count(count)} values)"
+    return validation
+
+
+def _summary_value_text(value: Any) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int):
+        return format_count(value)
+    return str(value)
 
 
 def _print_finding_samples(summary: ValidationRunSummary) -> None:

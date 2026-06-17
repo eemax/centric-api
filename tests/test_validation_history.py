@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from openpyxl import load_workbook
-
 from centric_api.cli import main
 
 
@@ -71,19 +69,15 @@ def test_validate_history_groups_latest_run_and_writes_outputs(
     assert latest_point["run_id"] == "run-new"
     assert latest_point["value"] == 20.0
     assert latest_point["trend"] == "up"
-    workbook = load_workbook(output_dir / "history.xlsx", read_only=True)
-    assert workbook.sheetnames == ["History", "Latest", "Runs"]
-    latest_rows = list(workbook["Latest"].iter_rows(values_only=True))
-    latest_headers = {header: index for index, header in enumerate(latest_rows[0])}
-    assert latest_rows[1][latest_headers["Previous Value"]] == 10
-    assert latest_rows[1][latest_headers["Change"]] == 10
-    assert latest_rows[1][latest_headers["Change Percent"]] == 100
-    assert latest_rows[1][latest_headers["Movement"]] == "good"
+    assert "workbook_path" not in payload
+    assert not (output_dir / "history.xlsx").exists()
     html = (output_dir / "history.html").read_text(encoding="utf-8")
     assert "__HISTORY_JSON__" not in html
     assert "const historyPayload =" in html
     assert 'select id="brandSelect" multiple' in html
     assert 'id="allBrands"' in html
+    assert 'select id="conceptSelect" multiple' in html
+    assert 'id="allConcepts"' in html
     assert 'select id="seasonType"' in html
     assert 'select id="seasonSelect" multiple' in html
     assert "brandFilter" not in html
@@ -186,14 +180,9 @@ def test_validate_history_marks_downward_metric_improvement(
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["point_count"] == 2
-    workbook = load_workbook(output_dir / "history.xlsx", read_only=True)
-    latest_rows = list(workbook["Latest"].iter_rows(values_only=True))
-    latest_headers = {header: index for index, header in enumerate(latest_rows[0])}
-    assert latest_rows[1][latest_headers["Trend"]] == "down"
-    assert latest_rows[1][latest_headers["Previous Value"]] == 8
-    assert latest_rows[1][latest_headers["Change"]] == -5
-    assert latest_rows[1][latest_headers["Change Percent"]] == -62.5
-    assert latest_rows[1][latest_headers["Movement"]] == "good"
+    assert not (output_dir / "history.xlsx").exists()
+    history_payload = json.loads((output_dir / "history.json").read_text(encoding="utf-8"))
+    assert history_payload["points"][-1]["trend"] == "down"
 
 
 def test_validate_history_keeps_season_dimensions_as_separate_series(
@@ -210,8 +199,10 @@ def test_validate_history_keeps_season_dimensions_as_separate_series(
         value=25,
         brand="CRAFT",
         trend="up",
-        scope="brand_season",
+        scope="concept_brand_season",
         dimensions={
+            "concept": "Craft",
+            "brand": "CRAFT",
             "season_type": "cycle",
             "season_year": "2026",
             "season_slot": "1C",
@@ -226,8 +217,10 @@ def test_validate_history_keeps_season_dimensions_as_separate_series(
         value=75,
         brand="CRAFT",
         trend="up",
-        scope="brand_season",
+        scope="concept_brand_season",
         dimensions={
+            "concept": "Craft",
+            "brand": "CRAFT",
             "season_type": "cycle",
             "season_year": "2026",
             "season_slot": "2C",
@@ -257,13 +250,10 @@ def test_validate_history_keeps_season_dimensions_as_separate_series(
         "1C26",
         "2C26",
     }
-    workbook = load_workbook(output_dir / "history.xlsx", read_only=True)
-    history_rows = list(workbook["History"].iter_rows(values_only=True))
-    history_headers = {header: index for index, header in enumerate(history_rows[0])}
-    assert {row[history_headers["Season Label"]] for row in history_rows[1:]} == {
-        "1C26",
-        "2C26",
+    assert {point["dimensions"]["concept"] for point in history_payload["points"]} == {
+        "Craft"
     }
+    assert not (output_dir / "history.xlsx").exists()
 
 
 def _write_history_run(
