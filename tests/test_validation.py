@@ -9,7 +9,11 @@ from openpyxl import load_workbook
 from centric_api.cli import main
 from centric_api.config import ConfigError
 from centric_api.store import connect
-from centric_api.validation import ValidationFinding, ValidationFindingTotals
+from centric_api.validation import (
+    ValidationFinding,
+    ValidationFindingTotals,
+    ValidationHistoryMetric,
+)
 from centric_api.validation.registry import discover_validators
 
 
@@ -71,6 +75,7 @@ def test_validate_cli_runs_private_validator_and_writes_artifacts(
     assert report_path.is_file()
     assert Path(payload["summary_path"]).is_file()
     assert Path(payload["findings_path"]).is_file()
+    assert Path(payload["history_path"]).is_file()
     findings_payload = json.loads(Path(payload["findings_path"]).read_text(encoding="utf-8"))
     assert findings_payload["total_findings"] == 1
     assert findings_payload["exported_findings"] == 1
@@ -305,7 +310,7 @@ def test_validation_artifacts_can_cap_raw_finding_exports(tmp_path: Path) -> Non
         findings_export_limit=1,
     )
 
-    report_path, summary_path, findings_path = write_validation_artifacts(
+    report_path, summary_path, findings_path, history_path = write_validation_artifacts(
         tmp_path,
         result,
         run_record={
@@ -324,6 +329,7 @@ def test_validation_artifacts_can_cap_raw_finding_exports(tmp_path: Path) -> Non
 
     assert report_path.is_file()
     assert summary_path.is_file()
+    assert history_path.is_file()
     payload = json.loads(findings_path.read_text(encoding="utf-8"))
     assert payload["truncated"] is True
     assert payload["total_findings"] == 3
@@ -362,7 +368,7 @@ def test_validation_artifacts_can_use_custom_report_workbook(tmp_path: Path) -> 
         report_workbook=buffer.getvalue(),
     )
 
-    report_path, summary_path, findings_path = write_validation_artifacts(
+    report_path, summary_path, findings_path, history_path = write_validation_artifacts(
         tmp_path,
         result,
         run_record={
@@ -381,10 +387,62 @@ def test_validation_artifacts_can_use_custom_report_workbook(tmp_path: Path) -> 
 
     assert summary_path.is_file()
     assert findings_path.is_file()
+    assert history_path.is_file()
     report = load_workbook(report_path, read_only=True)
     assert report.sheetnames == ["DPP Summary"]
     rows = list(report["DPP Summary"].iter_rows(values_only=True))
     assert rows == [("Metric", "ALL"), ("Ready Styles", 0)]
+
+
+def test_validation_artifacts_write_history_metrics(tmp_path: Path) -> None:
+    from centric_api.validation.artifacts import write_validation_artifacts
+    from centric_api.validation.contracts import ValidationResult
+
+    result = ValidationResult(
+        summary={"styles": 10},
+        history_metrics=(
+            ValidationHistoryMetric(
+                metric="Style Completion %",
+                value=40.0,
+                unit="percent",
+                numerator=4,
+                denominator=10,
+            ),
+        ),
+    )
+
+    _report_path, _summary_path, _findings_path, history_path = write_validation_artifacts(
+        tmp_path,
+        result,
+        run_record={
+            "run_id": "run-1",
+            "validator": "style-readiness",
+            "title": "Style Readiness",
+            "status": "failed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "findings": 0,
+            "errors": 0,
+            "warnings": 0,
+            "info": 0,
+        },
+    )
+
+    payload = json.loads(history_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert payload["validator"] == "style-readiness"
+    assert payload["metrics"] == [
+        {
+            "brand": None,
+            "denominator": 10,
+            "dimensions": {},
+            "metric": "Style Completion %",
+            "numerator": 4,
+            "scope": "overall",
+            "unit": "percent",
+            "value": 40.0,
+        }
+    ]
 
 
 def test_validation_run_can_use_explicit_samples_and_totals(
@@ -506,6 +564,37 @@ def test_validation_run_rejects_invalid_custom_report_workbook(
 
     captured = capsys.readouterr()
     assert "report_workbook must be bytes" in captured.err
+
+
+def test_validation_run_rejects_invalid_history_metric(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    validators_dir = tmp_path / "validators"
+    validators_dir.mkdir()
+    _write_invalid_history_metric_validator(validators_dir / "invalid_history_metric.py")
+    _seed_styles_cache(db_path)
+
+    assert (
+        main(
+            [
+                "validate",
+                "--validators-dir",
+                str(validators_dir),
+                "run",
+                "invalid-history-metric",
+                "--db",
+                str(db_path),
+                "--output-dir",
+                str(tmp_path / "validation-runs"),
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert "history metric Style Completion % value must be finite" in captured.err
 
 
 def test_validate_run_all_requires_private_validators(
@@ -733,6 +822,42 @@ class InvalidReportWorkbookValidator:
 
 
 VALIDATOR = InvalidReportWorkbookValidator()
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_invalid_history_metric_validator(path: Path) -> None:
+    path.write_text(
+        """
+from centric_api.validation import (
+    ValidationDefinition,
+    ValidationHistoryMetric,
+    ValidationResult,
+)
+
+
+class InvalidHistoryMetricValidator:
+    definition = ValidationDefinition(
+        name="invalid-history-metric",
+        title="Invalid History Metric",
+        required_endpoints=("styles",),
+    )
+
+    def run(self, ctx):
+        return ValidationResult(
+            summary={},
+            history_metrics=(
+                ValidationHistoryMetric(
+                    metric="Style Completion %",
+                    value=float("nan"),
+                    unit="percent",
+                ),
+            ),
+        )
+
+
+VALIDATOR = InvalidHistoryMetricValidator()
 """,
         encoding="utf-8",
     )

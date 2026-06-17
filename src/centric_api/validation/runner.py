@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from .context import ValidationContext
 from .contracts import (
     ValidationFinding,
     ValidationFindingTotals,
+    ValidationHistoryMetric,
     ValidationResult,
     ValidationRunSummary,
     ValidationStatus,
@@ -64,7 +66,7 @@ def run_validator(
             "warnings": warnings,
             "info": info,
         }
-        report_path, summary_path, findings_path = write_validation_artifacts(
+        report_path, summary_path, findings_path, history_path = write_validation_artifacts(
             output_dir,
             result,
             run_record=run_record,
@@ -83,6 +85,7 @@ def run_validator(
         report_path=report_path,
         summary_path=summary_path,
         findings_path=findings_path,
+        history_path=history_path,
         finding_count=total_findings,
         error_count=errors,
         warning_count=warnings,
@@ -142,6 +145,7 @@ def _validate_result(validator_name: str, result: object) -> None:
     _validate_findings(validator_name, "findings", result.findings)
     _validate_findings(validator_name, "finding_samples", result.finding_samples)
     _validate_finding_totals(validator_name, result)
+    _validate_history_metrics(validator_name, result.history_metrics)
     if result.report_workbook is not None and not isinstance(result.report_workbook, bytes):
         raise ConfigError(f"Validator {validator_name} report_workbook must be bytes.")
     if result.findings_export_limit is not None and result.findings_export_limit < 0:
@@ -197,6 +201,74 @@ def _validate_finding_totals(validator_name: str, result: ValidationResult) -> N
     ):
         raise ConfigError(
             f"Validator {validator_name} finding_totals cannot be smaller than exported samples."
+        )
+
+
+def _validate_history_metrics(
+    validator_name: str,
+    metrics: tuple[ValidationHistoryMetric, ...],
+) -> None:
+    for metric in metrics:
+        if not isinstance(metric, ValidationHistoryMetric):
+            raise ConfigError(
+                f"Validator {validator_name} history_metrics must contain "
+                "ValidationHistoryMetric items."
+            )
+        if not metric.metric.strip():
+            raise ConfigError(f"Validator {validator_name} history metric name is required.")
+        if not isinstance(metric.value, int | float) or isinstance(metric.value, bool):
+            raise ConfigError(
+                f"Validator {validator_name} history metric {metric.metric} value must be numeric."
+            )
+        if not isfinite(float(metric.value)):
+            raise ConfigError(
+                f"Validator {validator_name} history metric {metric.metric} value must be finite."
+            )
+        _validate_optional_history_number(
+            validator_name,
+            metric.metric,
+            "numerator",
+            metric.numerator,
+        )
+        _validate_optional_history_number(
+            validator_name,
+            metric.metric,
+            "denominator",
+            metric.denominator,
+        )
+        if metric.unit not in {"percent", "count", "number"}:
+            raise ConfigError(
+                f"Validator {validator_name} history metric {metric.metric} unit is invalid."
+            )
+        if not metric.scope.strip():
+            raise ConfigError(f"Validator {validator_name} history metric scope is required.")
+        if not isinstance(metric.dimensions, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in metric.dimensions.items()
+        ):
+            raise ConfigError(
+                f"Validator {validator_name} history metric {metric.metric} "
+                "dimensions must be string keys and values."
+            )
+
+
+def _validate_optional_history_number(
+    validator_name: str,
+    metric_name: str,
+    field_name: str,
+    value: int | float | None,
+) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise ConfigError(
+            f"Validator {validator_name} history metric {metric_name} {field_name} "
+            "must be numeric."
+        )
+    if not isfinite(float(value)):
+        raise ConfigError(
+            f"Validator {validator_name} history metric {metric_name} {field_name} "
+            "must be finite."
         )
 
 

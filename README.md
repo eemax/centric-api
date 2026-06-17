@@ -39,6 +39,7 @@ uv run centric-api model list
 uv run centric-api model check my-model
 uv run centric-api validate list
 uv run centric-api validate run my-validator
+uv run centric-api validate history
 uv run centric-api units convert 1500 g kg
 uv run centric-api units basis gsm
 uv run centric-api status
@@ -128,8 +129,13 @@ Views are read-only and local: they do not call the Centric API.
 
 `validate` runs private cache validation reports and writes timestamped artifacts under
 `CENTRIC_API_HOME/validation/runs`. The main repo provides the command, cache helpers, and standard
-`report.xlsx`, `summary.json`, and `findings.json` artifact writer. Validation logic lives in
-private `CENTRIC_API_HOME/validators` modules or a directory passed with `--validators-dir`.
+`report.xlsx`, `summary.json`, `findings.json`, and `history.json` artifact writer. The
+`validate history` command refreshes HTML, XLSX, and JSON history output from those first-class
+history metrics. Validators that should trend over time should emit explicit aggregated
+`ValidationHistoryMetric` values; use one metric per trend series, include `numerator` and
+`denominator` for percentages, and emit both overall and per-brand metric sets when brand comparison
+matters. Validation logic lives in private `CENTRIC_API_HOME/validators` modules or a directory
+passed with `--validators-dir`.
 
 `load` validates workbook rows and can send API requests to Centric. The repo includes
 `material-create`, which posts material rows to `/v2/materials`, and

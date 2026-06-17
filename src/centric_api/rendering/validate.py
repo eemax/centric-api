@@ -31,6 +31,7 @@ def validation_summary_record(summary: ValidationRunSummary) -> dict[str, Any]:
         "report_path": str(summary.report_path),
         "summary_path": str(summary.summary_path),
         "findings_path": str(summary.findings_path),
+        "history_path": str(summary.history_path),
         "findings": summary.finding_count,
         "blocking": summary.error_count,
         "errors": summary.error_count,
@@ -76,6 +77,7 @@ def print_human_validation_summary(summary: ValidationRunSummary) -> None:
     print(f"Report:   {summary.report_path}")
     print(f"Findings: {summary.findings_path}")
     print(f"Summary:  {summary.summary_path}")
+    print(f"History:  {summary.history_path}")
     print()
     print("Findings")
     print(f"Total:    {format_count(summary.finding_count)}")

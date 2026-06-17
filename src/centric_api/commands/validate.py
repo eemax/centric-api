@@ -16,11 +16,45 @@ from ..rendering.validate import (
     validation_summary_record,
     validator_record,
 )
+from ..validation.history import build_validation_history
 from ..validation.registry import discover_validators, select_validator
 from ..validation.runner import run_validator
 
 
 def run_validate_command(args: argparse.Namespace) -> int:
+    if args.action == "history":
+        summary = build_validation_history(
+            runs_dir=args.runs_dir,
+            output_dir=args.output_dir,
+            group=args.group,
+            validators=tuple(args.validator),
+        )
+        payload = {
+            "group": summary.group,
+            "runs_dir": str(summary.runs_dir),
+            "output_dir": str(summary.output_dir),
+            "json_path": str(summary.json_path),
+            "workbook_path": str(summary.workbook_path),
+            "html_path": str(summary.html_path),
+            "raw_metric_count": summary.raw_metric_count,
+            "point_count": summary.point_count,
+            "run_count": summary.run_count,
+            "validators": list(summary.validators),
+            "metrics": list(summary.metrics),
+        }
+        if args.json:
+            print(json.dumps(payload, default=str))
+        else:
+            print("Validation History")
+            print()
+            print(f"Group:     {summary.group}")
+            print(f"Runs:      {summary.run_count}")
+            print(f"Metrics:   {summary.raw_metric_count} raw, {summary.point_count} grouped")
+            print(f"HTML:      {summary.html_path}")
+            print(f"Workbook:  {summary.workbook_path}")
+            print(f"JSON:      {summary.json_path}")
+        return 0
+
     validators = discover_validators(args.validators_dir)
     if args.action == "list":
         rows = [validator_record(validator) for validator in validators]
@@ -58,9 +92,7 @@ def run_validate_command(args: argparse.Namespace) -> int:
         validator = select_validator(validators, name)
         validator_started = time.time()
         if not args.json:
-            _print_validate_progress(
-                f"[{validator.definition.name}] START  {index}/{len(names)}"
-            )
+            _print_validate_progress(f"[{validator.definition.name}] START  {index}/{len(names)}")
         summary = run_validator(
             db_path,
             validator,

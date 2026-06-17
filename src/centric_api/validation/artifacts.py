@@ -7,7 +7,7 @@ from itertools import islice
 from pathlib import Path
 from typing import Any
 
-from .contracts import ValidationFinding, ValidationResult
+from .contracts import ValidationFinding, ValidationHistoryMetric, ValidationResult
 
 SUMMARY_COLUMNS = ("metric", "value")
 FINDING_COLUMNS = (
@@ -33,10 +33,11 @@ def write_validation_artifacts(
     result: ValidationResult,
     *,
     run_record: dict[str, Any],
-) -> tuple[Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / "summary.json"
     findings_path = output_dir / "findings.json"
+    history_path = output_dir / "history.json"
     report_path = output_dir / "report.xlsx"
 
     summary_payload = {**run_record, "summary": result.summary}
@@ -52,8 +53,9 @@ def write_validation_artifacts(
     }
     _write_json(summary_path, summary_payload)
     _write_json(findings_path, findings_payload)
+    _write_json(history_path, _history_payload(result, run_record))
     write_validation_workbook(report_path, result, run_record=run_record)
-    return report_path, summary_path, findings_path
+    return report_path, summary_path, findings_path, history_path
 
 
 def write_validation_workbook(
@@ -116,6 +118,35 @@ def finding_record(finding: ValidationFinding) -> dict[str, Any]:
         json.dumps(finding.details, default=str, sort_keys=True) if finding.details else None
     )
     return payload
+
+
+def history_metric_record(metric: ValidationHistoryMetric) -> dict[str, Any]:
+    return {
+        "scope": metric.scope,
+        "brand": metric.brand,
+        "metric": metric.metric,
+        "value": metric.value,
+        "unit": metric.unit,
+        "numerator": metric.numerator,
+        "denominator": metric.denominator,
+        "dimensions": metric.dimensions,
+    }
+
+
+def _history_payload(
+    result: ValidationResult,
+    run_record: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "validator": run_record["validator"],
+        "title": run_record["title"],
+        "run_id": run_record["run_id"],
+        "status": run_record["status"],
+        "started_at": run_record["started_at"],
+        "finished_at": run_record["finished_at"],
+        "metrics": [history_metric_record(metric) for metric in result.history_metrics],
+    }
 
 
 def _exported_finding_records(result: ValidationResult) -> list[dict[str, Any]]:

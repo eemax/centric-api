@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation History</title>
+<style>
+:root {
+  color-scheme: light;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #17202a;
+  background: #f6f7f9;
+}
+body { margin: 0; }
+main { max-width: 1240px; margin: 0 auto; padding: 28px; }
+h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: 0; }
+.meta { color: #5b6673; margin-bottom: 22px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; align-items: end; }
+label { display: grid; gap: 4px; font-size: 12px; color: #44515f; font-weight: 650; }
+select, input { min-width: 220px; padding: 8px 10px; border: 1px solid #c8d0d9; border-radius: 6px; background: white; font: inherit; }
+.panel { background: white; border: 1px solid #dbe1e8; border-radius: 8px; padding: 16px; }
+#chart { width: 100%; height: 520px; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; font-size: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 18px; height: 3px; display: inline-block; }
+table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
+th, td { border-bottom: 1px solid #e6ebf0; padding: 8px 10px; text-align: left; vertical-align: top; }
+th { background: #f1f4f7; font-size: 12px; color: #4b5967; }
+.empty { color: #6b7480; padding: 24px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Validation History</h1>
+<div class="meta">Generated __GENERATED_AT__ · group __GROUP__ · __POINT_COUNT__ grouped points from __RUN_COUNT__ runs</div>
+<div class="controls">
+  <label>Validator<select id="validator"></select></label>
+  <label>Metric<select id="metric"></select></label>
+  <label>Scope<select id="scope"></select></label>
+  <label>Brand filter<input id="brandFilter" placeholder="Type to filter brands"></label>
+</div>
+<section class="panel">
+  <svg id="chart" role="img" aria-label="Validation metric history chart"></svg>
+  <div id="legend" class="legend"></div>
+</section>
+<section class="panel" style="margin-top: 16px;">
+  <table id="latest"><thead><tr><th>Brand</th><th>Latest Bucket</th><th>Value</th><th>Run</th><th>Started</th></tr></thead><tbody></tbody></table>
+</section>
+</main>
+<script>
+const historyPayload = __HISTORY_JSON__;
+const points = historyPayload.points || [];
+const colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"];
+const validatorSelect = document.getElementById("validator");
+const metricSelect = document.getElementById("metric");
+const scopeSelect = document.getElementById("scope");
+const brandFilter = document.getElementById("brandFilter");
+const chart = document.getElementById("chart");
+const legend = document.getElementById("legend");
+const latestBody = document.querySelector("#latest tbody");
+
+function unique(values) { return [...new Set(values.filter(Boolean))].sort(); }
+function fill(select, values) {
+  const current = select.value;
+  select.innerHTML = "";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  }
+  if (values.includes(current)) select.value = current;
+}
+function init() {
+  fill(validatorSelect, unique(points.map(p => p.validator)));
+  refreshMetrics();
+  draw();
+}
+function refreshMetrics() {
+  const validator = validatorSelect.value;
+  const subset = points.filter(p => p.validator === validator);
+  fill(metricSelect, unique(subset.map(p => p.metric)));
+  refreshScopes();
+}
+function refreshScopes() {
+  const validator = validatorSelect.value;
+  const metric = metricSelect.value;
+  const subset = points.filter(p => p.validator === validator && p.metric === metric);
+  fill(scopeSelect, unique(subset.map(p => p.scope)));
+}
+function filteredPoints() {
+  const brandText = brandFilter.value.trim().toLowerCase();
+  return points.filter(p =>
+    p.validator === validatorSelect.value &&
+    p.metric === metricSelect.value &&
+    p.scope === scopeSelect.value &&
+    (!brandText || String(p.brand || "Overall").toLowerCase().includes(brandText))
+  );
+}
+function draw() {
+  const selected = filteredPoints();
+  chart.innerHTML = "";
+  legend.innerHTML = "";
+  latestBody.innerHTML = "";
+  if (!selected.length) {
+    chart.innerHTML = '<text x="24" y="48" class="empty">No matching history metrics.</text>';
+    return;
+  }
+  const width = chart.clientWidth || 1000;
+  const height = chart.clientHeight || 520;
+  const margin = {left: 56, right: 24, top: 24, bottom: 54};
+  const buckets = unique(selected.map(p => p.bucket));
+  const seriesNames = unique(selected.map(p => p.brand || "Overall"));
+  const maxValue = Math.max(1, ...selected.map(p => Number(p.value) || 0));
+  const x = bucket => margin.left + (buckets.indexOf(bucket) / Math.max(1, buckets.length - 1)) * (width - margin.left - margin.right);
+  const y = value => height - margin.bottom - (Number(value) / maxValue) * (height - margin.top - margin.bottom);
+  const ns = "http://www.w3.org/2000/svg";
+  function el(name, attrs) {
+    const node = document.createElementNS(ns, name);
+    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+    chart.appendChild(node);
+    return node;
+  }
+  el("line", {x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, stroke: "#b8c2cc"});
+  el("line", {x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, stroke: "#b8c2cc"});
+  for (let i = 0; i <= 4; i++) {
+    const value = (maxValue / 4) * i;
+    const yy = y(value);
+    el("line", {x1: margin.left, y1: yy, x2: width - margin.right, y2: yy, stroke: "#edf1f5"});
+    const label = el("text", {x: 8, y: yy + 4, fill: "#5b6673", "font-size": "12"});
+    label.textContent = value.toFixed(value >= 10 ? 0 : 1);
+  }
+  buckets.forEach((bucket, index) => {
+    const label = el("text", {x: x(bucket), y: height - 20, fill: "#5b6673", "font-size": "12", "text-anchor": "middle"});
+    label.textContent = buckets.length > 12 && index % Math.ceil(buckets.length / 12) ? "" : bucket;
+  });
+  const latest = new Map();
+  seriesNames.forEach((name, index) => {
+    const series = selected.filter(p => (p.brand || "Overall") === name);
+    const d = series.map(p => `${x(p.bucket)},${y(p.value)}`).join(" ");
+    const color = colors[index % colors.length];
+    el("polyline", {points: d, fill: "none", stroke: color, "stroke-width": 2.2});
+    for (const point of series) {
+      el("circle", {cx: x(point.bucket), cy: y(point.value), r: 3, fill: color});
+      const previous = latest.get(name);
+      if (!previous || point.bucket_start > previous.bucket_start) latest.set(name, point);
+    }
+    const item = document.createElement("span");
+    const swatch = document.createElement("i");
+    swatch.className = "swatch";
+    swatch.style.background = color;
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(name));
+    legend.appendChild(item);
+  });
+  [...latest.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([brand, point]) => {
+    const row = document.createElement("tr");
+    for (const value of [brand, point.bucket, `${point.value} ${point.unit}`, point.run_id, point.started_at]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.appendChild(cell);
+    }
+    latestBody.appendChild(row);
+  });
+}
+validatorSelect.addEventListener("change", () => { refreshMetrics(); draw(); });
+metricSelect.addEventListener("change", () => { refreshScopes(); draw(); });
+scopeSelect.addEventListener("change", draw);
+brandFilter.addEventListener("input", draw);
+window.addEventListener("resize", draw);
+init();
+</script>
+</body>
+</html>

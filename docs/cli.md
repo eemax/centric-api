@@ -23,6 +23,7 @@ command:
   `validate run NAME --json`, `ingest check --json`, `ingest raw-run --json`,
   `map endpoints --json`, `swagger refresh --json`, `swagger status --json`,
   `swagger diff --json`, `swagger coverage --json`, and units commands emit one JSON object.
+  `validate history --json` also emits one JSON object with artifact paths and history counts.
 
 Progress lines for fetch and download are written to stderr unless `--quiet` is used. Group config
 flags such as `--load-config`, `--models-dir`, `--validators-dir`, and `--units-config` can be
@@ -367,11 +368,15 @@ uv run centric-api validate list
 uv run centric-api validate show my-validator
 uv run centric-api validate run my-validator
 uv run centric-api validate run all
+uv run centric-api validate history
+uv run centric-api validate history --group month
 ```
 
 `validate` runs private cache validation modules and writes artifacts instead of database history
-tables. A run writes `report.xlsx`, `summary.json`, and `findings.json` under
+tables. A run writes `report.xlsx`, `summary.json`, `findings.json`, and `history.json` under
 `CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/`.
+`validate history` refreshes `CENTRIC_API_HOME/validation/history/history.html`,
+`history.xlsx`, and `history.json` from first-class run `history.json` files.
 
 Useful options:
 
@@ -379,6 +384,8 @@ Useful options:
 - `--units-config PATH`: use an explicit unit registry.
 - `--db PATH`: use a non-default SQLite cache for `run`.
 - `--output-dir PATH`: choose the validation artifact root.
+- `--group day|week|month`: choose `validate history` grouping; default is `week`.
+- `--validator NAME`: filter `validate history`; repeat for multiple validators.
 - `--json`: emit machine-readable output.
 
 There are no bundled validators. Validator modules load from `CENTRIC_API_HOME/validators/*.py` by

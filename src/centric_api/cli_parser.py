@@ -471,6 +471,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_run_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
 
+    validate_history_parser = validate_actions.add_parser(
+        "history",
+        help="Refresh validation history artifacts from run history.json files",
+    )
+    validate_history_parser.add_argument(
+        "--group",
+        choices=("day", "week", "month"),
+        default="week",
+        help="Time bucket for grouped history points. Default: week.",
+    )
+    validate_history_parser.add_argument(
+        "--validator",
+        metavar="NAME",
+        action="append",
+        default=[],
+        help="Filter to one validator; repeat for multiple validators.",
+    )
+    validate_history_parser.add_argument(
+        "--runs-dir",
+        metavar="PATH",
+        default=None,
+        help="Validation runs root. Default: CENTRIC_API_HOME/validation/runs.",
+    )
+    validate_history_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="History output directory. Default: CENTRIC_API_HOME/validation/history.",
+    )
+    validate_history_parser.add_argument(
+        "--json", action="store_true", help="Emit one JSON object."
+    )
+
     map_parser = subparsers.add_parser("map", help="Generate local cache relationship maps")
     map_actions = map_parser.add_subparsers(dest="action", required=True)
 

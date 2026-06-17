@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 
 ValidationSeverity = Literal["error", "warning", "info"]
 ValidationStatus = Literal["ok", "attention", "failed"]
+ValidationHistoryUnit = Literal["percent", "count", "number"]
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,18 @@ class ValidationFindingTotals:
 
 
 @dataclass(frozen=True)
+class ValidationHistoryMetric:
+    metric: str
+    value: int | float
+    unit: ValidationHistoryUnit = "number"
+    scope: str = "overall"
+    brand: str | None = None
+    numerator: int | float | None = None
+    denominator: int | float | None = None
+    dimensions: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ValidationResult:
     summary: dict[str, Any]
     findings: tuple[ValidationFinding, ...] = ()
@@ -75,6 +88,7 @@ class ValidationResult:
     findings_export_limit: int | None = None
     sheets: tuple[ValidationSheet, ...] = ()
     report_workbook: bytes | None = None
+    history_metrics: tuple[ValidationHistoryMetric, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,6 +103,7 @@ class ValidationRunSummary:
     report_path: Path
     summary_path: Path
     findings_path: Path
+    history_path: Path
     finding_count: int
     error_count: int
     warning_count: int
