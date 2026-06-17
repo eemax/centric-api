@@ -240,6 +240,10 @@ def _validate_history_metrics(
             raise ConfigError(
                 f"Validator {validator_name} history metric {metric.metric} unit is invalid."
             )
+        if metric.trend not in {"up", "down", "neutral"}:
+            raise ConfigError(
+                f"Validator {validator_name} history metric {metric.metric} trend is invalid."
+            )
         if not metric.scope.strip():
             raise ConfigError(f"Validator {validator_name} history metric scope is required.")
         if not isinstance(metric.dimensions, dict) or any(

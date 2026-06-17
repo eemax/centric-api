@@ -133,9 +133,10 @@ Views are read-only and local: they do not call the Centric API.
 `validate history` command refreshes HTML, XLSX, and JSON history output from those first-class
 history metrics. Validators that should trend over time should emit explicit aggregated
 `ValidationHistoryMetric` values; use one metric per trend series, include `numerator` and
-`denominator` for percentages, and emit both overall and per-brand metric sets when brand comparison
-matters. Validation logic lives in private `CENTRIC_API_HOME/validators` modules or a directory
-passed with `--validators-dir`.
+`denominator` for percentages, set `trend` to `up`, `down`, or `neutral`, and emit both overall and
+per-brand metric sets when brand comparison matters. Metrics can also include low-cardinality
+dimensions, such as brand-season dimensions, for exact filters in the history view. Validation logic
+lives in private `CENTRIC_API_HOME/validators` modules or a directory passed with `--validators-dir`.
 
 `load` validates workbook rows and can send API requests to Centric. The repo includes
 `material-create`, which posts material rows to `/v2/materials`, and

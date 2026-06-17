@@ -17,16 +17,25 @@ h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: 0; }
 .meta { color: #5b6673; margin-bottom: 22px; }
 .controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; align-items: end; }
 label { display: grid; gap: 4px; font-size: 12px; color: #44515f; font-weight: 650; }
-select, input { min-width: 220px; padding: 8px 10px; border: 1px solid #c8d0d9; border-radius: 6px; background: white; font: inherit; }
+select, button { min-width: 220px; padding: 8px 10px; border: 1px solid #c8d0d9; border-radius: 6px; background: white; font: inherit; }
+select[multiple] { min-height: 118px; min-width: 260px; padding: 6px 8px; }
+button { min-width: auto; cursor: pointer; font-size: 12px; font-weight: 650; }
+.brand-control { align-self: stretch; }
+.filter-actions { display: flex; gap: 6px; }
 .panel { background: white; border: 1px solid #dbe1e8; border-radius: 8px; padding: 16px; }
 #chart { width: 100%; height: 520px; display: block; }
 .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; font-size: 12px; }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .swatch { width: 18px; height: 3px; display: inline-block; }
+.trend-note { color: #5b6673; font-size: 12px; margin-top: 8px; }
 table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
 th, td { border-bottom: 1px solid #e6ebf0; padding: 8px 10px; text-align: left; vertical-align: top; }
 th { background: #f1f4f7; font-size: 12px; color: #4b5967; }
 .empty { color: #6b7480; padding: 24px; }
+.movement { font-weight: 700; }
+.movement.good { color: #217346; }
+.movement.bad { color: #b42318; }
+.movement.flat, .movement.neutral, .movement.new { color: #5b6673; }
 </style>
 </head>
 <body>
@@ -37,14 +46,25 @@ th { background: #f1f4f7; font-size: 12px; color: #4b5967; }
   <label>Validator<select id="validator"></select></label>
   <label>Metric<select id="metric"></select></label>
   <label>Scope<select id="scope"></select></label>
-  <label>Brand filter<input id="brandFilter" placeholder="Type to filter brands"></label>
+  <label class="brand-control">Brands<select id="brandSelect" multiple size="6"></select></label>
+  <div class="filter-actions">
+    <button id="allBrands" type="button">All</button>
+    <button id="noBrands" type="button">None</button>
+  </div>
+  <label>Season Type<select id="seasonType"></select></label>
+  <label class="brand-control">Seasons<select id="seasonSelect" multiple size="6"></select></label>
+  <div class="filter-actions">
+    <button id="allSeasons" type="button">All</button>
+    <button id="noSeasons" type="button">None</button>
+  </div>
 </div>
 <section class="panel">
   <svg id="chart" role="img" aria-label="Validation metric history chart"></svg>
   <div id="legend" class="legend"></div>
+  <div id="trendNote" class="trend-note"></div>
 </section>
 <section class="panel" style="margin-top: 16px;">
-  <table id="latest"><thead><tr><th>Brand</th><th>Latest Bucket</th><th>Value</th><th>Run</th><th>Started</th></tr></thead><tbody></tbody></table>
+  <table id="latest"><thead><tr><th>Series</th><th>Latest Bucket</th><th>Value</th><th>Trend</th><th>Previous</th><th>Change</th><th>Movement</th><th>Started</th></tr></thead><tbody></tbody></table>
 </section>
 </main>
 <script>
@@ -54,13 +74,20 @@ const colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf"
 const validatorSelect = document.getElementById("validator");
 const metricSelect = document.getElementById("metric");
 const scopeSelect = document.getElementById("scope");
-const brandFilter = document.getElementById("brandFilter");
+const brandSelect = document.getElementById("brandSelect");
+const allBrandsButton = document.getElementById("allBrands");
+const noBrandsButton = document.getElementById("noBrands");
+const seasonTypeSelect = document.getElementById("seasonType");
+const seasonSelect = document.getElementById("seasonSelect");
+const allSeasonsButton = document.getElementById("allSeasons");
+const noSeasonsButton = document.getElementById("noSeasons");
 const chart = document.getElementById("chart");
 const legend = document.getElementById("legend");
+const trendNote = document.getElementById("trendNote");
 const latestBody = document.querySelector("#latest tbody");
 
 function unique(values) { return [...new Set(values.filter(Boolean))].sort(); }
-function fill(select, values) {
+function fill(select, values, preferred = "") {
   const current = select.value;
   select.innerHTML = "";
   for (const value of values) {
@@ -69,7 +96,47 @@ function fill(select, values) {
     option.textContent = value;
     select.appendChild(option);
   }
-  if (values.includes(current)) select.value = current;
+  if (current && values.includes(current)) select.value = current;
+  else if (preferred && values.includes(preferred)) select.value = preferred;
+}
+function fillBrands(values) {
+  const previous = new Set([...brandSelect.selectedOptions].map(option => option.value));
+  brandSelect.innerHTML = "";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    option.selected = previous.size === 0 || previous.has(value);
+    brandSelect.appendChild(option);
+  }
+  if (![...brandSelect.options].some(option => option.selected)) selectAllBrands();
+}
+function fillSeasonTypes(values, preferred = "") {
+  const current = seasonTypeSelect.value;
+  seasonTypeSelect.innerHTML = "";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = seasonTypeLabel(value);
+    seasonTypeSelect.appendChild(option);
+  }
+  if (current && values.includes(current)) seasonTypeSelect.value = current;
+  else if (preferred && values.includes(preferred)) seasonTypeSelect.value = preferred;
+}
+function fillSeasons(values) {
+  const previous = new Set([...seasonSelect.selectedOptions].map(option => option.value));
+  seasonSelect.innerHTML = "";
+  for (const value of values) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = value;
+    option.selected = previous.size === 0 || previous.has(value);
+    seasonSelect.appendChild(option);
+  }
+  seasonSelect.disabled = values.length === 0;
+  allSeasonsButton.disabled = values.length === 0;
+  noSeasonsButton.disabled = values.length === 0;
+  if (values.length && ![...seasonSelect.options].some(option => option.selected)) selectAllSeasons();
 }
 function init() {
   fill(validatorSelect, unique(points.map(p => p.validator)));
@@ -86,21 +153,79 @@ function refreshScopes() {
   const validator = validatorSelect.value;
   const metric = metricSelect.value;
   const subset = points.filter(p => p.validator === validator && p.metric === metric);
-  fill(scopeSelect, unique(subset.map(p => p.scope)));
+  fill(scopeSelect, unique(subset.map(p => p.scope)), "brand_season");
+  refreshSeasonTypes();
+  refreshBrands();
+}
+function refreshBrands() {
+  const selectedType = seasonTypeSelect.value;
+  const seasons = selectedSeasons();
+  const subset = selectedBasePoints().filter(p =>
+    (!selectedType || seasonType(p) === selectedType) &&
+    (!selectedType || seasons.has(seasonLabel(p)))
+  );
+  fillBrands(unique(subset.map(p => p.brand || "Overall")));
+}
+function refreshSeasonTypes() {
+  const subset = selectedBasePoints();
+  const types = unique(subset.map(p => seasonType(p)).filter(Boolean)).sort(seasonTypeSort);
+  fillSeasonTypes(types.length ? types : [""], "seasonal");
+  refreshSeasons();
+}
+function refreshSeasons() {
+  const selectedType = seasonTypeSelect.value;
+  const seasons = selectedType
+    ? unique(selectedBasePoints()
+        .filter(p => seasonType(p) === selectedType)
+        .map(p => seasonLabel(p))
+        .filter(Boolean))
+        .sort((a, b) => seasonSortKey(a).localeCompare(seasonSortKey(b)))
+    : [];
+  fillSeasons(seasons);
+}
+function selectedBasePoints() {
+  return points.filter(p =>
+    p.validator === validatorSelect.value &&
+    p.metric === metricSelect.value &&
+    p.scope === scopeSelect.value
+  );
+}
+function selectedBrands() {
+  return new Set([...brandSelect.selectedOptions].map(option => option.value));
+}
+function selectAllBrands() {
+  [...brandSelect.options].forEach(option => { option.selected = true; });
+}
+function selectNoBrands() {
+  [...brandSelect.options].forEach(option => { option.selected = false; });
+}
+function selectedSeasons() {
+  return new Set([...seasonSelect.selectedOptions].map(option => option.value));
+}
+function selectAllSeasons() {
+  [...seasonSelect.options].forEach(option => { option.selected = true; });
+}
+function selectNoSeasons() {
+  [...seasonSelect.options].forEach(option => { option.selected = false; });
 }
 function filteredPoints() {
-  const brandText = brandFilter.value.trim().toLowerCase();
+  const brands = selectedBrands();
+  const selectedType = seasonTypeSelect.value;
+  const seasons = selectedSeasons();
   return points.filter(p =>
     p.validator === validatorSelect.value &&
     p.metric === metricSelect.value &&
     p.scope === scopeSelect.value &&
-    (!brandText || String(p.brand || "Overall").toLowerCase().includes(brandText))
+    brands.has(p.brand || "Overall") &&
+    (!selectedType || seasonType(p) === selectedType) &&
+    (!selectedType || seasons.has(seasonLabel(p)))
   );
 }
 function draw() {
   const selected = filteredPoints();
   chart.innerHTML = "";
   legend.innerHTML = "";
+  trendNote.textContent = "";
   latestBody.innerHTML = "";
   if (!selected.length) {
     chart.innerHTML = '<text x="24" y="48" class="empty">No matching history metrics.</text>';
@@ -110,10 +235,13 @@ function draw() {
   const height = chart.clientHeight || 520;
   const margin = {left: 56, right: 24, top: 24, bottom: 54};
   const buckets = unique(selected.map(p => p.bucket));
-  const seriesNames = unique(selected.map(p => p.brand || "Overall"));
-  const maxValue = Math.max(1, ...selected.map(p => Number(p.value) || 0));
-  const x = bucket => margin.left + (buckets.indexOf(bucket) / Math.max(1, buckets.length - 1)) * (width - margin.left - margin.right);
-  const y = value => height - margin.bottom - (Number(value) / maxValue) * (height - margin.top - margin.bottom);
+  const seriesKeys = unique(selected.map(seriesKey));
+  const domain = valueDomain(selected);
+  const trend = selected[0]?.trend || "neutral";
+  const x = bucket => buckets.length === 1
+    ? margin.left + (width - margin.left - margin.right) / 2
+    : margin.left + (buckets.indexOf(bucket) / (buckets.length - 1)) * (width - margin.left - margin.right);
+  const y = value => height - margin.bottom - ((Number(value) - domain.min) / Math.max(1, domain.max - domain.min)) * (height - margin.top - margin.bottom);
   const ns = "http://www.w3.org/2000/svg";
   function el(name, attrs) {
     const node = document.createElementNS(ns, name);
@@ -124,49 +252,179 @@ function draw() {
   el("line", {x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, stroke: "#b8c2cc"});
   el("line", {x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, stroke: "#b8c2cc"});
   for (let i = 0; i <= 4; i++) {
-    const value = (maxValue / 4) * i;
+    const value = domain.min + ((domain.max - domain.min) / 4) * i;
     const yy = y(value);
     el("line", {x1: margin.left, y1: yy, x2: width - margin.right, y2: yy, stroke: "#edf1f5"});
     const label = el("text", {x: 8, y: yy + 4, fill: "#5b6673", "font-size": "12"});
-    label.textContent = value.toFixed(value >= 10 ? 0 : 1);
+    label.textContent = formatAxisValue(value, selected[0]?.unit);
   }
   buckets.forEach((bucket, index) => {
     const label = el("text", {x: x(bucket), y: height - 20, fill: "#5b6673", "font-size": "12", "text-anchor": "middle"});
     label.textContent = buckets.length > 12 && index % Math.ceil(buckets.length / 12) ? "" : bucket;
   });
   const latest = new Map();
-  seriesNames.forEach((name, index) => {
-    const series = selected.filter(p => (p.brand || "Overall") === name);
+  seriesKeys.forEach((key, index) => {
+    const series = selected.filter(p => seriesKey(p) === key);
     const d = series.map(p => `${x(p.bucket)},${y(p.value)}`).join(" ");
     const color = colors[index % colors.length];
     el("polyline", {points: d, fill: "none", stroke: color, "stroke-width": 2.2});
     for (const point of series) {
-      el("circle", {cx: x(point.bucket), cy: y(point.value), r: 3, fill: color});
-      const previous = latest.get(name);
-      if (!previous || point.bucket_start > previous.bucket_start) latest.set(name, point);
+      el("circle", {
+        cx: x(point.bucket),
+        cy: y(point.value),
+        r: 4.5,
+        fill: color,
+        stroke: "#ffffff",
+        "stroke-width": 1.6,
+      });
+      const previous = latest.get(key);
+      if (!previous || point.bucket_start > previous.bucket_start) latest.set(key, point);
     }
     const item = document.createElement("span");
     const swatch = document.createElement("i");
     swatch.className = "swatch";
     swatch.style.background = color;
     item.appendChild(swatch);
-    item.appendChild(document.createTextNode(name));
+    item.appendChild(document.createTextNode(seriesLabel(series[0])));
     legend.appendChild(item);
   });
-  [...latest.entries()].sort((a, b) => a[0].localeCompare(b[0])).forEach(([brand, point]) => {
+  trendNote.textContent = trendHelp(trend);
+  [...latest.entries()].sort((a, b) => seriesLabel(a[1]).localeCompare(seriesLabel(b[1]))).forEach(([_key, point]) => {
+    const previous = previousPoint(selected, point);
+    const movement = movementStatus(point, previous);
     const row = document.createElement("tr");
-    for (const value of [brand, point.bucket, `${point.value} ${point.unit}`, point.run_id, point.started_at]) {
+    const values = [
+      seriesLabel(point),
+      point.bucket,
+      `${point.value} ${point.unit}`,
+      trendLabel(point.trend),
+      previous ? String(previous.value) : "",
+      changeLabel(point, previous),
+      movement.label,
+      formatTimestamp(point.started_at),
+    ];
+    values.forEach((value, index) => {
       const cell = document.createElement("td");
       cell.textContent = value;
+      if (index === 6) cell.className = `movement ${movement.className}`;
       row.appendChild(cell);
-    }
+    });
     latestBody.appendChild(row);
   });
 }
+function valueDomain(selected) {
+  const values = selected.map(p => Number(p.value)).filter(Number.isFinite);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const unit = selected[0]?.unit || "number";
+  if (unit === "percent") {
+    const pad = min === max ? 5 : Math.max((max - min) * 0.12, 1);
+    let yMin = Math.max(0, min - pad);
+    let yMax = Math.min(100, max + pad);
+    if (yMin === yMax) {
+      yMin = Math.max(0, yMin - 5);
+      yMax = Math.min(100, yMax + 5);
+    }
+    if (yMin === yMax) yMax = yMin + 1;
+    return {min: yMin, max: yMax};
+  }
+  const pad = min === max ? Math.max(Math.abs(max) * 0.1, 1) : Math.max((max - min) * 0.12, 1);
+  const yMin = min >= 0 ? Math.max(0, min - pad) : min - pad;
+  return {min: yMin, max: max + pad};
+}
+function formatAxisValue(value, unit) {
+  if (unit === "percent") return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
+  return value.toFixed(Math.abs(value) >= 10 ? 0 : 1);
+}
+function formatTimestamp(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}` : String(value || "");
+}
+function trendLabel(trend) {
+  if (trend === "up") return "Higher is better";
+  if (trend === "down") return "Lower is better";
+  return "Neutral";
+}
+function trendHelp(trend) {
+  if (trend === "up") return "Trend intent: higher values are better.";
+  if (trend === "down") return "Trend intent: lower values are better.";
+  return "Trend intent: neutral context metric.";
+}
+function previousPoint(selected, latest) {
+  const series = selected
+    .filter(p => seriesKey(p) === seriesKey(latest))
+    .sort((a, b) => a.bucket_start.localeCompare(b.bucket_start));
+  const index = series.findIndex(p => p.bucket_start === latest.bucket_start && p.run_id === latest.run_id);
+  return index > 0 ? series[index - 1] : null;
+}
+function seasonType(point) {
+  return point.dimensions?.season_type || "";
+}
+function seasonLabel(point) {
+  return point.dimensions?.season_label || "";
+}
+function seriesKey(point) {
+  return `${point.brand || "Overall"}\\u0000${seasonType(point)}\\u0000${seasonLabel(point)}`;
+}
+function seriesLabel(point) {
+  const brand = point.brand || "Overall";
+  const season = seasonLabel(point);
+  return season ? `${brand} · ${season}` : brand;
+}
+function seasonTypeLabel(value) {
+  if (value === "cycle") return "Cycle";
+  if (value === "seasonal") return "Seasonal";
+  if (value === "fiscal") return "Fiscal";
+  if (value === "unknown") return "Unknown";
+  return "No season split";
+}
+function seasonTypeSort(a, b) {
+  return seasonTypeOrder(a) - seasonTypeOrder(b);
+}
+function seasonTypeOrder(value) {
+  return {cycle: 1, seasonal: 2, fiscal: 3, unknown: 4, "": 99}[value] || 98;
+}
+function seasonSortKey(label) {
+  const text = String(label || "").toUpperCase();
+  const year = text.match(/(\d{2,4})$/)?.[1] || text.match(/(\d{2,4})/)?.[1] || "9999";
+  const normalizedYear = year.length === 2 ? `20${year}` : year;
+  let slot = 99;
+  if (/^1C|1C$/.test(text)) slot = 1;
+  else if (/^2C|2C$/.test(text)) slot = 2;
+  else if (/^3C|3C$/.test(text)) slot = 3;
+  else if (/^SS|^SP|SS$|SP$/.test(text)) slot = 1;
+  else if (/^AW|^FW|^FA|AW$|FW$|FA$/.test(text)) slot = 2;
+  else if (/^FY|FY$/.test(text)) slot = 1;
+  return `${normalizedYear.padStart(4, "0")}-${String(slot).padStart(2, "0")}-${text}`;
+}
+function changeLabel(point, previous) {
+  if (!previous) return "";
+  const change = Number(point.value) - Number(previous.value);
+  const sign = change > 0 ? "+" : "";
+  return `${sign}${change.toFixed(Math.abs(change) >= 10 ? 0 : 2)}`;
+}
+function movementStatus(point, previous) {
+  if (!previous) return {label: "New", className: "new"};
+  const change = Number(point.value) - Number(previous.value);
+  if (change === 0) return {label: "Flat", className: "flat"};
+  if (point.trend === "up") return change > 0
+    ? {label: "Good", className: "good"}
+    : {label: "Worse", className: "bad"};
+  if (point.trend === "down") return change < 0
+    ? {label: "Good", className: "good"}
+    : {label: "Worse", className: "bad"};
+  return {label: "Changed", className: "neutral"};
+}
 validatorSelect.addEventListener("change", () => { refreshMetrics(); draw(); });
 metricSelect.addEventListener("change", () => { refreshScopes(); draw(); });
-scopeSelect.addEventListener("change", draw);
-brandFilter.addEventListener("input", draw);
+scopeSelect.addEventListener("change", () => { refreshSeasonTypes(); refreshBrands(); draw(); });
+brandSelect.addEventListener("change", draw);
+allBrandsButton.addEventListener("click", () => { selectAllBrands(); draw(); });
+noBrandsButton.addEventListener("click", () => { selectNoBrands(); draw(); });
+seasonTypeSelect.addEventListener("change", () => { refreshSeasons(); refreshBrands(); draw(); });
+seasonSelect.addEventListener("change", () => { refreshBrands(); draw(); });
+allSeasonsButton.addEventListener("click", () => { selectAllSeasons(); refreshBrands(); draw(); });
+noSeasonsButton.addEventListener("click", () => { selectNoSeasons(); refreshBrands(); draw(); });
 window.addEventListener("resize", draw);
 init();
 </script>

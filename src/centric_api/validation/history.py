@@ -14,7 +14,7 @@ HistoryGroup = Literal["day", "week", "month"]
 
 DEFAULT_VALIDATION_HISTORY_DIR = Path("validation/history")
 DEFAULT_VALIDATION_RUNS_DIR = Path("validation/runs")
-HISTORY_SCHEMA_VERSION = 1
+HISTORY_SCHEMA_VERSION = 2
 HISTORY_ARTIFACT_NAME = "history.json"
 HISTORY_OUTPUT_JSON = "history.json"
 HISTORY_OUTPUT_XLSX = "history.xlsx"
@@ -136,8 +136,15 @@ def _history_point(
     value = _numeric_value(metric.get("value"))
     if not metric_name or value is None:
         return None
-    unit = str(metric.get("unit") or "number")
-    scope = str(metric.get("scope") or "overall")
+    unit = str(metric.get("unit") or "")
+    trend = str(metric.get("trend") or "")
+    scope = str(metric.get("scope") or "")
+    if unit not in {"percent", "count", "number"}:
+        return None
+    if trend not in {"up", "down", "neutral"}:
+        return None
+    if not scope.strip():
+        return None
     brand = metric.get("brand")
     dimensions = metric.get("dimensions")
     return {
@@ -152,6 +159,7 @@ def _history_point(
         "metric": metric_name,
         "value": value,
         "unit": unit,
+        "trend": trend,
         "numerator": _numeric_value(metric.get("numerator")),
         "denominator": _numeric_value(metric.get("denominator")),
         "dimensions": dimensions if isinstance(dimensions, dict) else {},
@@ -163,7 +171,7 @@ def _history_point(
 def _group_latest_points(
     points: list[dict[str, Any]], *, group: HistoryGroup
 ) -> list[dict[str, Any]]:
-    grouped: dict[tuple[str, str, str, str, str | None, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str, str, str | None, str, str], dict[str, Any]] = {}
     for point in points:
         started_at = _parse_datetime(str(point["started_at"]))
         if started_at is None:
@@ -175,6 +183,7 @@ def _group_latest_points(
             str(point["unit"]),
             str(point["scope"]),
             point.get("brand"),
+            _dimension_key(point.get("dimensions")),
             _isoformat(bucket_start),
         )
         current = grouped.get(key)
@@ -191,6 +200,7 @@ def _group_latest_points(
             item["metric"],
             item["scope"],
             item.get("brand") or "",
+            _dimension_key(item.get("dimensions")),
             item["bucket_start"],
         ),
     )
@@ -205,7 +215,7 @@ def _history_payload(
     points: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": HISTORY_SCHEMA_VERSION,
         "generated_at": _isoformat(datetime.now(UTC)),
         "group": group,
         "runs_dir": str(runs_dir),
@@ -289,6 +299,11 @@ def _point_rows(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "brand": point.get("brand"),
             "value": point["value"],
             "unit": point["unit"],
+            "trend": point.get("trend"),
+            "season_type": _dimension_value(point, "season_type"),
+            "season_year": _dimension_value(point, "season_year"),
+            "season_slot": _dimension_value(point, "season_slot"),
+            "season_label": _dimension_value(point, "season_label"),
             "numerator": point.get("numerator"),
             "denominator": point.get("denominator"),
             "run_id": point["run_id"],
@@ -301,12 +316,6 @@ def _point_rows(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _latest_rows(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    latest: dict[tuple[str, str, str, str | None], dict[str, Any]] = {}
-    for point in points:
-        key = (point["validator"], point["metric"], point["scope"], point.get("brand"))
-        current = latest.get(key)
-        if current is None or point["bucket_start"] > current["bucket_start"]:
-            latest[key] = point
     rows = [
         {
             "validator": point["validator"],
@@ -316,22 +325,104 @@ def _latest_rows(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "latest_bucket": point["bucket"],
             "value": point["value"],
             "unit": point["unit"],
+            "trend": point.get("trend"),
+            "season_type": _dimension_value(point, "season_type"),
+            "season_year": _dimension_value(point, "season_year"),
+            "season_slot": _dimension_value(point, "season_slot"),
+            "season_label": _dimension_value(point, "season_label"),
+            "previous_value": point.get("previous_value"),
+            "change": point.get("change"),
+            "change_percent": point.get("change_percent"),
+            "movement": point.get("movement"),
             "numerator": point.get("numerator"),
             "denominator": point.get("denominator"),
             "run_id": point["run_id"],
             "started_at": point["started_at"],
         }
-        for point in sorted(
-            latest.values(),
-            key=lambda item: (
-                item["validator"],
-                item["metric"],
-                item["scope"],
-                item.get("brand") or "",
-            ),
-        )
+        for point in _latest_points(points)
     ]
     return rows or [{"message": "No validation history metrics found."}]
+
+
+def _latest_points(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, str, str | None, str], list[dict[str, Any]]] = {}
+    for point in points:
+        key = (
+            point["validator"],
+            point["metric"],
+            point["unit"],
+            point["scope"],
+            point.get("brand"),
+            _dimension_key(point.get("dimensions")),
+        )
+        grouped.setdefault(key, []).append(point)
+    latest_points = []
+    for series in grouped.values():
+        ordered = sorted(series, key=lambda point: point["bucket_start"])
+        latest = ordered[-1]
+        previous = ordered[-2] if len(ordered) > 1 else None
+        latest_points.append(_with_movement(latest, previous))
+    return sorted(
+        latest_points,
+        key=lambda item: (
+            item["validator"],
+            item["metric"],
+            item["scope"],
+            item.get("brand") or "",
+            _dimension_key(item.get("dimensions")),
+        ),
+    )
+
+
+def _dimension_key(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return json.dumps(
+        {str(key): str(item) for key, item in sorted(value.items())},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _dimension_value(point: dict[str, Any], key: str) -> str | None:
+    dimensions = point.get("dimensions")
+    if not isinstance(dimensions, dict):
+        return None
+    value = dimensions.get(key)
+    return str(value) if value is not None else None
+
+
+def _with_movement(
+    point: dict[str, Any],
+    previous: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if previous is None:
+        return {
+            **point,
+            "previous_value": None,
+            "change": None,
+            "change_percent": None,
+            "movement": "new",
+        }
+    value = float(point["value"])
+    previous_value = float(previous["value"])
+    change = value - previous_value
+    if change == 0:
+        movement = "flat"
+    elif point.get("trend") == "up":
+        movement = "good" if change > 0 else "bad"
+    elif point.get("trend") == "down":
+        movement = "good" if change < 0 else "bad"
+    else:
+        movement = "neutral"
+    change_percent = None if previous_value == 0 else round((change / abs(previous_value)) * 100, 2)
+    return {
+        **point,
+        "previous_value": previous["value"],
+        "change": int(change) if change.is_integer() else round(change, 2),
+        "change_percent": change_percent,
+        "movement": movement,
+    }
 
 
 def _run_rows(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -387,7 +478,7 @@ def _format_sheet(
 def _write_html(path: Path, payload: dict[str, Any]) -> None:
     html = _validation_history_template()
     replacements = {
-        "__GENERATED_AT__": str(payload["generated_at"]),
+        "__GENERATED_AT__": _display_timestamp(str(payload["generated_at"])),
         "__GROUP__": str(payload["group"]),
         "__POINT_COUNT__": str(payload["point_count"]),
         "__RUN_COUNT__": str(payload["run_count"]),
@@ -414,6 +505,13 @@ def _validation_history_template() -> str:
 
 def _script_json(value: Any, *, sort_keys: bool = False) -> str:
     return json.dumps(value, sort_keys=sort_keys, default=str).replace("</", "<\\/")
+
+
+def _display_timestamp(value: str) -> str:
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        return value
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:

@@ -127,6 +127,7 @@ def history_metric_record(metric: ValidationHistoryMetric) -> dict[str, Any]:
         "metric": metric.metric,
         "value": metric.value,
         "unit": metric.unit,
+        "trend": metric.trend,
         "numerator": metric.numerator,
         "denominator": metric.denominator,
         "dimensions": metric.dimensions,
@@ -138,7 +139,7 @@ def _history_payload(
     run_record: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "validator": run_record["validator"],
         "title": run_record["title"],
         "run_id": run_record["run_id"],

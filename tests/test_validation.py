@@ -405,6 +405,8 @@ def test_validation_artifacts_write_history_metrics(tmp_path: Path) -> None:
                 metric="Style Completion %",
                 value=40.0,
                 unit="percent",
+                trend="up",
+                scope="overall",
                 numerator=4,
                 denominator=10,
             ),
@@ -429,7 +431,7 @@ def test_validation_artifacts_write_history_metrics(tmp_path: Path) -> None:
     )
 
     payload = json.loads(history_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["validator"] == "style-readiness"
     assert payload["metrics"] == [
         {
@@ -439,6 +441,7 @@ def test_validation_artifacts_write_history_metrics(tmp_path: Path) -> None:
             "metric": "Style Completion %",
             "numerator": 4,
             "scope": "overall",
+            "trend": "up",
             "unit": "percent",
             "value": 40.0,
         }
@@ -595,6 +598,37 @@ def test_validation_run_rejects_invalid_history_metric(
 
     captured = capsys.readouterr()
     assert "history metric Style Completion % value must be finite" in captured.err
+
+
+def test_validation_run_rejects_invalid_history_metric_trend(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    validators_dir = tmp_path / "validators"
+    validators_dir.mkdir()
+    _write_invalid_history_metric_trend_validator(validators_dir / "invalid_history_trend.py")
+    _seed_styles_cache(db_path)
+
+    assert (
+        main(
+            [
+                "validate",
+                "--validators-dir",
+                str(validators_dir),
+                "run",
+                "invalid-history-trend",
+                "--db",
+                str(db_path),
+                "--output-dir",
+                str(tmp_path / "validation-runs"),
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert "history metric Active Styles trend is invalid" in captured.err
 
 
 def test_validate_run_all_requires_private_validators(
@@ -852,12 +886,52 @@ class InvalidHistoryMetricValidator:
                     metric="Style Completion %",
                     value=float("nan"),
                     unit="percent",
+                    trend="up",
+                    scope="overall",
                 ),
             ),
         )
 
 
 VALIDATOR = InvalidHistoryMetricValidator()
+""",
+        encoding="utf-8",
+    )
+
+
+def _write_invalid_history_metric_trend_validator(path: Path) -> None:
+    path.write_text(
+        """
+from centric_api.validation import (
+    ValidationDefinition,
+    ValidationHistoryMetric,
+    ValidationResult,
+)
+
+
+class InvalidHistoryTrendValidator:
+    definition = ValidationDefinition(
+        name="invalid-history-trend",
+        title="Invalid History Trend",
+        required_endpoints=("styles",),
+    )
+
+    def run(self, ctx):
+        return ValidationResult(
+            summary={},
+            history_metrics=(
+                ValidationHistoryMetric(
+                    metric="Active Styles",
+                    value=1,
+                    unit="count",
+                    trend="sideways",
+                    scope="overall",
+                ),
+            ),
+        )
+
+
+VALIDATOR = InvalidHistoryTrendValidator()
 """,
         encoding="utf-8",
     )

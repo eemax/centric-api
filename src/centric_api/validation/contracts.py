@@ -8,6 +8,7 @@ from typing import Any, Literal, Protocol
 ValidationSeverity = Literal["error", "warning", "info"]
 ValidationStatus = Literal["ok", "attention", "failed"]
 ValidationHistoryUnit = Literal["percent", "count", "number"]
+ValidationHistoryTrend = Literal["up", "down", "neutral"]
 
 
 @dataclass(frozen=True)
@@ -71,8 +72,9 @@ class ValidationFindingTotals:
 class ValidationHistoryMetric:
     metric: str
     value: int | float
-    unit: ValidationHistoryUnit = "number"
-    scope: str = "overall"
+    unit: ValidationHistoryUnit
+    trend: ValidationHistoryTrend
+    scope: str
     brand: str | None = None
     numerator: int | float | None = None
     denominator: int | float | None = None

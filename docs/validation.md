@@ -109,6 +109,8 @@ return ValidationResult(
             metric="Style Completion %",
             value=ready_styles / len(styles) * 100,
             unit="percent",
+            trend="up",
+            scope="overall",
             numerator=ready_styles,
             denominator=len(styles),
         ),
@@ -116,6 +118,8 @@ return ValidationResult(
             metric="Active Styles",
             value=len(styles),
             unit="count",
+            trend="neutral",
+            scope="overall",
         ),
     ),
 )
@@ -134,14 +138,18 @@ the same run. The history builder groups points by this identity:
 validator + metric + unit + scope + brand + time bucket
 ```
 
-Within one time bucket, such as one week, the latest run wins for each identity. Keep these fields
-stable across releases:
+`dimensions` are also part of that identity when present, so a brand-season metric is kept separate
+from the same brand metric and from other seasons in the same bucket. Within one time bucket, such as
+one week, the latest run wins for each identity. Keep these fields stable across releases:
 
 - `metric`: human-readable series name, for example `Style Completion %` or `Active Styles`.
 - `unit`: use `percent` for percentages, `count` for integer counts, and `number` for other numeric
   values.
-- `scope`: use `overall` for all-record metrics and `brand` for brand-specific metrics.
-- `brand`: set only for brand-scoped metrics.
+- `trend`: use `up` when higher is better, `down` when lower is better, and `neutral` for context
+  metrics.
+- `scope`: use `overall` for all-record metrics, `brand` for brand-specific metrics, and
+  `brand_season` when the same brand metric should be split by season.
+- `brand`: set for brand-scoped metrics, including `brand_season`.
 - `numerator` and `denominator`: include them for percentages so future reports can explain the
   exact ratio behind the percentage.
 - `dimensions`: optional string metadata for later filtering. Keep it sparse and low-cardinality.
@@ -152,6 +160,27 @@ signals that make sense over time. A good readiness validator usually emits:
 - one or two percentage metrics, such as style completion and material completion
 - supporting counts for active, ready, failed, and issue-bearing records
 - both overall and per-brand versions of the same metric set when brand comparison matters
+- optional per-brand-season versions when season filtering matters
+
+Trend direction is independent from the numeric value. Completion percentages usually use
+`trend="up"`, blocking issue and fix-item counts usually use `trend="down"`, and population metrics
+such as active style counts usually use `trend="neutral"`.
+
+For season-aware private validators, emit `scope="brand_season"` with these dimension keys:
+
+```python
+{
+    "season_type": "cycle",      # cycle, seasonal, fiscal, or unknown
+    "season_year": "2026",       # four-digit year
+    "season_slot": "1C",         # 1C/2C/3C, SS/AW, or FY
+    "season_label": "1C26",      # display label
+}
+```
+
+The history UI allows one season type at a time and exact multi-select season filtering. Cycle
+seasons sort as `1C`, `2C`, `3C`; seasonal values sort as `SS`, then `AW`; fiscal values sort by
+year. Values that do not match one of those three season groups should use `season_type="unknown"`
+and `season_label="UNKNOWN"`.
 
 Prefer helper functions that build the overall metrics first, then loop over the same grouped data
 for per-brand metrics:
@@ -173,6 +202,7 @@ def readiness_metrics(results, *, brand=None):
             metric="Style Completion %",
             value=round((ready / active) * 100, 2) if active else 0.0,
             unit="percent",
+            trend="up",
             scope=scope,
             brand=brand,
             numerator=ready,
@@ -182,6 +212,7 @@ def readiness_metrics(results, *, brand=None):
             metric="Active Styles",
             value=active,
             unit="count",
+            trend="neutral",
             scope=scope,
             brand=brand,
         ),
@@ -230,7 +261,7 @@ JSON/XLSX artifacts to include the first `N` rows. `findings.json` always uses t
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "validator": "style-readiness",
   "run_id": "20260617T043001Z-style-readiness-e207690a",
   "started_at": "2026-06-17T04:30:01Z",
@@ -242,6 +273,7 @@ JSON/XLSX artifacts to include the first `N` rows. `findings.json` always uses t
       "metric": "Style Completion %",
       "value": 42.4,
       "unit": "percent",
+      "trend": "up",
       "numerator": 120,
       "denominator": 283,
       "dimensions": {}
@@ -339,10 +371,13 @@ CENTRIC_API_HOME/validation/history/
   history.json
 ```
 
-The HTML file is a self-contained graph and latest-value table. The XLSX file has grouped history,
-latest values, and source runs. The JSON file is the canonical aggregated data for other tools.
-Only run artifacts that contain schema version `1` `history.json` files participate; old runs
-without history files are ignored by design.
+The HTML file is a self-contained graph and latest-value table. It scales the selected metric around
+its observed range and uses `trend` to label whether the latest movement is good, worse, flat, or
+neutral. Brand and season filters are exact multi-select controls. The XLSX file has grouped
+history, latest values with previous/change/movement and season dimension columns, and source runs.
+The JSON file is the canonical aggregated data for other tools.
+Only run artifacts that contain schema version `2` `history.json` files participate; old runs and
+runs without history files are ignored by design.
 
 ## Context Helpers
 
