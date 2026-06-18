@@ -64,6 +64,7 @@ def top_level_help(*, color: bool = False) -> str:
             command("fetch", "Pull Centric records into SQLite"),
             command("view", "Export cache data to Excel/CSV"),
             command("validate", "Run private cache validation reports"),
+            command("snapshot", "Build private modeled JSONL snapshots"),
             command("load", "Validate Excel rows and push data to Centric"),
             command("map", "Generate endpoint relationship maps"),
             command("changelog", "Review changed records and actor activity"),
@@ -98,6 +99,11 @@ def top_level_help(*, color: bool = False) -> str:
             example(
                 ("binary", "centric-api"),
                 ("command", "validate"),
+                ("command", "list"),
+            ),
+            example(
+                ("binary", "centric-api"),
+                ("command", "snapshot"),
                 ("command", "list"),
             ),
             example(

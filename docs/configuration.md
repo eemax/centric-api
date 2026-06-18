@@ -20,6 +20,8 @@ locks, raw evidence, downloads, bundles, and the default SQLite database.
 | Units config | `config/units.yml` plus private overlay when present | `CENTRIC_API_HOME/units.yml` | `--units-config` |
 | Model modules | n/a | `CENTRIC_API_HOME/models/*.py` | `--models-dir` |
 | Validator modules | n/a | `CENTRIC_API_HOME/validators/*.py` | `--validators-dir` |
+| Snapshot modules | n/a | `CENTRIC_API_HOME/snapshots/*.py` | `--snapshots-dir` |
+| Snapshot output | n/a | `CENTRIC_API_HOME/snapshot/workspaces/<name>/<target>` | `--output-dir`, `--target` |
 
 Relative runtime paths inside configs resolve under `CENTRIC_API_HOME`. Absolute paths and `~` are
 respected.

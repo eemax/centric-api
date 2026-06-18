@@ -141,7 +141,7 @@ uv run centric-api swagger history --diffs
 uv run centric-api swagger endpoints
 uv run centric-api swagger fields --endpoint styles --method get
 uv run centric-api swagger field 42
-uv run centric-api swagger field --endpoint styles nwg_style_brand_category_enum
+uv run centric-api swagger field --endpoint styles custom_style_brand_category_enum
 uv run centric-api swagger diff
 uv run centric-api swagger diff --history 0 1
 uv run centric-api swagger coverage
@@ -176,7 +176,7 @@ Actions:
 - `field`: inspects one field without truncating enum values. Without `--endpoint`, the selector
   must be a global field index copied from `swagger fields`, such as `swagger field 42`. With
   `--endpoint`, the selector is interpreted as a field name, such as
-  `swagger field --endpoint styles nwg_style_brand_category_enum`; numeric-looking names remain
+  `swagger field --endpoint styles custom_style_brand_category_enum`; numeric-looking names remain
   names in this mode. Use `--method` or `--include-nested` to narrow endpoint-scoped name matches.
 - `diff`: shows field-first schema drift from metadata, compares the current Swagger against another
   file with `--against PATH`, or compares two history snapshots with
@@ -392,6 +392,38 @@ Useful options:
 There are no bundled validators. Validator modules load from `CENTRIC_API_HOME/validators/*.py` by
 default, or from `--validators-dir PATH`. See [Validation](validation.md) for the validator contract,
 context helpers, artifact shape, and private authoring guidance.
+
+## Snapshots
+
+```bash
+uv run centric-api snapshot list
+uv run centric-api snapshot show dpp
+uv run centric-api snapshot check dpp
+uv run centric-api snapshot build dpp
+uv run centric-api snapshot build dpp --target baseline
+uv run centric-api snapshot promote dpp
+uv run centric-api snapshot build dpp --output-dir ~/review-repos/snapshots
+```
+
+`snapshot` runs private cache modeling/grouping modules and writes deterministic JSONL directories
+for Git review workflows. Builds write to a snapshot workspace target: `candidate` by default, or
+`baseline` when explicitly selected. `snapshot promote` copies reviewed candidate artifacts to
+baseline exactly. There are no bundled snapshots. Private modules load from
+`CENTRIC_API_HOME/snapshots/*.py` by default, or from `--snapshots-dir PATH`.
+
+Useful options:
+
+- `--snapshots-dir PATH`: load private snapshots from a specific directory.
+- `--units-config PATH`: use an explicit unit registry.
+- `--db PATH`: use a non-default SQLite cache for `check` or `build`.
+- `--output-dir PATH`: choose the snapshot workspace root for `build`.
+- `--target candidate|baseline`: choose the workspace target for `build`; default is `candidate`.
+- `promote`: copy `candidate/` to `baseline/` after review.
+- `--clean`: replace non-hidden contents in the selected snapshot target while preserving hidden
+  directories such as `.git`.
+- `--json`: emit machine-readable output.
+
+See [Snapshots](snapshot.md) for the private module contract and artifact rules.
 
 ## Load Jobs
 

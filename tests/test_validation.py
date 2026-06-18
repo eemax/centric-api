@@ -749,7 +749,7 @@ class StyleNameValidator:
                 "artifact_timestamp": ctx.artifact_timestamp,
                 "value_sets": {
                     "Product Group": {
-                        "path": "/tmp/styles.nwg_style_product_group.xlsx",
+                        "path": "/tmp/styles.custom_style_product_group.xlsx",
                         "found": True,
                         "validation": "enabled",
                         "value_count": 104,

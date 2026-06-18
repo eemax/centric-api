@@ -11,6 +11,7 @@ Docs:
 - [Load jobs](docs/load.md)
 - [Modeling spec](docs/modeling.md)
 - [Operations](docs/operations.md)
+- [Snapshots](docs/snapshot.md)
 - [Units](docs/units.md)
 - [Validation](docs/validation.md)
 - [View exports](docs/views.md)
@@ -40,6 +41,8 @@ uv run centric-api model check my-model
 uv run centric-api validate list
 uv run centric-api validate run my-validator
 uv run centric-api validate history
+uv run centric-api snapshot list
+uv run centric-api snapshot build dpp
 uv run centric-api units convert 1500 g kg
 uv run centric-api units basis gsm
 uv run centric-api status

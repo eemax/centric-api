@@ -158,7 +158,7 @@ def test_swagger_diff_human_output_does_not_truncate_long_field_values(
     previous["definitions"]["StyleCreate"]["properties"]["code"]["enum"] = ["OLD001"]
     previous_path.write_text(json.dumps(previous), encoding="utf-8")
     current["definitions"]["StyleCreate"]["properties"]["code"]["enum"] = [
-        "NWG_BrandCategory:" + ", ".join(f"Value {index:02d}" for index in range(50))
+        "DemoBrandCategory:" + ", ".join(f"Value {index:02d}" for index in range(50))
     ]
     _write_home_swagger(tmp_path, monkeypatch, current)
 
@@ -179,7 +179,7 @@ def test_swagger_diff_human_output_does_not_truncate_long_field_values(
     output = capsys.readouterr().out
     assert exit_code == 1
     assert "code enum +1 -1" in output
-    assert "+ NWG_BrandCategory:" in output
+    assert "+ DemoBrandCategory:" in output
     assert "- OLD001" in output
     assert "Value 49" in output
     assert "..." not in output
@@ -589,7 +589,7 @@ def test_swagger_field_inspects_global_index_with_full_enum(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     document = _swagger_doc()
-    long_enum = "NWG_BrandCategory:" + ", ".join(f"Value {index:02d}" for index in range(50))
+    long_enum = "DemoBrandCategory:" + ", ".join(f"Value {index:02d}" for index in range(50))
     document["definitions"]["StyleCreate"]["properties"]["code"]["enum"] = [long_enum]
     _write_home_swagger(tmp_path, monkeypatch, document)
 
@@ -651,7 +651,7 @@ def test_swagger_fields_endpoint_human_output_truncates_long_cells(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     document = _swagger_doc()
-    long_enum = "NWG_BrandCategory:" + ", ".join(f"Value {index:02d}" for index in range(50))
+    long_enum = "DemoBrandCategory:" + ", ".join(f"Value {index:02d}" for index in range(50))
     document["definitions"]["StyleCreate"]["properties"]["code"]["enum"] = [long_enum]
     _write_home_swagger(tmp_path, monkeypatch, document)
 
@@ -659,7 +659,7 @@ def test_swagger_fields_endpoint_human_output_truncates_long_cells(
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "string enum=['NWG_BrandCatego..." in output
+    assert "string enum=['DemoBrandCatego..." in output
     assert "Value 49" not in output
     assert max(len(line) for line in output.splitlines()) < 190
 

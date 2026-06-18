@@ -504,6 +504,87 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Emit one JSON object."
     )
 
+    snapshot_parser = subparsers.add_parser(
+        "snapshot",
+        help="Build private modeled JSONL snapshots",
+    )
+    snapshot_parser.add_argument(
+        "--snapshots-dir",
+        metavar="PATH",
+        default=None,
+        help="Private snapshots directory.",
+    )
+    snapshot_parser.add_argument(
+        "--units-config",
+        metavar="PATH",
+        default=None,
+        help="Units config path.",
+    )
+    snapshot_actions = snapshot_parser.add_subparsers(dest="action", required=True)
+
+    snapshot_list_parser = snapshot_actions.add_parser("list", help="List available snapshots")
+    _add_snapshot_dir_override(snapshot_list_parser)
+    snapshot_list_parser.add_argument("--json", action="store_true", help="Emit JSON Lines output.")
+
+    snapshot_show_parser = snapshot_actions.add_parser("show", help="Show one snapshot")
+    snapshot_show_parser.add_argument("name", metavar="NAME", help="Snapshot name.")
+    _add_snapshot_dir_override(snapshot_show_parser)
+    snapshot_show_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    snapshot_check_parser = snapshot_actions.add_parser("check", help="Check one snapshot")
+    snapshot_check_parser.add_argument("name", metavar="NAME", help="Snapshot name.")
+    _add_snapshot_config_overrides(snapshot_check_parser)
+    snapshot_check_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    snapshot_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    snapshot_build_parser = snapshot_actions.add_parser("build", help="Build one snapshot")
+    snapshot_build_parser.add_argument("name", metavar="NAME", help="Snapshot name.")
+    _add_snapshot_config_overrides(snapshot_build_parser)
+    snapshot_build_parser.add_argument(
+        "--db", metavar="PATH", default=None, help="SQLite database path."
+    )
+    snapshot_build_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Snapshot workspace root directory.",
+    )
+    snapshot_build_parser.add_argument(
+        "--target",
+        choices=["candidate", "baseline"],
+        default="candidate",
+        help="Snapshot workspace target. Default: candidate.",
+    )
+    snapshot_build_parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Replace non-hidden contents in the selected snapshot target.",
+    )
+    snapshot_build_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    snapshot_promote_parser = snapshot_actions.add_parser(
+        "promote",
+        help="Promote candidate snapshot artifacts to baseline",
+    )
+    snapshot_promote_parser.add_argument("name", metavar="NAME", help="Snapshot name.")
+    _add_snapshot_dir_override(snapshot_promote_parser)
+    snapshot_promote_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Snapshot workspace root directory.",
+    )
+    snapshot_promote_parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Replace non-hidden contents in the baseline target.",
+    )
+    snapshot_promote_parser.add_argument(
+        "--json", action="store_true", help="Emit one JSON object."
+    )
+
     map_parser = subparsers.add_parser("map", help="Generate local cache relationship maps")
     map_actions = map_parser.add_subparsers(dest="action", required=True)
 
@@ -814,6 +895,25 @@ def _add_validate_config_overrides(parser: argparse.ArgumentParser) -> None:
         default=argparse.SUPPRESS,
         help="Private validators directory.",
     )
+    parser.add_argument(
+        "--units-config",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Units config path.",
+    )
+
+
+def _add_snapshot_dir_override(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--snapshots-dir",
+        metavar="PATH",
+        default=argparse.SUPPRESS,
+        help="Private snapshots directory.",
+    )
+
+
+def _add_snapshot_config_overrides(parser: argparse.ArgumentParser) -> None:
+    _add_snapshot_dir_override(parser)
     parser.add_argument(
         "--units-config",
         metavar="PATH",

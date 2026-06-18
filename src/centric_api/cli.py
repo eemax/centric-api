@@ -15,6 +15,7 @@ from .commands.load import run_load_command
 from .commands.map import run_map_command
 from .commands.model import run_model_command
 from .commands.rebuild_db import run_rebuild_db
+from .commands.snapshot import run_snapshot_command
 from .commands.status import run_status
 from .commands.swagger import run_swagger
 from .commands.units import run_units
@@ -55,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_model_command(args)
         if args.command == "validate":
             return run_validate_command(args)
+        if args.command == "snapshot":
+            return run_snapshot_command(args)
         if args.command == "units":
             return run_units(args)
         if args.command == "status":
