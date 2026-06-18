@@ -8,7 +8,7 @@ from uuid import uuid4
 from ..config import ConfigError, runtime_home
 from ..store import connect_readonly
 from ..units import load_unit_registry
-from .artifacts import write_validation_artifacts
+from .artifacts import validation_artifact_timestamp, write_validation_artifacts
 from .context import ValidationContext
 from .contracts import (
     ValidationFinding,
@@ -33,6 +33,7 @@ def run_validator(
     input_file: str | Path | None = None,
 ) -> ValidationRunSummary:
     started_at = _utc_iso()
+    artifact_timestamp = validation_artifact_timestamp(started_at)
     run_id = _run_id(validator.definition.name)
     output_dir = _output_dir(validator.definition.name, run_id, output_root)
     try:
@@ -42,6 +43,7 @@ def run_validator(
                 units=load_unit_registry(units_config),
                 validator_name=validator.definition.name,
                 artifact_dir=output_dir,
+                artifact_timestamp=artifact_timestamp,
                 mode=mode,
                 input_file=input_file,
             )
@@ -61,6 +63,7 @@ def run_validator(
             "status": status,
             "started_at": started_at,
             "finished_at": finished_at,
+            "artifact_timestamp": artifact_timestamp,
             "findings": total_findings,
             "errors": errors,
             "warnings": warnings,

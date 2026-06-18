@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict
+from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from .contracts import ValidationFinding, ValidationHistoryMetric, ValidationResult
 
 SUMMARY_COLUMNS = ("metric", "value")
+VALIDATION_ARTIFACT_TIMESTAMP_FORMAT = "%y-%m-%d-%H%M"
 FINDING_COLUMNS = (
     "severity",
     "code",
@@ -38,24 +40,38 @@ def write_validation_artifacts(
     summary_path = output_dir / "summary.json"
     findings_path = output_dir / "findings.json"
     history_path = output_dir / "history.json"
-    report_path = output_dir / "report.xlsx"
+    artifact_timestamp = str(
+        run_record.get("artifact_timestamp")
+        or validation_artifact_timestamp(run_record.get("started_at"))
+    )
+    report_path = output_dir / f"report_{artifact_timestamp}.xlsx"
+    artifact_run_record = {
+        **run_record,
+        "artifact_timestamp": artifact_timestamp,
+        "report_path": str(report_path),
+    }
 
-    summary_payload = {**run_record, "summary": result.summary}
+    summary_payload = {**artifact_run_record, "summary": result.summary}
     finding_rows = _exported_finding_records(result)
     findings_payload = {
-        "total_findings": run_record["findings"],
-        "errors": run_record["errors"],
-        "warnings": run_record["warnings"],
-        "info": run_record["info"],
+        "total_findings": artifact_run_record["findings"],
+        "errors": artifact_run_record["errors"],
+        "warnings": artifact_run_record["warnings"],
+        "info": artifact_run_record["info"],
         "exported_findings": len(finding_rows),
-        "truncated": len(finding_rows) < int(run_record["findings"]),
+        "truncated": len(finding_rows) < int(artifact_run_record["findings"]),
         "findings": finding_rows,
     }
     _write_json(summary_path, summary_payload)
     _write_json(findings_path, findings_payload)
-    _write_json(history_path, _history_payload(result, run_record))
-    write_validation_workbook(report_path, result, run_record=run_record)
+    _write_json(history_path, _history_payload(result, artifact_run_record))
+    write_validation_workbook(report_path, result, run_record=artifact_run_record)
     return report_path, summary_path, findings_path, history_path
+
+
+def validation_artifact_timestamp(value: str | datetime | None = None) -> str:
+    parsed = _artifact_datetime(value)
+    return parsed.strftime(VALIDATION_ARTIFACT_TIMESTAMP_FORMAT)
 
 
 def write_validation_workbook(
@@ -146,8 +162,27 @@ def _history_payload(
         "status": run_record["status"],
         "started_at": run_record["started_at"],
         "finished_at": run_record["finished_at"],
+        "artifact_timestamp": run_record.get("artifact_timestamp"),
+        "report_path": run_record.get("report_path"),
         "metrics": [history_metric_record(metric) for metric in result.history_metrics],
     }
+
+
+def _artifact_datetime(value: str | datetime | None) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            return value.astimezone(UTC)
+        return value.replace(tzinfo=UTC)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            pass
+        else:
+            if parsed.tzinfo is not None:
+                return parsed.astimezone(UTC)
+            return parsed.replace(tzinfo=UTC)
+    return datetime.now(UTC)
 
 
 def _exported_finding_records(result: ValidationResult) -> list[dict[str, Any]]:

@@ -23,7 +23,7 @@ Each run writes a timestamped artifact folder:
 
 ```text
 CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/
-  report.xlsx
+  report_<YY-MM-DD-HHMM>.xlsx
   summary.json
   findings.json
   history.json
@@ -98,8 +98,8 @@ records become `findings.json`, the workbook `Findings` sheet, and CLI finding s
 `ValidationSheet` becomes one additional workbook sheet before `Findings`.
 
 `ValidationResult.history_metrics` is the machine-readable history contract. The runner writes
-these metrics to `history.json` for every run. History is not inferred from `report.xlsx`; validators
-that should appear in trends must publish explicit metrics:
+these metrics to `history.json` for every run. History is not inferred from the timestamped report
+workbook; validators that should appear in trends must publish explicit metrics:
 
 ```python
 return ValidationResult(

@@ -19,6 +19,7 @@ class ValidationContext:
         units: UnitRegistry,
         validator_name: str,
         artifact_dir: Path,
+        artifact_timestamp: str | None = None,
         mode: str = "cache",
         input_file: str | Path | None = None,
     ) -> None:
@@ -26,6 +27,7 @@ class ValidationContext:
         self.units = units
         self.validator_name = validator_name
         self.artifact_dir = artifact_dir
+        self.artifact_timestamp = artifact_timestamp
         self.mode = mode
         self.input_file = Path(input_file).expanduser() if input_file is not None else None
         self._records_cache: dict[str, tuple[dict[str, Any], ...]] = {}

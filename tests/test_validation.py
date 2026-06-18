@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -67,12 +68,14 @@ def test_validate_cli_runs_private_validator_and_writes_artifacts(
     assert payload["status"] == "failed"
     assert payload["summary"]["styles"] == 2
     assert payload["summary"]["styles_missing_name"] == 1
+    assert re.fullmatch(r"\d{2}-\d{2}-\d{2}-\d{4}", payload["summary"]["artifact_timestamp"])
     assert payload["findings"] == 1
     assert payload["blocking"] == 1
     assert payload["finding_samples"][0]["code"] == "STYLE_NAME_MISSING"
 
     report_path = Path(payload["report_path"])
     assert report_path.is_file()
+    assert re.fullmatch(r"report_\d{2}-\d{2}-\d{2}-\d{4}\.xlsx", report_path.name)
     assert Path(payload["summary_path"]).is_file()
     assert Path(payload["findings_path"]).is_file()
     assert Path(payload["history_path"]).is_file()
@@ -331,6 +334,7 @@ def test_validation_artifacts_can_cap_raw_finding_exports(tmp_path: Path) -> Non
     )
 
     assert report_path.is_file()
+    assert report_path.name == "report_26-01-01-0000.xlsx"
     assert summary_path.is_file()
     assert history_path.is_file()
     payload = json.loads(findings_path.read_text(encoding="utf-8"))
@@ -391,6 +395,7 @@ def test_validation_artifacts_can_use_custom_report_workbook(tmp_path: Path) -> 
     assert summary_path.is_file()
     assert findings_path.is_file()
     assert history_path.is_file()
+    assert report_path.name == "report_26-01-01-0000.xlsx"
     report = load_workbook(report_path, read_only=True)
     assert report.sheetnames == ["DPP Summary"]
     rows = list(report["DPP Summary"].iter_rows(values_only=True))
@@ -416,7 +421,7 @@ def test_validation_artifacts_write_history_metrics(tmp_path: Path) -> None:
         ),
     )
 
-    _report_path, _summary_path, _findings_path, history_path = write_validation_artifacts(
+    report_path, _summary_path, _findings_path, history_path = write_validation_artifacts(
         tmp_path,
         result,
         run_record={
@@ -436,6 +441,8 @@ def test_validation_artifacts_write_history_metrics(tmp_path: Path) -> None:
     payload = json.loads(history_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 2
     assert payload["validator"] == "style-readiness"
+    assert payload["artifact_timestamp"] == "26-01-01-0000"
+    assert payload["report_path"] == str(report_path)
     assert payload["metrics"] == [
         {
             "brand": None,
@@ -739,6 +746,7 @@ class StyleNameValidator:
                 "styles_missing_name": len(findings),
                 "mode": ctx.mode,
                 "input_file": str(ctx.input_file) if ctx.input_file else None,
+                "artifact_timestamp": ctx.artifact_timestamp,
                 "value_sets": {
                     "Product Group": {
                         "path": "/tmp/styles.nwg_style_product_group.xlsx",

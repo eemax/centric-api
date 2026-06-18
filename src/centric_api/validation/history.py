@@ -143,6 +143,7 @@ def _history_point(
         return None
     brand = metric.get("brand")
     dimensions = metric.get("dimensions")
+    report_path = _report_path(payload, history_path)
     return {
         "validator": validator,
         "title": payload.get("title"),
@@ -160,8 +161,15 @@ def _history_point(
         "denominator": _numeric_value(metric.get("denominator")),
         "dimensions": dimensions if isinstance(dimensions, dict) else {},
         "history_path": str(history_path),
-        "report_path": str(history_path.parent / "report.xlsx"),
+        "report_path": report_path,
     }
+
+
+def _report_path(payload: dict[str, Any], history_path: Path) -> str:
+    report_path = payload.get("report_path")
+    if isinstance(report_path, str) and report_path.strip():
+        return report_path
+    return str(history_path.parent / "report.xlsx")
 
 
 def _group_latest_points(

@@ -29,6 +29,7 @@ def test_validate_history_groups_latest_run_and_writes_outputs(
         value=20.0,
         brand="CRAFT",
         trend="up",
+        report_filename="report_26-06-03-0900.xlsx",
     )
     _write_history_run(
         runs_dir,
@@ -75,7 +76,7 @@ def test_validate_history_groups_latest_run_and_writes_outputs(
     assert "__HISTORY_JSON__" not in html
     assert "const historyPayload =" in html
     assert '"raw_points"' not in html
-    assert '"report_path": "../runs/style-readiness/run-new/report.xlsx"' in html
+    assert '"report_path": "../runs/style-readiness/run-new/report_26-06-03-0900.xlsx"' in html
     assert 'select id="brandSelect" multiple' in html
     assert 'id="allBrands"' in html
     assert 'select id="conceptSelect" multiple' in html
@@ -271,33 +272,35 @@ def _write_history_run(
     trend: str = "neutral",
     scope: str = "brand",
     dimensions: dict[str, str] | None = None,
+    report_filename: str | None = None,
 ) -> None:
     run_dir = runs_dir / validator / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "history.json").write_text(
-        json.dumps(
+    payload = {
+        "schema_version": 2,
+        "validator": validator,
+        "title": validator.replace("-", " ").title(),
+        "run_id": run_id,
+        "status": "failed",
+        "started_at": started_at,
+        "finished_at": started_at,
+        "metrics": [
             {
-                "schema_version": 2,
-                "validator": validator,
-                "title": validator.replace("-", " ").title(),
-                "run_id": run_id,
-                "status": "failed",
-                "started_at": started_at,
-                "finished_at": started_at,
-                "metrics": [
-                    {
-                        "scope": scope,
-                        "brand": brand,
-                        "metric": metric,
-                        "value": value,
-                        "unit": unit,
-                        "trend": trend,
-                        "numerator": value,
-                        "denominator": 100,
-                        "dimensions": dimensions or {},
-                    }
-                ],
+                "scope": scope,
+                "brand": brand,
+                "metric": metric,
+                "value": value,
+                "unit": unit,
+                "trend": trend,
+                "numerator": value,
+                "denominator": 100,
+                "dimensions": dimensions or {},
             }
-        ),
+        ],
+    }
+    if report_filename is not None:
+        payload["report_path"] = str(run_dir / report_filename)
+    (run_dir / "history.json").write_text(
+        json.dumps(payload),
         encoding="utf-8",
     )
