@@ -35,24 +35,29 @@
 body { margin: 0; background: var(--bg); }
 button, select { font: inherit; }
 button { cursor: pointer; }
-main { max-width: 1480px; margin: 0 auto; padding: 20px; }
+main { max-width: 1480px; margin: 0 auto; padding: 14px 20px 20px; }
 .hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: end;
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 33px;
+  margin-bottom: 6px;
 }
-.eyebrow {
-  margin: 0 0 5px;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+.hero-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  min-width: 0;
 }
 h1 { margin: 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
-.meta { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.meta {
+  color: var(--muted-strong);
+  font-size: 15px;
+  font-weight: 750;
+  white-space: nowrap;
+}
 .run-strip {
   display: flex;
   flex-wrap: wrap;
@@ -79,11 +84,11 @@ h1 { margin: 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 .summary-card {
-  min-height: 96px;
-  padding: 12px;
+  min-height: 86px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -101,20 +106,20 @@ h1 { margin: 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
   font-size: 11px;
 }
 .summary-value {
-  margin-top: 9px;
-  font-size: 28px;
+  margin-top: 7px;
+  font-size: 25px;
   line-height: 1;
   font-weight: 850;
   letter-spacing: 0;
 }
 .summary-sub {
-  margin-top: 7px;
+  margin-top: 6px;
   color: var(--muted);
   font-size: 12px;
 }
 .progress {
   height: 7px;
-  margin-top: 9px;
+  margin-top: 7px;
   overflow: hidden;
   border-radius: 999px;
   background: var(--ink-soft);
@@ -133,6 +138,7 @@ h1 { margin: 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
   align-items: start;
 }
 .panel {
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -140,7 +146,7 @@ h1 { margin: 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
 }
 .filter-panel {
   position: sticky;
-  top: 10px;
+  top: 12px;
   padding: 12px;
 }
 .section-title {
@@ -232,7 +238,34 @@ select[multiple] {
   color: #21595d;
 }
 #scope { display: none; }
-.content-stack { display: grid; gap: 12px; }
+.content-stack { display: grid; min-width: 0; gap: 10px; }
+.content-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.content-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafb;
+}
+.content-tab {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-strong);
+  font-weight: 850;
+}
+.content-tab.active {
+  background: #ffffff;
+  color: var(--ink);
+  box-shadow: 0 1px 4px rgba(34, 51, 59, .10);
+}
+.content-panel[hidden] { display: none; }
 .chart-panel { padding: 14px; }
 .chart-head {
   display: flex;
@@ -245,7 +278,7 @@ select[multiple] {
 .chart-subtitle { margin-top: 5px; color: var(--muted); font-size: 12px; }
 #chart {
   width: 100%;
-  height: 460px;
+  height: 600px;
   display: block;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -264,7 +297,10 @@ select[multiple] {
 .legend span { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; }
 .swatch { width: 18px; height: 3px; border-radius: 999px; display: inline-block; }
 .trend-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
-.table-panel { overflow: hidden; }
+.table-panel {
+  height: var(--latest-panel-height, auto);
+  overflow: visible;
+}
 .table-head {
   display: flex;
   justify-content: space-between;
@@ -272,8 +308,19 @@ select[multiple] {
   align-items: center;
   padding: 12px 14px 0;
 }
-.table-wrap { overflow: auto; max-height: 520px; }
+.table-wrap {
+  max-height: var(--latest-table-max-height, 680px);
+  overflow: auto;
+}
 table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+#latest {
+  min-width: 820px;
+  table-layout: fixed;
+}
+.series-col { width: 26%; }
+.latest-col { width: 190px; }
+.recent-col { width: auto; }
+.report-col { width: 90px; }
 th, td {
   border-bottom: 1px solid var(--line);
   padding: 8px 10px;
@@ -292,9 +339,34 @@ th {
   text-transform: uppercase;
 }
 tbody tr:hover { background: #fbfcfd; }
-.series-cell { min-width: 280px; font-weight: 750; }
-.value-cell { min-width: 150px; }
-.value-main { font-weight: 850; }
+.series-cell { font-weight: 750; overflow-wrap: anywhere; }
+.value-cell { min-width: 0; }
+.value-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-weight: 850;
+}
+.latest-bucket { color: var(--muted); font-weight: 700; }
+.latest-separator { color: var(--muted); font-weight: 650; }
+.latest-value { color: var(--ink); font-size: 14px; font-weight: 900; }
+.recent-cell { min-width: 0; color: var(--muted-strong); }
+.recent-item { white-space: nowrap; }
+.recent-delta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  margin-left: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 850;
+}
+.recent-delta.good { color: var(--good); background: var(--good-bg); }
+.recent-delta.bad { color: var(--bad); background: var(--bad-bg); }
+.recent-delta.flat { color: var(--warn); background: var(--warn-bg); }
+.recent-delta.neutral { color: var(--neutral); background: var(--neutral-bg); }
 .mini-progress {
   width: 118px;
   height: 6px;
@@ -304,18 +376,6 @@ tbody tr:hover { background: #fbfcfd; }
   background: var(--ink-soft);
 }
 .mini-progress i { display: block; height: 100%; background: var(--accent); }
-.movement {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 850;
-}
-.movement.good { color: var(--good); background: var(--good-bg); }
-.movement.bad { color: var(--bad); background: var(--bad-bg); }
-.movement.flat, .movement.neutral, .movement.new { color: var(--neutral); background: var(--neutral-bg); }
 .empty {
   color: var(--muted);
   font-size: 13px;
@@ -333,7 +393,8 @@ a.report-link {
 a.report-link:hover { text-decoration: underline; }
 @media (max-width: 1120px) {
   main { padding: 16px; }
-  .hero, .layout { grid-template-columns: 1fr; }
+  .hero { align-items: flex-start; flex-direction: column; }
+  .layout { grid-template-columns: 1fr; }
   .run-strip { justify-content: flex-start; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-panel { position: static; }
@@ -341,8 +402,11 @@ a.report-link:hover { text-decoration: underline; }
 @media (max-width: 680px) {
   main { padding: 12px; }
   h1 { font-size: 26px; }
+  .meta { white-space: normal; }
   .summary-grid { grid-template-columns: 1fr; }
-  .chart-head, .table-head { align-items: stretch; flex-direction: column; }
+  .chart-head, .table-head, .content-bar { align-items: stretch; flex-direction: column; }
+  .content-tabs { width: 100%; }
+  .content-tab { flex: 1; }
   #chart { height: 400px; }
 }
 </style>
@@ -350,15 +414,12 @@ a.report-link:hover { text-decoration: underline; }
 <body>
 <main>
   <header class="hero">
-    <div>
-      <p class="eyebrow">Validation</p>
+    <div class="hero-title">
       <h1>Readiness History</h1>
-      <div class="meta">Generated __GENERATED_AT__ · group __GROUP__ · __POINT_COUNT__ grouped points from __RUN_COUNT__ runs</div>
+      <div class="meta">Group by __GROUP__ · __POINT_COUNT__ grouped points from __RUN_COUNT__ runs</div>
     </div>
     <div class="run-strip" id="runStrip"></div>
   </header>
-
-  <section class="summary-grid" id="summaryGrid" aria-label="Latest validation summary"></section>
 
   <div class="layout">
     <aside class="panel filter-panel">
@@ -415,7 +476,45 @@ a.report-link:hover { text-decoration: underline; }
     </aside>
 
     <div class="content-stack">
-      <section class="panel chart-panel">
+      <section class="summary-grid" id="summaryGrid" aria-label="Latest validation summary"></section>
+
+      <div class="content-bar">
+        <div class="content-tabs" id="contentTabs" role="tablist" aria-label="History display mode">
+          <button class="content-tab active" id="latestTab" type="button" role="tab" data-panel="table" aria-controls="tablePanel" aria-selected="true">Latest Points</button>
+          <button class="content-tab" id="graphTab" type="button" role="tab" data-panel="chart" aria-controls="chartPanel" aria-selected="false">Graph</button>
+        </div>
+        <button class="ghost-button" id="resetFilters" type="button">Reset Filters</button>
+      </div>
+
+      <section class="panel table-panel content-panel" id="tablePanel" role="tabpanel" aria-labelledby="latestTab">
+        <div class="table-head">
+          <div>
+            <p class="section-title" style="margin-bottom: 2px;">Latest Points</p>
+            <div class="chart-subtitle" id="tableSubtitle"></div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="latest">
+            <colgroup>
+              <col class="series-col">
+              <col class="latest-col">
+              <col class="recent-col">
+              <col class="report-col">
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Series</th>
+                <th>Latest</th>
+                <th>Recent</th>
+                <th>Report</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel chart-panel content-panel" id="chartPanel" role="tabpanel" aria-labelledby="graphTab" hidden>
         <div class="chart-head">
           <div>
             <h2 class="chart-title" id="chartTitle">History</h2>
@@ -427,33 +526,6 @@ a.report-link:hover { text-decoration: underline; }
         <div id="legend" class="legend"></div>
         <div id="trendNote" class="trend-note"></div>
       </section>
-
-      <section class="panel table-panel">
-        <div class="table-head">
-          <div>
-            <p class="section-title" style="margin-bottom: 2px;">Latest Points</p>
-            <div class="chart-subtitle" id="tableSubtitle"></div>
-          </div>
-          <button class="ghost-button" id="resetFilters" type="button">Reset Filters</button>
-        </div>
-        <div class="table-wrap">
-          <table id="latest">
-            <thead>
-              <tr>
-                <th>Series</th>
-                <th>Bucket</th>
-                <th>Value</th>
-                <th>Previous</th>
-                <th>Change</th>
-                <th>Movement</th>
-                <th>Started</th>
-                <th>Report</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
     </div>
   </div>
 </main>
@@ -464,6 +536,8 @@ const colors = [
   "#2f6f73", "#b4562a", "#5567a6", "#7a5c99", "#21865d", "#b83b5e",
   "#8a6d1d", "#3f7fba", "#99613f", "#54705f", "#c45f35", "#65727f"
 ];
+const maxChartBuckets = 30;
+const recentBucketLimit = 4;
 const summaryMetrics = [
   "Style Completion %",
   "Material Completion %",
@@ -504,6 +578,11 @@ const allSeasonsButton = document.getElementById("allSeasons");
 const noSeasonsButton = document.getElementById("noSeasons");
 const seasonCount = document.getElementById("seasonCount");
 const resetFiltersButton = document.getElementById("resetFilters");
+const contentTabs = document.getElementById("contentTabs");
+const tablePanel = document.getElementById("tablePanel");
+const tableHead = document.querySelector(".table-head");
+const filterPanel = document.querySelector(".filter-panel");
+const chartPanel = document.getElementById("chartPanel");
 const chart = document.getElementById("chart");
 const legend = document.getElementById("legend");
 const trendNote = document.getElementById("trendNote");
@@ -514,6 +593,10 @@ const chartTitle = document.getElementById("chartTitle");
 const chartSubtitle = document.getElementById("chartSubtitle");
 const tableSubtitle = document.getElementById("tableSubtitle");
 const seriesCount = document.getElementById("seriesCount");
+let activeContentPanel = "table";
+let currentChartPoints = [];
+let currentSeriesMap = new Map();
+let latestPanelHeight = 0;
 
 function unique(values) { return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b))); }
 function metricSort(a, b) {
@@ -719,20 +802,49 @@ function filteredPoints() {
     (!filterSeasons || !selectedType || seasons.has(seasonLabel(p)))
   );
 }
+function bucketWindowPoints(sourcePoints, maxBuckets) {
+  const bucketStarts = unique(sourcePoints.map(p => p.bucket_start)).sort();
+  const allowedStarts = new Set(bucketStarts.slice(Math.max(0, bucketStarts.length - maxBuckets)));
+  return sourcePoints.filter(point => allowedStarts.has(point.bucket_start));
+}
+function bucketWindowLabel(sourcePoints) {
+  const count = unique(sourcePoints.map(p => p.bucket_start)).length;
+  const unit = historyPayload.group || "bucket";
+  const plural = count === 1 ? unit : `${unit}s`;
+  return `${count} ${plural}`;
+}
 function draw() {
   renderSummary();
   const selected = filteredPoints();
-  const seriesMap = groupedSeries(selected);
+  const chartPoints = bucketWindowPoints(selected, maxChartBuckets);
+  const seriesMap = groupedSeries(chartPoints);
   const latestMap = latestBySeries(seriesMap);
+  currentChartPoints = chartPoints;
+  currentSeriesMap = seriesMap;
   renderRunStrip();
-  renderChart(selected, seriesMap);
   renderLatestTable(latestMap, seriesMap);
   updateFilterVisibility();
   updateFilterCounts();
   chartTitle.textContent = metricSelect.value || "History";
   chartSubtitle.textContent = chartSubtitleParts().join(" · ");
-  tableSubtitle.textContent = `${latestMap.size} latest series from ${selected.length} grouped points`;
+  tableSubtitle.textContent = `${latestMap.size} latest series from ${chartPoints.length} points in the latest ${bucketWindowLabel(chartPoints)}`;
   seriesCount.textContent = `${seriesMap.size} series`;
+  syncLatestTableHeight();
+  renderContentPanels();
+}
+function renderContentPanels() {
+  tablePanel.hidden = activeContentPanel !== "table";
+  chartPanel.hidden = activeContentPanel !== "chart";
+  for (const button of contentTabs.querySelectorAll(".content-tab")) {
+    const isActive = button.dataset.panel === activeContentPanel;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  }
+  if (activeContentPanel === "chart") renderChart(currentChartPoints, currentSeriesMap);
+}
+function setContentPanel(panel) {
+  activeContentPanel = panel;
+  renderContentPanels();
 }
 function chartSubtitleParts() {
   const parts = [validatorSelect.value || "Validator", scopeLabel(scopeSelect.value)];
@@ -874,7 +986,7 @@ function renderChart(selected, seriesMap) {
     item.appendChild(document.createTextNode(seriesLabel(series[0])));
     legend.appendChild(item);
   });
-  trendNote.textContent = trendHelp(trend);
+  trendNote.textContent = `${trendHelp(trend)} Showing latest ${bucketWindowLabel(selected)}.`;
 }
 function emptyChart(message) {
   const ns = "http://www.w3.org/2000/svg";
@@ -890,7 +1002,7 @@ function renderLatestTable(latestMap, seriesMap) {
   if (!latestMap.size) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 8;
+    cell.colSpan = 4;
     cell.className = "empty-state";
     cell.textContent = "No matching latest points.";
     row.appendChild(cell);
@@ -902,20 +1014,10 @@ function renderLatestTable(latestMap, seriesMap) {
     .sort((a, b) => seriesRowSort(a.point, b.point))
     .forEach(({point, series}) => {
       const previous = series.length > 1 ? series[series.length - 2] : null;
-      const movement = movementStatus(point, previous);
       const row = document.createElement("tr");
       appendCell(row, seriesLabel(point), "series-cell");
-      appendCell(row, point.bucket);
-      appendValueCell(row, point);
-      appendCell(row, previous ? formatValue(previous) : "");
-      appendCell(row, changeLabel(point, previous));
-      const movementCell = document.createElement("td");
-      const movementEl = document.createElement("span");
-      movementEl.className = `movement ${movement.className}`;
-      movementEl.textContent = movement.label;
-      movementCell.appendChild(movementEl);
-      row.appendChild(movementCell);
-      appendCell(row, formatTimestamp(point.started_at));
+      appendLatestCell(row, point, previous);
+      appendRecentCell(row, series);
       appendReportCell(row, point);
       latestBody.appendChild(row);
     });
@@ -926,12 +1028,28 @@ function appendCell(row, value, className = "") {
   cell.textContent = value;
   row.appendChild(cell);
 }
-function appendValueCell(row, point) {
+function appendLatestCell(row, point, previous) {
   const cell = document.createElement("td");
   cell.className = "value-cell";
   const main = document.createElement("div");
   main.className = "value-main";
-  main.textContent = formatValue(point);
+  const bucket = document.createElement("span");
+  bucket.className = "latest-bucket";
+  bucket.textContent = point.bucket;
+  const separator = document.createElement("span");
+  separator.className = "latest-separator";
+  separator.textContent = "·";
+  const value = document.createElement("span");
+  value.className = "latest-value";
+  value.textContent = formatValue(point);
+  main.append(bucket, separator, value);
+  const delta = changeLabel(point, previous);
+  if (delta) {
+    const deltaEl = document.createElement("span");
+    deltaEl.className = `recent-delta ${deltaClass(point, previous)}`;
+    deltaEl.textContent = `(${delta})`;
+    main.appendChild(deltaEl);
+  }
   cell.appendChild(main);
   const ratio = ratioLabel(point);
   if (ratio) {
@@ -947,6 +1065,42 @@ function appendValueCell(row, point) {
     cell.appendChild(mini);
   }
   row.appendChild(cell);
+}
+function appendRecentCell(row, series) {
+  const cell = document.createElement("td");
+  cell.className = "recent-cell";
+  const recent = recentTrail(series);
+  if (!recent.length) {
+    cell.textContent = "";
+    row.appendChild(cell);
+    return;
+  }
+  recent.forEach((item, index) => {
+    if (index) cell.appendChild(document.createTextNode(" · "));
+    const span = document.createElement("span");
+    span.className = "recent-item";
+    span.textContent = `${item.point.bucket} ${formatValue(item.point)}`;
+    if (item.delta) {
+      const delta = document.createElement("span");
+      delta.className = `recent-delta ${deltaClass(item.point, item.previous)}`;
+      delta.textContent = `(${item.delta})`;
+      span.appendChild(delta);
+    }
+    cell.appendChild(span);
+  });
+  row.appendChild(cell);
+}
+function recentTrail(series) {
+  const latestIndex = series.length - 1;
+  const startIndex = Math.max(0, latestIndex - recentBucketLimit);
+  return series
+    .slice(startIndex, latestIndex)
+    .map((point, offset) => {
+      const index = startIndex + offset;
+      const older = index > startIndex ? series[index - 1] : null;
+      return {point, previous: older, delta: changeLabel(point, older)};
+    })
+    .reverse();
 }
 function appendReportCell(row, point) {
   const cell = document.createElement("td");
@@ -984,6 +1138,53 @@ function updateFilterVisibility() {
   seasonPanel.hidden = !usesSeasonFilter() || seasonSelect.options.length === 0;
   conceptPanel.hidden = !usesConceptFilter() || conceptSelect.options.length === 0;
   brandPanel.hidden = !usesBrandFilter() || brandSelect.options.length === 0;
+}
+function syncLatestTableHeight() {
+  const measured = measureExpandedFilterHeight();
+  latestPanelHeight = Math.max(latestPanelHeight, measured);
+  const tableChrome = measureTableHeadHeight();
+  const panelStyle = getComputedStyle(tablePanel);
+  const panelChrome = parseFloat(panelStyle.borderTopWidth) + parseFloat(panelStyle.borderBottomWidth);
+  const target = Math.max(260, latestPanelHeight - tableChrome - panelChrome);
+  document.documentElement.style.setProperty("--latest-panel-height", `${Math.ceil(latestPanelHeight)}px`);
+  document.documentElement.style.setProperty("--latest-table-max-height", `${Math.ceil(target)}px`);
+}
+function measureTableHeadHeight() {
+  const width = tablePanel.getBoundingClientRect().width;
+  if (!width) return tableHead.getBoundingClientRect().height;
+  const clone = tablePanel.cloneNode(true);
+  clone.hidden = false;
+  clone.style.position = "absolute";
+  clone.style.visibility = "hidden";
+  clone.style.pointerEvents = "none";
+  clone.style.left = "-10000px";
+  clone.style.top = "0";
+  clone.style.width = `${width}px`;
+  clone.style.height = "auto";
+  clone.style.maxHeight = "none";
+  clone.style.overflow = "visible";
+  document.body.appendChild(clone);
+  const height = clone.querySelector(".table-head").getBoundingClientRect().height;
+  clone.remove();
+  return height;
+}
+function measureExpandedFilterHeight() {
+  const width = filterPanel.getBoundingClientRect().width;
+  if (!width) return 0;
+  const clone = filterPanel.cloneNode(true);
+  clone.querySelectorAll("[hidden]").forEach(element => { element.hidden = false; });
+  clone.style.position = "absolute";
+  clone.style.visibility = "hidden";
+  clone.style.pointerEvents = "none";
+  clone.style.left = "-10000px";
+  clone.style.top = "0";
+  clone.style.width = `${width}px`;
+  clone.style.maxHeight = "none";
+  clone.style.overflow = "visible";
+  document.body.appendChild(clone);
+  const height = clone.getBoundingClientRect().height;
+  clone.remove();
+  return height;
 }
 function updateFilterCounts() {
   conceptCount.textContent = selectedCountLabel(conceptSelect);
@@ -1195,21 +1396,17 @@ function seasonLabelRecencySortKey(label) {
 function changeLabel(point, previous) {
   if (!previous) return "";
   const change = Number(point.value) - Number(previous.value);
-  const sign = change > 0 ? "+" : "";
-  const suffix = point.unit === "percent" ? " pts" : "";
-  return `${sign}${change.toFixed(Math.abs(change) >= 10 ? 0 : 2)}${suffix}`;
+  const rounded = Math.abs(change) < 0.005 ? 0 : change;
+  const decimals = Number.isInteger(rounded) || Math.abs(rounded) >= 10 ? 0 : 2;
+  return `${rounded > 0 ? "+" : ""}${rounded.toFixed(decimals)}`;
 }
-function movementStatus(point, previous) {
-  if (!previous) return {label: "New", className: "new"};
+function deltaClass(point, previous) {
+  if (!previous) return "";
   const change = Number(point.value) - Number(previous.value);
-  if (change === 0) return {label: "Flat", className: "flat"};
-  if (point.trend === "up") return change > 0
-    ? {label: "Good", className: "good"}
-    : {label: "Worse", className: "bad"};
-  if (point.trend === "down") return change < 0
-    ? {label: "Good", className: "good"}
-    : {label: "Worse", className: "bad"};
-  return {label: "Changed", className: "neutral"};
+  if (Math.abs(change) < 0.005) return "flat";
+  if (point.trend === "up") return change > 0 ? "good" : "bad";
+  if (point.trend === "down") return change < 0 ? "good" : "bad";
+  return "neutral";
 }
 function pointTimeSort(a, b) {
   return String(a.started_at || "").localeCompare(String(b.started_at || "")) ||
@@ -1241,7 +1438,15 @@ seasonSelect.addEventListener("change", () => { refreshConcepts(); refreshBrands
 allSeasonsButton.addEventListener("click", () => { selectAll(seasonSelect); refreshConcepts(); refreshBrands(); draw(); });
 noSeasonsButton.addEventListener("click", () => { selectNone(seasonSelect); refreshConcepts(); refreshBrands(); draw(); });
 resetFiltersButton.addEventListener("click", () => { refreshScopes(); draw(); });
-window.addEventListener("resize", draw);
+contentTabs.addEventListener("click", event => {
+  const button = event.target.closest(".content-tab");
+  if (!button) return;
+  setContentPanel(button.dataset.panel || "table");
+});
+window.addEventListener("resize", () => {
+  syncLatestTableHeight();
+  if (activeContentPanel === "chart") renderChart(currentChartPoints, currentSeriesMap);
+});
 init();
 </script>
 </body>
