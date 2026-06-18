@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -250,12 +251,13 @@ def _dimension_key(value: Any) -> str:
 
 def _write_html(path: Path, payload: dict[str, Any]) -> None:
     html = _validation_history_template()
+    html_payload = _html_payload(payload)
     replacements = {
         "__GENERATED_AT__": _display_timestamp(str(payload["generated_at"])),
         "__GROUP__": str(payload["group"]),
         "__POINT_COUNT__": str(payload["point_count"]),
         "__RUN_COUNT__": str(payload["run_count"]),
-        "__HISTORY_JSON__": _script_json(payload, sort_keys=True),
+        "__HISTORY_JSON__": _script_json(html_payload, sort_keys=True),
     }
     for placeholder, value in replacements.items():
         html = html.replace(placeholder, value)
@@ -266,6 +268,39 @@ def _write_html(path: Path, payload: dict[str, Any]) -> None:
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+
+
+def _html_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    output_dir = str(payload.get("output_dir") or "")
+    points = [
+        _html_point(point, output_dir=Path(output_dir) if output_dir else None)
+        for point in payload.get("points", [])
+        if isinstance(point, dict)
+    ]
+    return {
+        key: value
+        for key, value in payload.items()
+        if key != "raw_points" and key != "points"
+    } | {"points": points}
+
+
+def _html_point(point: dict[str, Any], *, output_dir: Path | None) -> dict[str, Any]:
+    return {
+        key: _relative_artifact_path(value, output_dir=output_dir)
+        if key in {"history_path", "report_path"}
+        else value
+        for key, value in point.items()
+    }
+
+
+def _relative_artifact_path(value: Any, *, output_dir: Path | None) -> Any:
+    text = str(value or "")
+    if not text:
+        return value
+    path = Path(text)
+    if output_dir is None or not path.is_absolute():
+        return value
+    return os.path.relpath(path, output_dir)
 
 
 def _validation_history_template() -> str:

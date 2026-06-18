@@ -74,6 +74,8 @@ def test_validate_history_groups_latest_run_and_writes_outputs(
     html = (output_dir / "history.html").read_text(encoding="utf-8")
     assert "__HISTORY_JSON__" not in html
     assert "const historyPayload =" in html
+    assert '"raw_points"' not in html
+    assert '"report_path": "../runs/style-readiness/run-new/report.xlsx"' in html
     assert 'select id="brandSelect" multiple' in html
     assert 'id="allBrands"' in html
     assert 'select id="conceptSelect" multiple' in html

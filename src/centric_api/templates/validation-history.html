@@ -9,92 +9,525 @@
   color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #17202a;
-  background: #f6f7f9;
+  background: #f4f6f8;
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --surface-soft: #f9fafb;
+  --line: #dbe2ea;
+  --line-strong: #c4ced9;
+  --text: #17202a;
+  --muted: #667384;
+  --muted-strong: #425162;
+  --ink-soft: #edf1f5;
+  --accent: #2f6f73;
+  --accent-soft: #e4f1ef;
+  --good: #1d7a46;
+  --good-bg: #e8f4ed;
+  --bad: #b42318;
+  --bad-bg: #fae8e6;
+  --neutral: #5b6673;
+  --neutral-bg: #eef1f4;
+  --warn: #966800;
+  --warn-bg: #fff4d6;
+  --shadow: 0 8px 20px rgba(28, 39, 52, 0.07);
 }
-body { margin: 0; }
-main { max-width: 1240px; margin: 0 auto; padding: 28px; }
-h1 { font-size: 28px; margin: 0 0 6px; letter-spacing: 0; }
-.meta { color: #5b6673; margin-bottom: 22px; }
-.controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; align-items: end; }
-label { display: grid; gap: 4px; font-size: 12px; color: #44515f; font-weight: 650; }
-select, button { min-width: 220px; padding: 8px 10px; border: 1px solid #c8d0d9; border-radius: 6px; background: white; font: inherit; }
-select[multiple] { min-height: 118px; min-width: 260px; padding: 6px 8px; }
-button { min-width: auto; cursor: pointer; font-size: 12px; font-weight: 650; }
-.brand-control { align-self: stretch; }
-.filter-actions { display: flex; gap: 6px; }
-.panel { background: white; border: 1px solid #dbe1e8; border-radius: 8px; padding: 16px; }
-#chart { width: 100%; height: 520px; display: block; }
-.legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 12px; font-size: 12px; }
-.legend span { display: inline-flex; align-items: center; gap: 6px; }
-.swatch { width: 18px; height: 3px; display: inline-block; }
-.trend-note { color: #5b6673; font-size: 12px; margin-top: 8px; }
-table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
-th, td { border-bottom: 1px solid #e6ebf0; padding: 8px 10px; text-align: left; vertical-align: top; }
-th { background: #f1f4f7; font-size: 12px; color: #4b5967; }
-.empty { color: #6b7480; padding: 24px; }
-.movement { font-weight: 700; }
-.movement.good { color: #217346; }
-.movement.bad { color: #b42318; }
-.movement.flat, .movement.neutral, .movement.new { color: #5b6673; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); }
+button, select { font: inherit; }
+button { cursor: pointer; }
+main { max-width: 1480px; margin: 0 auto; padding: 20px; }
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+.eyebrow {
+  margin: 0 0 5px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+h1 { margin: 0; font-size: 30px; line-height: 1.08; letter-spacing: 0; }
+.meta { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.run-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.pill.good { color: var(--good); background: var(--good-bg); border-color: #bfdec9; }
+.pill.bad { color: var(--bad); background: var(--bad-bg); border-color: #efc0bb; }
+.pill.neutral { color: var(--neutral); background: var(--neutral-bg); }
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.summary-card {
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.summary-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.summary-label span { display: block; }
+.summary-label span + span {
+  margin-top: 4px;
+  color: var(--muted-strong);
+  font-size: 11px;
+}
+.summary-value {
+  margin-top: 9px;
+  font-size: 28px;
+  line-height: 1;
+  font-weight: 850;
+  letter-spacing: 0;
+}
+.summary-sub {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.progress {
+  height: 7px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ink-soft);
+}
+.progress i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.layout {
+  display: grid;
+  grid-template-columns: 296px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+.panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.filter-panel {
+  position: sticky;
+  top: 10px;
+  padding: 12px;
+}
+.section-title {
+  margin: 0 0 8px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.control-stack { display: grid; gap: 10px; }
+label, .field-label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+select {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+}
+select:focus, button:focus-visible {
+  outline: 2px solid rgba(47, 111, 115, .25);
+  outline-offset: 2px;
+}
+select[multiple] {
+  min-height: 118px;
+  padding: 6px;
+}
+.filter-card {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+.filter-card[hidden],
+#seasonTypePanel[hidden] {
+  display: none;
+}
+.filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.filter-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.filter-actions button, .ghost-button, .tab-button {
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+.filter-actions button:hover, .ghost-button:hover, .tab-button:hover {
+  border-color: #9eb2bf;
+  background: #f7fafb;
+}
+.filter-count {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+.scope-tabs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+.tab-button {
+  width: 100%;
+  text-align: left;
+}
+.tab-button.active {
+  border-color: #9fc5c6;
+  background: var(--accent-soft);
+  color: #21595d;
+}
+#scope { display: none; }
+.content-stack { display: grid; gap: 12px; }
+.chart-panel { padding: 14px; }
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+.chart-title { margin: 0; font-size: 18px; line-height: 1.25; letter-spacing: 0; }
+.chart-subtitle { margin-top: 5px; color: var(--muted); font-size: 12px; }
+#chart {
+  width: 100%;
+  height: 460px;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(#ffffff, #fbfcfd);
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  max-height: 82px;
+  overflow: auto;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+.legend span { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; }
+.swatch { width: 18px; height: 3px; border-radius: 999px; display: inline-block; }
+.trend-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.table-panel { overflow: hidden; }
+.table-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px 0;
+}
+.table-wrap { overflow: auto; max-height: 520px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+th, td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: middle;
+}
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f1f5f7;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+tbody tr:hover { background: #fbfcfd; }
+.series-cell { min-width: 280px; font-weight: 750; }
+.value-cell { min-width: 150px; }
+.value-main { font-weight: 850; }
+.mini-progress {
+  width: 118px;
+  height: 6px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ink-soft);
+}
+.mini-progress i { display: block; height: 100%; background: var(--accent); }
+.movement {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 850;
+}
+.movement.good { color: var(--good); background: var(--good-bg); }
+.movement.bad { color: var(--bad); background: var(--bad-bg); }
+.movement.flat, .movement.neutral, .movement.new { color: var(--neutral); background: var(--neutral-bg); }
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+.empty-state {
+  padding: 36px;
+  color: var(--muted);
+  text-align: center;
+}
+a.report-link {
+  color: var(--accent);
+  font-weight: 800;
+  text-decoration: none;
+}
+a.report-link:hover { text-decoration: underline; }
+@media (max-width: 1120px) {
+  main { padding: 16px; }
+  .hero, .layout { grid-template-columns: 1fr; }
+  .run-strip { justify-content: flex-start; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filter-panel { position: static; }
+}
+@media (max-width: 680px) {
+  main { padding: 12px; }
+  h1 { font-size: 26px; }
+  .summary-grid { grid-template-columns: 1fr; }
+  .chart-head, .table-head { align-items: stretch; flex-direction: column; }
+  #chart { height: 400px; }
+}
 </style>
 </head>
 <body>
 <main>
-<h1>Validation History</h1>
-<div class="meta">Generated __GENERATED_AT__ · group __GROUP__ · __POINT_COUNT__ grouped points from __RUN_COUNT__ runs</div>
-<div class="controls">
-  <label>Validator<select id="validator"></select></label>
-  <label>Metric<select id="metric"></select></label>
-  <label>Scope<select id="scope"></select></label>
-  <label class="brand-control">Concepts<select id="conceptSelect" multiple size="6"></select></label>
-  <div class="filter-actions">
-    <button id="allConcepts" type="button">All</button>
-    <button id="noConcepts" type="button">None</button>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Validation</p>
+      <h1>Readiness History</h1>
+      <div class="meta">Generated __GENERATED_AT__ · group __GROUP__ · __POINT_COUNT__ grouped points from __RUN_COUNT__ runs</div>
+    </div>
+    <div class="run-strip" id="runStrip"></div>
+  </header>
+
+  <section class="summary-grid" id="summaryGrid" aria-label="Latest validation summary"></section>
+
+  <div class="layout">
+    <aside class="panel filter-panel">
+      <p class="section-title">Controls</p>
+      <div class="control-stack">
+        <label>Validator<select id="validator"></select></label>
+        <label>Metric<select id="metric"></select></label>
+        <label id="seasonTypePanel">Season Type<select id="seasonType"></select></label>
+        <select id="scope" aria-label="Scope"></select>
+        <div>
+          <div class="field-label" style="margin-bottom: 6px;">View</div>
+          <div class="scope-tabs" id="scopeTabs"></div>
+        </div>
+        <div class="filter-card" id="seasonPanel">
+          <div class="filter-head">
+            <div>
+              <div class="field-label">Seasons</div>
+              <div class="filter-count" id="seasonCount"></div>
+            </div>
+            <div class="filter-actions">
+              <button id="allSeasons" type="button">All</button>
+              <button id="noSeasons" type="button">Clear</button>
+            </div>
+          </div>
+          <select id="seasonSelect" multiple size="7"></select>
+        </div>
+        <div class="filter-card" id="conceptPanel">
+          <div class="filter-head">
+            <div>
+              <div class="field-label">Concepts</div>
+              <div class="filter-count" id="conceptCount"></div>
+            </div>
+            <div class="filter-actions">
+              <button id="allConcepts" type="button">All</button>
+              <button id="noConcepts" type="button">Clear</button>
+            </div>
+          </div>
+          <select id="conceptSelect" multiple size="7"></select>
+        </div>
+        <div class="filter-card" id="brandPanel">
+          <div class="filter-head">
+            <div>
+              <div class="field-label">Brands</div>
+              <div class="filter-count" id="brandCount"></div>
+            </div>
+            <div class="filter-actions">
+              <button id="allBrands" type="button">All</button>
+              <button id="noBrands" type="button">Clear</button>
+            </div>
+          </div>
+          <select id="brandSelect" multiple size="7"></select>
+        </div>
+      </div>
+    </aside>
+
+    <div class="content-stack">
+      <section class="panel chart-panel">
+        <div class="chart-head">
+          <div>
+            <h2 class="chart-title" id="chartTitle">History</h2>
+            <div class="chart-subtitle" id="chartSubtitle"></div>
+          </div>
+          <span class="pill neutral" id="seriesCount"></span>
+        </div>
+        <svg id="chart" role="img" aria-label="Validation metric history chart"></svg>
+        <div id="legend" class="legend"></div>
+        <div id="trendNote" class="trend-note"></div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-head">
+          <div>
+            <p class="section-title" style="margin-bottom: 2px;">Latest Points</p>
+            <div class="chart-subtitle" id="tableSubtitle"></div>
+          </div>
+          <button class="ghost-button" id="resetFilters" type="button">Reset Filters</button>
+        </div>
+        <div class="table-wrap">
+          <table id="latest">
+            <thead>
+              <tr>
+                <th>Series</th>
+                <th>Bucket</th>
+                <th>Value</th>
+                <th>Previous</th>
+                <th>Change</th>
+                <th>Movement</th>
+                <th>Started</th>
+                <th>Report</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   </div>
-  <label class="brand-control">Brands<select id="brandSelect" multiple size="6"></select></label>
-  <div class="filter-actions">
-    <button id="allBrands" type="button">All</button>
-    <button id="noBrands" type="button">None</button>
-  </div>
-  <label>Season Type<select id="seasonType"></select></label>
-  <label class="brand-control">Seasons<select id="seasonSelect" multiple size="6"></select></label>
-  <div class="filter-actions">
-    <button id="allSeasons" type="button">All</button>
-    <button id="noSeasons" type="button">None</button>
-  </div>
-</div>
-<section class="panel">
-  <svg id="chart" role="img" aria-label="Validation metric history chart"></svg>
-  <div id="legend" class="legend"></div>
-  <div id="trendNote" class="trend-note"></div>
-</section>
-<section class="panel" style="margin-top: 16px;">
-  <table id="latest"><thead><tr><th>Series</th><th>Latest Bucket</th><th>Value</th><th>Trend</th><th>Previous</th><th>Change</th><th>Movement</th><th>Started</th></tr></thead><tbody></tbody></table>
-</section>
 </main>
 <script>
 const historyPayload = __HISTORY_JSON__;
 const points = historyPayload.points || [];
-const colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22"];
+const colors = [
+  "#2f6f73", "#b4562a", "#5567a6", "#7a5c99", "#21865d", "#b83b5e",
+  "#8a6d1d", "#3f7fba", "#99613f", "#54705f", "#c45f35", "#65727f"
+];
+const summaryMetrics = [
+  "Style Completion %",
+  "Material Completion %",
+  "Active Styles",
+  "Failed Styles",
+  "Styles With Blocking Issues",
+];
+const preferredMetricOrder = [
+  "Style Completion %",
+  "Material Completion %",
+  "Active Styles",
+  "Ready Styles",
+  "Failed Styles",
+  "Styles With Blocking Issues",
+  "Styles With Hard Warnings",
+  "Reference Warnings",
+];
+const preferredScopeOrder = ["overall", "year", "concept", "concept_brand_season"];
 const validatorSelect = document.getElementById("validator");
 const metricSelect = document.getElementById("metric");
 const scopeSelect = document.getElementById("scope");
+const scopeTabs = document.getElementById("scopeTabs");
+const seasonPanel = document.getElementById("seasonPanel");
+const conceptPanel = document.getElementById("conceptPanel");
+const brandPanel = document.getElementById("brandPanel");
 const conceptSelect = document.getElementById("conceptSelect");
 const allConceptsButton = document.getElementById("allConcepts");
 const noConceptsButton = document.getElementById("noConcepts");
+const conceptCount = document.getElementById("conceptCount");
 const brandSelect = document.getElementById("brandSelect");
 const allBrandsButton = document.getElementById("allBrands");
 const noBrandsButton = document.getElementById("noBrands");
+const brandCount = document.getElementById("brandCount");
+const seasonTypePanel = document.getElementById("seasonTypePanel");
 const seasonTypeSelect = document.getElementById("seasonType");
 const seasonSelect = document.getElementById("seasonSelect");
 const allSeasonsButton = document.getElementById("allSeasons");
 const noSeasonsButton = document.getElementById("noSeasons");
+const seasonCount = document.getElementById("seasonCount");
+const resetFiltersButton = document.getElementById("resetFilters");
 const chart = document.getElementById("chart");
 const legend = document.getElementById("legend");
 const trendNote = document.getElementById("trendNote");
 const latestBody = document.querySelector("#latest tbody");
+const summaryGrid = document.getElementById("summaryGrid");
+const runStrip = document.getElementById("runStrip");
+const chartTitle = document.getElementById("chartTitle");
+const chartSubtitle = document.getElementById("chartSubtitle");
+const tableSubtitle = document.getElementById("tableSubtitle");
+const seriesCount = document.getElementById("seriesCount");
 
-function unique(values) { return [...new Set(values.filter(Boolean))].sort(); }
+function unique(values) { return [...new Set(values.filter(Boolean))].sort((a, b) => String(a).localeCompare(String(b))); }
+function metricSort(a, b) {
+  const ai = preferredMetricOrder.indexOf(a);
+  const bi = preferredMetricOrder.indexOf(b);
+  if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  return a.localeCompare(b);
+}
+function scopeSort(a, b) {
+  const ai = preferredScopeOrder.indexOf(a);
+  const bi = preferredScopeOrder.indexOf(b);
+  if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+  return a.localeCompare(b);
+}
 function fill(select, values, preferred = "") {
   const current = select.value;
   select.innerHTML = "";
@@ -106,18 +539,108 @@ function fill(select, values, preferred = "") {
   }
   if (current && values.includes(current)) select.value = current;
   else if (preferred && values.includes(preferred)) select.value = preferred;
+  else if (values.length) select.value = values[0];
 }
-function fillBrands(values) {
-  const previous = new Set([...brandSelect.selectedOptions].map(option => option.value));
-  brandSelect.innerHTML = "";
+function fillMulti(select, values, selectedByDefault = true) {
+  const previous = new Set([...select.selectedOptions].map(option => option.value));
+  select.innerHTML = "";
   for (const value of values) {
     const option = document.createElement("option");
     option.value = value;
     option.textContent = value;
-    option.selected = previous.size === 0 || previous.has(value);
-    brandSelect.appendChild(option);
+    option.selected = previous.size === 0 ? selectedByDefault : previous.has(value);
+    select.appendChild(option);
   }
-  if (![...brandSelect.options].some(option => option.selected)) selectAllBrands();
+  if (values.length && ![...select.options].some(option => option.selected) && selectedByDefault) {
+    [...select.options].forEach(option => { option.selected = true; });
+  }
+}
+function init() {
+  const validators = unique(points.map(p => p.validator));
+  fill(validatorSelect, validators);
+  refreshMetrics();
+  draw();
+}
+function refreshMetrics() {
+  const validator = validatorSelect.value;
+  const subset = points.filter(p => p.validator === validator);
+  fill(metricSelect, unique(subset.map(p => p.metric)).sort(metricSort), "Style Completion %");
+  refreshScopes();
+  renderSummary();
+}
+function refreshScopes() {
+  const validator = validatorSelect.value;
+  const metric = metricSelect.value;
+  const subset = points.filter(p => p.validator === validator && p.metric === metric);
+  fill(scopeSelect, unique(subset.map(p => p.scope)).sort(scopeSort), "concept_brand_season");
+  renderScopeTabs();
+  refreshSeasonTypes();
+  refreshConcepts();
+  refreshBrands();
+}
+function renderScopeTabs() {
+  const scopes = [...scopeSelect.options].map(option => option.value);
+  scopeTabs.innerHTML = "";
+  for (const scope of scopes) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `tab-button${scope === scopeSelect.value ? " active" : ""}`;
+    button.textContent = scopeLabel(scope);
+    button.addEventListener("click", () => {
+      scopeSelect.value = scope;
+      refreshSeasonTypes();
+      refreshConcepts();
+      refreshBrands();
+      renderScopeTabs();
+      draw();
+    });
+    scopeTabs.appendChild(button);
+  }
+}
+function refreshConcepts() {
+  if (!usesConceptFilter()) {
+    fillMulti(conceptSelect, []);
+    updateFilterCounts();
+    return;
+  }
+  const selectedType = seasonTypeSelect.value;
+  const seasons = selectedSeasons();
+  const subset = selectedBasePoints().filter(p =>
+    !usesSeasonFilter() ||
+    ((!selectedType || seasonType(p) === selectedType) &&
+      (!selectedType || seasons.has(seasonLabel(p))))
+  );
+  fillMulti(conceptSelect, unique(subset.map(p => conceptLabel(p))));
+  updateFilterCounts();
+}
+function refreshBrands() {
+  if (!usesBrandFilter()) {
+    fillMulti(brandSelect, []);
+    updateFilterCounts();
+    return;
+  }
+  const concepts = selectedConcepts();
+  const selectedType = seasonTypeSelect.value;
+  const seasons = selectedSeasons();
+  const subset = selectedBasePoints().filter(p =>
+    (!usesConceptFilter() || concepts.has(conceptLabel(p))) &&
+    (!usesSeasonFilter() ||
+      ((!selectedType || seasonType(p) === selectedType) &&
+        (!selectedType || seasons.has(seasonLabel(p)))))
+  );
+  fillMulti(brandSelect, unique(subset.map(p => brandLabel(p))));
+  updateFilterCounts();
+}
+function refreshSeasonTypes() {
+  if (!usesSeasonFilter()) {
+    fillSeasonTypes([""], "");
+    refreshSeasons();
+    return;
+  }
+  const subset = selectedBasePoints();
+  const types = unique(subset.map(p => seasonType(p)).filter(Boolean)).sort(seasonTypeSort);
+  fillSeasonTypes(types.length ? types : [""], "seasonal");
+  refreshSeasons();
 }
 function fillSeasonTypes(values, preferred = "") {
   const current = seasonTypeSelect.value;
@@ -130,78 +653,31 @@ function fillSeasonTypes(values, preferred = "") {
   }
   if (current && values.includes(current)) seasonTypeSelect.value = current;
   else if (preferred && values.includes(preferred)) seasonTypeSelect.value = preferred;
-}
-function fillSeasons(values) {
-  const previous = new Set([...seasonSelect.selectedOptions].map(option => option.value));
-  seasonSelect.innerHTML = "";
-  for (const value of values) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    option.selected = previous.size === 0 || previous.has(value);
-    seasonSelect.appendChild(option);
-  }
-  seasonSelect.disabled = values.length === 0;
-  allSeasonsButton.disabled = values.length === 0;
-  noSeasonsButton.disabled = values.length === 0;
-  if (values.length && ![...seasonSelect.options].some(option => option.selected)) selectAllSeasons();
-}
-function init() {
-  fill(validatorSelect, unique(points.map(p => p.validator)));
-  refreshMetrics();
-  draw();
-}
-function refreshMetrics() {
-  const validator = validatorSelect.value;
-  const subset = points.filter(p => p.validator === validator);
-  fill(metricSelect, unique(subset.map(p => p.metric)));
-  refreshScopes();
-}
-function refreshScopes() {
-  const validator = validatorSelect.value;
-  const metric = metricSelect.value;
-  const subset = points.filter(p => p.validator === validator && p.metric === metric);
-  fill(scopeSelect, unique(subset.map(p => p.scope)), "concept_brand_season");
-  refreshSeasonTypes();
-  refreshConcepts();
-  refreshBrands();
-}
-function refreshConcepts() {
-  const selectedType = seasonTypeSelect.value;
-  const seasons = selectedSeasons();
-  const subset = selectedBasePoints().filter(p =>
-    (!selectedType || seasonType(p) === selectedType) &&
-    (!selectedType || seasons.has(seasonLabel(p)))
-  );
-  fillConcepts(unique(subset.map(p => conceptLabel(p))));
-}
-function refreshBrands() {
-  const concepts = selectedConcepts();
-  const selectedType = seasonTypeSelect.value;
-  const seasons = selectedSeasons();
-  const subset = selectedBasePoints().filter(p =>
-    concepts.has(conceptLabel(p)) &&
-    (!selectedType || seasonType(p) === selectedType) &&
-    (!selectedType || seasons.has(seasonLabel(p)))
-  );
-  fillBrands(unique(subset.map(p => brandLabel(p))));
-}
-function refreshSeasonTypes() {
-  const subset = selectedBasePoints();
-  const types = unique(subset.map(p => seasonType(p)).filter(Boolean)).sort(seasonTypeSort);
-  fillSeasonTypes(types.length ? types : [""], "seasonal");
-  refreshSeasons();
+  else if (values.length) seasonTypeSelect.value = values[0];
 }
 function refreshSeasons() {
+  if (!usesSeasonFilter()) {
+    fillMulti(seasonSelect, []);
+    seasonSelect.disabled = true;
+    allSeasonsButton.disabled = true;
+    noSeasonsButton.disabled = true;
+    updateFilterCounts();
+    return;
+  }
   const selectedType = seasonTypeSelect.value;
   const seasons = selectedType
     ? unique(selectedBasePoints()
         .filter(p => seasonType(p) === selectedType)
         .map(p => seasonLabel(p))
         .filter(Boolean))
-        .sort((a, b) => seasonSortKey(a).localeCompare(seasonSortKey(b)))
+        .sort(seasonLabelRecencySort)
     : [];
-  fillSeasons(seasons);
+  fillMulti(seasonSelect, seasons);
+  const disabled = seasons.length === 0;
+  seasonSelect.disabled = disabled;
+  allSeasonsButton.disabled = disabled;
+  noSeasonsButton.disabled = disabled;
+  updateFilterCounts();
 }
 function selectedBasePoints() {
   return points.filter(p =>
@@ -216,72 +692,133 @@ function selectedBrands() {
 function selectedConcepts() {
   return new Set([...conceptSelect.selectedOptions].map(option => option.value));
 }
-function fillConcepts(values) {
-  const previous = new Set([...conceptSelect.selectedOptions].map(option => option.value));
-  conceptSelect.innerHTML = "";
-  for (const value of values) {
-    const option = document.createElement("option");
-    option.value = value;
-    option.textContent = value;
-    option.selected = previous.size === 0 || previous.has(value);
-    conceptSelect.appendChild(option);
-  }
-  conceptSelect.disabled = values.length === 0;
-  allConceptsButton.disabled = values.length === 0;
-  noConceptsButton.disabled = values.length === 0;
-  if (values.length && ![...conceptSelect.options].some(option => option.selected)) selectAllConcepts();
-}
-function selectAllConcepts() {
-  [...conceptSelect.options].forEach(option => { option.selected = true; });
-}
-function selectNoConcepts() {
-  [...conceptSelect.options].forEach(option => { option.selected = false; });
-}
-function selectAllBrands() {
-  [...brandSelect.options].forEach(option => { option.selected = true; });
-}
-function selectNoBrands() {
-  [...brandSelect.options].forEach(option => { option.selected = false; });
-}
 function selectedSeasons() {
   return new Set([...seasonSelect.selectedOptions].map(option => option.value));
 }
-function selectAllSeasons() {
-  [...seasonSelect.options].forEach(option => { option.selected = true; });
+function selectAll(select) {
+  [...select.options].forEach(option => { option.selected = true; });
 }
-function selectNoSeasons() {
-  [...seasonSelect.options].forEach(option => { option.selected = false; });
+function selectNone(select) {
+  [...select.options].forEach(option => { option.selected = false; });
 }
 function filteredPoints() {
-  const concepts = selectedConcepts();
-  const brands = selectedBrands();
+  const filterConcepts = usesConceptFilter();
+  const filterBrands = usesBrandFilter();
+  const filterSeasons = usesSeasonFilter();
+  const concepts = filterConcepts ? selectedConcepts() : new Set();
+  const brands = filterBrands ? selectedBrands() : new Set();
   const selectedType = seasonTypeSelect.value;
-  const seasons = selectedSeasons();
+  const seasons = filterSeasons ? selectedSeasons() : new Set();
   return points.filter(p =>
     p.validator === validatorSelect.value &&
     p.metric === metricSelect.value &&
     p.scope === scopeSelect.value &&
-    concepts.has(conceptLabel(p)) &&
-    brands.has(brandLabel(p)) &&
-    (!selectedType || seasonType(p) === selectedType) &&
-    (!selectedType || seasons.has(seasonLabel(p)))
+    (!filterConcepts || concepts.has(conceptLabel(p))) &&
+    (!filterBrands || brands.has(brandLabel(p))) &&
+    (!filterSeasons || !selectedType || seasonType(p) === selectedType) &&
+    (!filterSeasons || !selectedType || seasons.has(seasonLabel(p)))
   );
 }
 function draw() {
+  renderSummary();
   const selected = filteredPoints();
+  const seriesMap = groupedSeries(selected);
+  const latestMap = latestBySeries(seriesMap);
+  renderRunStrip();
+  renderChart(selected, seriesMap);
+  renderLatestTable(latestMap, seriesMap);
+  updateFilterVisibility();
+  updateFilterCounts();
+  chartTitle.textContent = metricSelect.value || "History";
+  chartSubtitle.textContent = chartSubtitleParts().join(" · ");
+  tableSubtitle.textContent = `${latestMap.size} latest series from ${selected.length} grouped points`;
+  seriesCount.textContent = `${seriesMap.size} series`;
+}
+function chartSubtitleParts() {
+  const parts = [validatorSelect.value || "Validator", scopeLabel(scopeSelect.value)];
+  if (usesSeasonFilter()) parts.push(seasonTypeLabel(seasonTypeSelect.value));
+  return parts;
+}
+function renderSummary() {
+  summaryGrid.innerHTML = "";
+  const validator = validatorSelect.value;
+  const latestOverall = latestOverallMetrics(validator);
+  const cards = summaryMetrics
+    .map(metric => latestOverall.get(metric))
+    .filter(Boolean);
+  if (!cards.length) {
+    summaryGrid.appendChild(emptySummaryCard("No summary metrics", "Run a validator with overall history metrics."));
+    return;
+  }
+  for (const point of cards.slice(0, 5)) summaryGrid.appendChild(summaryCard(point));
+}
+function emptySummaryCard(title, subtitle) {
+  const card = document.createElement("article");
+  card.className = "summary-card";
+  card.innerHTML = `<div class="summary-label"><span>${escapeHtml(title)}</span></div><div class="summary-sub">${escapeHtml(subtitle)}</div>`;
+  return card;
+}
+function summaryCard(point) {
+  const card = document.createElement("article");
+  card.className = "summary-card";
+  const value = formatValue(point);
+  const sub = ratioLabel(point) || `${scopeLabel(point.scope)} · ${formatTimestamp(point.started_at)}`;
+  card.innerHTML = "";
+  const label = document.createElement("div");
+  label.className = "summary-label";
+  label.innerHTML = `<span>${escapeHtml(point.metric)}</span><span>${escapeHtml(trendShort(point.trend))}</span>`;
+  const valueEl = document.createElement("div");
+  valueEl.className = "summary-value";
+  valueEl.textContent = value;
+  const subEl = document.createElement("div");
+  subEl.className = "summary-sub";
+  subEl.textContent = sub;
+  card.append(label, valueEl, subEl);
+  if (point.unit === "percent") {
+    const progress = document.createElement("div");
+    progress.className = "progress";
+    progress.innerHTML = `<i style="width: ${clamp(Number(point.value), 0, 100)}%"></i>`;
+    card.appendChild(progress);
+  }
+  return card;
+}
+function latestOverallMetrics(validator) {
+  const overall = points
+    .filter(p => p.validator === validator && p.scope === "overall")
+    .sort(pointTimeSort);
+  const latest = new Map();
+  for (const point of overall) latest.set(point.metric, point);
+  return latest;
+}
+function renderRunStrip() {
+  runStrip.innerHTML = "";
+  const validator = validatorSelect.value;
+  const validatorPoints = points.filter(p => p.validator === validator);
+  const runIds = new Set(validatorPoints.map(p => p.run_id));
+  const latest = validatorPoints.slice().sort(pointTimeSort).at(-1);
+  const runPill = document.createElement("span");
+  runPill.className = "pill neutral";
+  runPill.textContent = `${runIds.size} runs`;
+  runStrip.appendChild(runPill);
+  if (latest?.started_at) {
+    const timePill = document.createElement("span");
+    timePill.className = "pill neutral";
+    timePill.textContent = formatTimestamp(latest.started_at);
+    runStrip.appendChild(timePill);
+  }
+}
+function renderChart(selected, seriesMap) {
   chart.innerHTML = "";
   legend.innerHTML = "";
   trendNote.textContent = "";
-  latestBody.innerHTML = "";
   if (!selected.length) {
-    chart.innerHTML = '<text x="24" y="48" class="empty">No matching history metrics.</text>';
+    emptyChart("No matching history metrics.");
     return;
   }
   const width = chart.clientWidth || 1000;
-  const height = chart.clientHeight || 520;
-  const margin = {left: 56, right: 24, top: 24, bottom: 54};
+  const height = chart.clientHeight || 500;
+  const margin = {left: 64, right: 28, top: 28, bottom: 58};
   const buckets = unique(selected.map(p => p.bucket));
-  const seriesMap = groupedSeries(selected);
   const seriesKeys = [...seriesMap.keys()].sort();
   const domain = valueDomain(selected);
   const trend = selected[0]?.trend || "neutral";
@@ -290,44 +827,45 @@ function draw() {
     : margin.left + (buckets.indexOf(bucket) / (buckets.length - 1)) * (width - margin.left - margin.right);
   const y = value => height - margin.bottom - ((Number(value) - domain.min) / Math.max(1, domain.max - domain.min)) * (height - margin.top - margin.bottom);
   const ns = "http://www.w3.org/2000/svg";
-  function el(name, attrs) {
+  function el(name, attrs, parent = chart) {
     const node = document.createElementNS(ns, name);
     for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-    chart.appendChild(node);
+    parent.appendChild(node);
     return node;
   }
-  el("line", {x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, stroke: "#b8c2cc"});
-  el("line", {x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, stroke: "#b8c2cc"});
+  el("rect", {x: 0, y: 0, width, height, fill: "transparent"});
   for (let i = 0; i <= 4; i++) {
     const value = domain.min + ((domain.max - domain.min) / 4) * i;
     const yy = y(value);
     el("line", {x1: margin.left, y1: yy, x2: width - margin.right, y2: yy, stroke: "#edf1f5"});
-    const label = el("text", {x: 8, y: yy + 4, fill: "#5b6673", "font-size": "12"});
+    const label = el("text", {x: margin.left - 12, y: yy + 4, fill: "#667384", "font-size": "12", "text-anchor": "end"});
     label.textContent = formatAxisValue(value, selected[0]?.unit);
   }
+  el("line", {x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, stroke: "#c4ced9"});
+  el("line", {x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, stroke: "#c4ced9"});
   buckets.forEach((bucket, index) => {
-    const label = el("text", {x: x(bucket), y: height - 20, fill: "#5b6673", "font-size": "12", "text-anchor": "middle"});
-    label.textContent = buckets.length > 12 && index % Math.ceil(buckets.length / 12) ? "" : bucket;
+    const xx = x(bucket);
+    el("line", {x1: xx, y1: height - margin.bottom, x2: xx, y2: height - margin.bottom + 5, stroke: "#c4ced9"});
+    const label = el("text", {x: xx, y: height - 24, fill: "#667384", "font-size": "12", "text-anchor": "middle"});
+    label.textContent = buckets.length > 10 && index % Math.ceil(buckets.length / 10) ? "" : bucket;
   });
-  const latest = new Map();
-  const previousLatest = new Map();
   seriesKeys.forEach((key, index) => {
     const series = seriesMap.get(key) || [];
-    const d = series.map(p => `${x(p.bucket)},${y(p.value)}`).join(" ");
     const color = colors[index % colors.length];
-    el("polyline", {points: d, fill: "none", stroke: color, "stroke-width": 2.2});
+    const d = series.map(p => `${x(p.bucket)},${y(p.value)}`).join(" ");
+    el("polyline", {points: d, fill: "none", stroke: color, "stroke-width": 2.6, "stroke-linejoin": "round", "stroke-linecap": "round"});
     for (const point of series) {
-      el("circle", {
+      const dot = el("circle", {
         cx: x(point.bucket),
         cy: y(point.value),
         r: 4.5,
         fill: color,
         stroke: "#ffffff",
-        "stroke-width": 1.6,
+        "stroke-width": 1.8,
       });
+      const title = el("title", {}, dot);
+      title.textContent = `${seriesLabel(point)} · ${point.bucket} · ${formatValue(point)}`;
     }
-    latest.set(key, series[series.length - 1]);
-    previousLatest.set(key, series.length > 1 ? series[series.length - 2] : null);
     const item = document.createElement("span");
     const swatch = document.createElement("i");
     swatch.className = "swatch";
@@ -337,28 +875,125 @@ function draw() {
     legend.appendChild(item);
   });
   trendNote.textContent = trendHelp(trend);
-  [...latest.entries()].sort((a, b) => seriesLabel(a[1]).localeCompare(seriesLabel(b[1]))).forEach(([_key, point]) => {
-    const previous = previousLatest.get(_key);
-    const movement = movementStatus(point, previous);
+}
+function emptyChart(message) {
+  const ns = "http://www.w3.org/2000/svg";
+  const text = document.createElementNS(ns, "text");
+  text.setAttribute("x", "28");
+  text.setAttribute("y", "48");
+  text.setAttribute("class", "empty");
+  text.textContent = message;
+  chart.appendChild(text);
+}
+function renderLatestTable(latestMap, seriesMap) {
+  latestBody.innerHTML = "";
+  if (!latestMap.size) {
     const row = document.createElement("tr");
-    const values = [
-      seriesLabel(point),
-      point.bucket,
-      `${point.value} ${point.unit}`,
-      trendLabel(point.trend),
-      previous ? String(previous.value) : "",
-      changeLabel(point, previous),
-      movement.label,
-      formatTimestamp(point.started_at),
-    ];
-    values.forEach((value, index) => {
-      const cell = document.createElement("td");
-      cell.textContent = value;
-      if (index === 6) cell.className = `movement ${movement.className}`;
-      row.appendChild(cell);
-    });
+    const cell = document.createElement("td");
+    cell.colSpan = 8;
+    cell.className = "empty-state";
+    cell.textContent = "No matching latest points.";
+    row.appendChild(cell);
     latestBody.appendChild(row);
-  });
+    return;
+  }
+  [...latestMap.entries()]
+    .map(([key, point]) => ({key, point, series: seriesMap.get(key) || []}))
+    .sort((a, b) => seriesRowSort(a.point, b.point))
+    .forEach(({point, series}) => {
+      const previous = series.length > 1 ? series[series.length - 2] : null;
+      const movement = movementStatus(point, previous);
+      const row = document.createElement("tr");
+      appendCell(row, seriesLabel(point), "series-cell");
+      appendCell(row, point.bucket);
+      appendValueCell(row, point);
+      appendCell(row, previous ? formatValue(previous) : "");
+      appendCell(row, changeLabel(point, previous));
+      const movementCell = document.createElement("td");
+      const movementEl = document.createElement("span");
+      movementEl.className = `movement ${movement.className}`;
+      movementEl.textContent = movement.label;
+      movementCell.appendChild(movementEl);
+      row.appendChild(movementCell);
+      appendCell(row, formatTimestamp(point.started_at));
+      appendReportCell(row, point);
+      latestBody.appendChild(row);
+    });
+}
+function appendCell(row, value, className = "") {
+  const cell = document.createElement("td");
+  if (className) cell.className = className;
+  cell.textContent = value;
+  row.appendChild(cell);
+}
+function appendValueCell(row, point) {
+  const cell = document.createElement("td");
+  cell.className = "value-cell";
+  const main = document.createElement("div");
+  main.className = "value-main";
+  main.textContent = formatValue(point);
+  cell.appendChild(main);
+  const ratio = ratioLabel(point);
+  if (ratio) {
+    const sub = document.createElement("div");
+    sub.className = "summary-sub";
+    sub.textContent = ratio;
+    cell.appendChild(sub);
+  }
+  if (point.unit === "percent") {
+    const mini = document.createElement("div");
+    mini.className = "mini-progress";
+    mini.innerHTML = `<i style="width: ${clamp(Number(point.value), 0, 100)}%"></i>`;
+    cell.appendChild(mini);
+  }
+  row.appendChild(cell);
+}
+function appendReportCell(row, point) {
+  const cell = document.createElement("td");
+  if (point.report_path) {
+    const link = document.createElement("a");
+    link.className = "report-link";
+    link.href = artifactHref(point.report_path);
+    link.textContent = "Open";
+    cell.appendChild(link);
+  }
+  row.appendChild(cell);
+}
+function artifactHref(path) {
+  const value = String(path || "");
+  const outputDir = String(historyPayload.output_dir || "");
+  if (value.startsWith("/") && outputDir && value.startsWith(`${outputDir}/`)) {
+    return value.slice(outputDir.length + 1);
+  }
+  if (value.startsWith("/") && outputDir) {
+    return relativePath(outputDir, value);
+  }
+  return value;
+}
+function relativePath(fromDir, toPath) {
+  const fromParts = fromDir.split("/").filter(Boolean);
+  const toParts = toPath.split("/").filter(Boolean);
+  while (fromParts.length && toParts.length && fromParts[0] === toParts[0]) {
+    fromParts.shift();
+    toParts.shift();
+  }
+  return `${"../".repeat(fromParts.length)}${toParts.join("/")}`;
+}
+function updateFilterVisibility() {
+  seasonTypePanel.hidden = !usesSeasonFilter();
+  seasonPanel.hidden = !usesSeasonFilter() || seasonSelect.options.length === 0;
+  conceptPanel.hidden = !usesConceptFilter() || conceptSelect.options.length === 0;
+  brandPanel.hidden = !usesBrandFilter() || brandSelect.options.length === 0;
+}
+function updateFilterCounts() {
+  conceptCount.textContent = selectedCountLabel(conceptSelect);
+  brandCount.textContent = selectedCountLabel(brandSelect);
+  seasonCount.textContent = seasonSelect.disabled ? "No season split" : selectedCountLabel(seasonSelect);
+}
+function selectedCountLabel(select) {
+  const total = select.options.length;
+  const selected = select.selectedOptions.length;
+  return `${selected} of ${total} selected`;
 }
 function valueDomain(selected) {
   const values = selected.map(p => Number(p.value)).filter(Number.isFinite);
@@ -380,18 +1015,31 @@ function valueDomain(selected) {
   const yMin = min >= 0 ? Math.max(0, min - pad) : min - pad;
   return {min: yMin, max: max + pad};
 }
+function formatValue(point) {
+  const value = Number(point.value);
+  if (point.unit === "percent") return `${formatNumber(value)}%`;
+  return formatNumber(value);
+}
+function formatNumber(value) {
+  if (!Number.isFinite(value)) return "";
+  return new Intl.NumberFormat("en-US", {maximumFractionDigits: Math.abs(value) >= 10 ? 0 : 2}).format(value);
+}
 function formatAxisValue(value, unit) {
   if (unit === "percent") return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
   return value.toFixed(Math.abs(value) >= 10 ? 0 : 1);
 }
+function ratioLabel(point) {
+  if (point.numerator === null || point.numerator === undefined || point.denominator === null || point.denominator === undefined) return "";
+  return `${formatNumber(Number(point.numerator))} / ${formatNumber(Number(point.denominator))}`;
+}
 function formatTimestamp(value) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/);
-  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}` : String(value || "");
+  return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}` : String(value || "");
 }
-function trendLabel(trend) {
+function trendShort(trend) {
   if (trend === "up") return "Higher is better";
   if (trend === "down") return "Lower is better";
-  return "Neutral";
+  return "Context";
 }
 function trendHelp(trend) {
   if (trend === "up") return "Trend intent: higher values are better.";
@@ -413,6 +1061,11 @@ function groupedSeries(selected) {
   }
   return grouped;
 }
+function latestBySeries(seriesMap) {
+  const latest = new Map();
+  for (const [key, series] of seriesMap.entries()) latest.set(key, series[series.length - 1]);
+  return latest;
+}
 function seasonType(point) {
   return point.dimensions?.season_type || "";
 }
@@ -425,8 +1078,67 @@ function conceptLabel(point) {
 function brandLabel(point) {
   return point.brand || point.dimensions?.brand || "Overall";
 }
+function seriesRowSort(a, b) {
+  return conceptLabel(a).localeCompare(conceptLabel(b)) ||
+    brandLabel(a).localeCompare(brandLabel(b)) ||
+    seasonRecencySortKey(a).localeCompare(seasonRecencySortKey(b)) ||
+    seriesLabel(a).localeCompare(seriesLabel(b));
+}
+function seasonRecencySortKey(point) {
+  const dimensions = point.dimensions || {};
+  const year = String(dimensions.season_year || "").trim();
+  if (year && year !== "UNKNOWN") {
+    const yearNumber = Number(year);
+    const normalizedYear = Number.isFinite(yearNumber) ? yearNumber : 0;
+    return `0-${String(9999 - normalizedYear).padStart(4, "0")}-${seasonSlotSortKey(dimensions.season_slot)}`;
+  }
+  const label = seasonLabel(point);
+  if (!label) return "9";
+  const parsed = parseSeasonLabel(label);
+  if (!parsed) return `8-${label}`;
+  return `0-${String(9999 - parsed.year).padStart(4, "0")}-${seasonSlotSortKey(parsed.slot)}`;
+}
+function parseSeasonLabel(label) {
+  const text = String(label || "").toUpperCase().replace(/\s+/g, "");
+  const cyclePrefix = text.match(/^([123]C)(\d{2}|\d{4})$/);
+  if (cyclePrefix) return {slot: cyclePrefix[1], year: fullYear(cyclePrefix[2])};
+  const cycleSuffix = text.match(/^(\d{2}|\d{4})([123]C)$/);
+  if (cycleSuffix) return {slot: cycleSuffix[2], year: fullYear(cycleSuffix[1])};
+  const seasonalPrefix = text.match(/^(SS|SP|AW|FW|FA)(\d{2}|\d{4})$/);
+  if (seasonalPrefix) return {slot: normalizedSeasonSlot(seasonalPrefix[1]), year: fullYear(seasonalPrefix[2])};
+  const seasonalSuffix = text.match(/^(\d{2}|\d{4})(SS|SP|AW|FW|FA)$/);
+  if (seasonalSuffix) return {slot: normalizedSeasonSlot(seasonalSuffix[2]), year: fullYear(seasonalSuffix[1])};
+  const fiscalPrefix = text.match(/^FY(\d{2}|\d{4})$/);
+  if (fiscalPrefix) return {slot: "FY", year: fullYear(fiscalPrefix[1])};
+  const fiscalSuffix = text.match(/^(\d{2}|\d{4})FY$/);
+  if (fiscalSuffix) return {slot: "FY", year: fullYear(fiscalSuffix[1])};
+  const yearOnly = text.match(/^(\d{2}|\d{4})$/);
+  if (yearOnly) return {slot: "", year: fullYear(yearOnly[1])};
+  return null;
+}
+function fullYear(value) {
+  const text = String(value || "");
+  const number = Number(text.length === 2 ? `20${text}` : text);
+  return Number.isFinite(number) ? number : 0;
+}
+function normalizedSeasonSlot(value) {
+  return ["SS", "SP"].includes(value) ? "SS" : "AW";
+}
+function seasonSlotSortKey(slot) {
+  const order = {"3C": 1, "2C": 2, "1C": 3, "AW": 1, "SS": 2, "FY": 1, "": 9, "UNKNOWN": 9};
+  return String(order[String(slot || "").toUpperCase()] || 8).padStart(2, "0");
+}
+function usesConceptFilter() {
+  return ["concept", "concept_brand_season"].includes(scopeSelect.value);
+}
+function usesBrandFilter() {
+  return ["brand", "concept_brand_season"].includes(scopeSelect.value);
+}
+function usesSeasonFilter() {
+  return ["concept_brand_season"].includes(scopeSelect.value);
+}
 function seriesKey(point) {
-  return `${conceptLabel(point)}\\u0000${brandLabel(point)}\\u0000${seasonType(point)}\\u0000${seasonLabel(point)}`;
+  return `${conceptLabel(point)}\u0000${brandLabel(point)}\u0000${seasonType(point)}\u0000${seasonLabel(point)}`;
 }
 function seriesLabel(point) {
   const concept = conceptLabel(point);
@@ -437,6 +1149,14 @@ function seriesLabel(point) {
   if (brand !== "Overall") parts.push(brand);
   if (season) parts.push(season);
   return parts.length ? parts.join(" · ") : "Overall";
+}
+function scopeLabel(value) {
+  if (value === "overall") return "Overall";
+  if (value === "year") return "By Year";
+  if (value === "concept") return "Concept";
+  if (value === "concept_brand_season") return "Concept / Brand / Season";
+  if (value === "brand") return "Brand";
+  return value || "Scope";
 }
 function seasonTypeLabel(value) {
   if (value === "cycle") return "Cycle";
@@ -464,11 +1184,20 @@ function seasonSortKey(label) {
   else if (/^FY|FY$/.test(text)) slot = 1;
   return `${normalizedYear.padStart(4, "0")}-${String(slot).padStart(2, "0")}-${text}`;
 }
+function seasonLabelRecencySort(a, b) {
+  return seasonLabelRecencySortKey(a).localeCompare(seasonLabelRecencySortKey(b));
+}
+function seasonLabelRecencySortKey(label) {
+  const parsed = parseSeasonLabel(label);
+  if (!parsed) return `8-${label}`;
+  return `0-${String(9999 - parsed.year).padStart(4, "0")}-${seasonSlotSortKey(parsed.slot)}-${label}`;
+}
 function changeLabel(point, previous) {
   if (!previous) return "";
   const change = Number(point.value) - Number(previous.value);
   const sign = change > 0 ? "+" : "";
-  return `${sign}${change.toFixed(Math.abs(change) >= 10 ? 0 : 2)}`;
+  const suffix = point.unit === "percent" ? " pts" : "";
+  return `${sign}${change.toFixed(Math.abs(change) >= 10 ? 0 : 2)}${suffix}`;
 }
 function movementStatus(point, previous) {
   if (!previous) return {label: "New", className: "new"};
@@ -482,19 +1211,36 @@ function movementStatus(point, previous) {
     : {label: "Worse", className: "bad"};
   return {label: "Changed", className: "neutral"};
 }
+function pointTimeSort(a, b) {
+  return String(a.started_at || "").localeCompare(String(b.started_at || "")) ||
+    String(a.run_id || "").localeCompare(String(b.run_id || ""));
+}
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[char]));
+}
 validatorSelect.addEventListener("change", () => { refreshMetrics(); draw(); });
 metricSelect.addEventListener("change", () => { refreshScopes(); draw(); });
-scopeSelect.addEventListener("change", () => { refreshSeasonTypes(); refreshConcepts(); refreshBrands(); draw(); });
+scopeSelect.addEventListener("change", () => { refreshSeasonTypes(); refreshConcepts(); refreshBrands(); renderScopeTabs(); draw(); });
 conceptSelect.addEventListener("change", () => { refreshBrands(); draw(); });
-allConceptsButton.addEventListener("click", () => { selectAllConcepts(); refreshBrands(); draw(); });
-noConceptsButton.addEventListener("click", () => { selectNoConcepts(); refreshBrands(); draw(); });
-brandSelect.addEventListener("change", draw);
-allBrandsButton.addEventListener("click", () => { selectAllBrands(); draw(); });
-noBrandsButton.addEventListener("click", () => { selectNoBrands(); draw(); });
+allConceptsButton.addEventListener("click", () => { selectAll(conceptSelect); refreshBrands(); draw(); });
+noConceptsButton.addEventListener("click", () => { selectNone(conceptSelect); refreshBrands(); draw(); });
+brandSelect.addEventListener("change", () => { updateFilterCounts(); draw(); });
+allBrandsButton.addEventListener("click", () => { selectAll(brandSelect); updateFilterCounts(); draw(); });
+noBrandsButton.addEventListener("click", () => { selectNone(brandSelect); updateFilterCounts(); draw(); });
 seasonTypeSelect.addEventListener("change", () => { refreshSeasons(); refreshConcepts(); refreshBrands(); draw(); });
 seasonSelect.addEventListener("change", () => { refreshConcepts(); refreshBrands(); draw(); });
-allSeasonsButton.addEventListener("click", () => { selectAllSeasons(); refreshConcepts(); refreshBrands(); draw(); });
-noSeasonsButton.addEventListener("click", () => { selectNoSeasons(); refreshConcepts(); refreshBrands(); draw(); });
+allSeasonsButton.addEventListener("click", () => { selectAll(seasonSelect); refreshConcepts(); refreshBrands(); draw(); });
+noSeasonsButton.addEventListener("click", () => { selectNone(seasonSelect); refreshConcepts(); refreshBrands(); draw(); });
+resetFiltersButton.addEventListener("click", () => { refreshScopes(); draw(); });
 window.addEventListener("resize", draw);
 init();
 </script>
