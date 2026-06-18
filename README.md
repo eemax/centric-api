@@ -60,6 +60,7 @@ uv run centric-api doctor
 uv run centric-api ingest check 2026-06-16T124501Z-full
 uv run centric-api ingest raw-run 2026-06-16T124501Z-full --changelog
 uv run centric-api rebuild-db --yes
+uv run centric-api rebuild-db --yes --skip-changelog
 uv run centric-api cron
 uv run centric-api cron "0 * * * *" --endpoint styles
 ```
@@ -186,7 +187,9 @@ normal scoped changelog from the ingest result.
 
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays completed raw evidence from `CENTRIC_API_HOME/raw/runs` into a fresh DB, rebuilds changelog,
-and reinstalls dashboard views. Use `--raw-dir` or `--db` to override the defaults.
+and reinstalls dashboard views. Use `--skip-changelog` for faster cache-only rebuilds after schema
+or ingest-rule changes; run `centric-api changelog update` later if changelog views need to match
+the rebuilt cache. Use `--raw-dir` or `--db` to override the defaults.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed

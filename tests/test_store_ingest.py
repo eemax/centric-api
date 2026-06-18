@@ -60,7 +60,7 @@ endpoints:
     assert tombstones == 1
 
 
-def test_default_schema_tombstones_ad_hoc_bom_sections(tmp_path: Path) -> None:
+def test_default_schema_keeps_inactive_ad_hoc_bom_sections(tmp_path: Path) -> None:
     raw_dir = tmp_path / "raw"
     run_dir = raw_dir / "runs" / "run-1"
     run_dir.mkdir(parents=True)
@@ -70,7 +70,7 @@ def test_default_schema_tombstones_ad_hoc_bom_sections(tmp_path: Path) -> None:
                 "id": "BS1",
                 "_modified_at": "2026-01-01T00:00:00Z",
                 "node_name": "Custom Section",
-                "active": True,
+                "active": False,
                 "ad_hoc": True,
             }
         )
@@ -93,20 +93,21 @@ def test_default_schema_tombstones_ad_hoc_bom_sections(tmp_path: Path) -> None:
     result = ingest_raw_dir(raw_dir, db_path, schemas=load_endpoint_schemas())
 
     assert result.records_read == 1
-    assert result.records_upserted == 0
+    assert result.records_upserted == 1
     assert result.records_deleted == 0
     with sqlite3.connect(db_path) as conn:
-        current = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
-        tombstone = conn.execute(
+        current = conn.execute(
             """
             SELECT payload_json
-            FROM endpoint_tombstones
+            FROM endpoint_records
             WHERE endpoint = 'bom_sections' AND record_id = 'BS1'
             """
         ).fetchone()
-    assert current == 0
-    assert tombstone is not None
-    assert json.loads(tombstone[0])["ad_hoc"] is True
+        tombstones = conn.execute("SELECT COUNT(*) FROM endpoint_tombstones").fetchone()[0]
+    assert current is not None
+    assert json.loads(current[0])["ad_hoc"] is True
+    assert json.loads(current[0])["active"] is False
+    assert tombstones == 0
 
 
 def test_default_schema_tombstones_compositions_not_ok_for_material(tmp_path: Path) -> None:

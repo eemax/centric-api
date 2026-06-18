@@ -860,6 +860,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--schema", metavar="PATH", default=None, help="Endpoint schema config path."
     )
     rebuild_parser.add_argument("--yes", action="store_true", help="Confirm destructive rebuild.")
+    rebuild_parser.add_argument(
+        "--skip-changelog",
+        action="store_true",
+        help="Skip full changelog rebuild after raw ingest.",
+    )
     rebuild_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
     return parser
 

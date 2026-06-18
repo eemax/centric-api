@@ -570,10 +570,12 @@ to `logs/cron.jsonl`, and uses the fetch lock to avoid overlapping fetches.
 ```bash
 uv run centric-api rebuild-db --yes
 uv run centric-api rebuild-db --yes --raw-dir ~/.centric-api/raw
+uv run centric-api rebuild-db --yes --skip-changelog
 uv run centric-api rebuild-db --yes --json
 ```
 
 `rebuild-db` is the recovery path for SQLite. It refuses to run without `--yes`, backs up the current
 database files, replays raw evidence into a fresh database, rebuilds changelog, and reinstalls
-dashboard views. Human output shows progress through the long-running rebuild phases; `--json`
-keeps stdout to a single summary object.
+dashboard views. Use `--skip-changelog` for faster cache-only rebuilds when changelog views can be
+refreshed later with `centric-api changelog update`. Human output shows progress through the
+long-running rebuild phases; `--json` keeps stdout to a single summary object.

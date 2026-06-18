@@ -364,6 +364,54 @@ def test_rebuild_db_replays_raw_evidence(tmp_path, capsys) -> None:
     assert count == 1
 
 
+def test_rebuild_db_can_skip_changelog(tmp_path, monkeypatch, capsys) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    def fail_changelog(*_args, **_kwargs):
+        raise AssertionError("changelog should not run")
+
+    monkeypatch.setattr("centric_api.commands.rebuild_db.record_changelog", fail_changelog)
+
+    exit_code = main(
+        [
+            "rebuild-db",
+            "--db",
+            str(db_path),
+            "--raw-dir",
+            str(raw_dir),
+            "--yes",
+            "--skip-changelog",
+            "--json",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["changelog"] is None
+    assert "full changelog rebuild skipped" in payload["changelog_skipped"]
+    with sqlite3.connect(db_path) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
+    assert count == 1
+
+
 def test_failed_rebuild_keeps_existing_db_active(tmp_path, monkeypatch, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -439,3 +487,44 @@ def test_rebuild_db_reports_human_progress(tmp_path, capsys) -> None:
     assert "Ingesting raw records..." in output
     assert "Updating changelog..." in output
     assert "SQLite Rebuilt" in output
+
+
+def test_rebuild_db_reports_skipped_changelog(tmp_path, capsys) -> None:
+    raw_dir = tmp_path / "raw"
+    run_dir = raw_dir / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "styles.jsonl").write_text(
+        json.dumps({"id": "S1", "_modified_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "mode": "full",
+                "started_at": "2026-01-01T00:00:00Z",
+                "endpoints": {"styles": {"file": "styles.jsonl", "is_delta": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "centric.db"
+
+    exit_code = main(
+        [
+            "rebuild-db",
+            "--db",
+            str(db_path),
+            "--raw-dir",
+            str(raw_dir),
+            "--yes",
+            "--skip-changelog",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Skipping changelog rebuild..." in output
+    assert "Updating changelog..." not in output
+    assert "Skipped: yes" in output
+    assert "Refresh: centric-api changelog update" in output

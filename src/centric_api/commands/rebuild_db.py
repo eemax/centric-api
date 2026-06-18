@@ -7,12 +7,14 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..changelog import record_changelog
+from ..changelog import ChangelogRun, record_changelog
 from ..config import ConfigError, runtime_path
 from ..defaults import db_path
 from ..schema import load_endpoint_schemas
 from ..store import connect, ingest_raw_dir
 from .health import _changelog_record, _ingest_record
+
+CHANGELOG_REFRESH_COMMAND = "centric-api changelog update"
 
 
 def run_rebuild_db(args: argparse.Namespace) -> int:
@@ -36,12 +38,21 @@ def run_rebuild_db(args: argparse.Namespace) -> int:
         _emit_progress(progress, f"Temp DB: {temp_db_path}")
         _emit_progress(progress, "Ingesting raw records...")
         ingest_result = ingest_raw_dir(raw_dir, temp_db_path, schemas=schemas)
-        _emit_progress(progress, "Updating changelog...")
-        changelog_run = record_changelog(
-            temp_db_path,
-            full=True,
-            progress=_indented_progress(progress),
-        )
+        changelog_run: ChangelogRun | None = None
+        changelog_skipped = None
+        if args.skip_changelog:
+            changelog_skipped = (
+                "full changelog rebuild skipped; run "
+                f"`{CHANGELOG_REFRESH_COMMAND}` if changelog views need refresh"
+            )
+            _emit_progress(progress, "Skipping changelog rebuild...")
+        else:
+            _emit_progress(progress, "Updating changelog...")
+            changelog_run = record_changelog(
+                temp_db_path,
+                full=True,
+                progress=_indented_progress(progress),
+            )
         _emit_progress(progress, "Opening rebuilt DB...")
         _checkpoint_rebuilt_db(temp_db_path)
         _emit_progress(progress, "Backing up existing DB files...")
@@ -56,7 +67,8 @@ def run_rebuild_db(args: argparse.Namespace) -> int:
         "raw_dir": str(raw_dir),
         "backups": [str(path) for path in backups],
         "ingest": _ingest_record(ingest_result),
-        "changelog": _changelog_record(changelog_run),
+        "changelog": _changelog_record(changelog_run) if changelog_run is not None else None,
+        "changelog_skipped": changelog_skipped,
     }
     if args.json:
         print(json.dumps(payload, default=str))
@@ -76,8 +88,13 @@ def run_rebuild_db(args: argparse.Namespace) -> int:
         print(f"Hard del: {ingest_result.records_hard_deleted}")
         print()
         print("Changelog")
-        print(f"Run:     {changelog_run.run_id}")
-        print(f"Events:  {changelog_run.event_count}")
+        if changelog_run is not None:
+            print(f"Run:     {changelog_run.run_id}")
+            print(f"Events:  {changelog_run.event_count}")
+        else:
+            print("Skipped: yes")
+            print("Warning: full changelog rebuild skipped.")
+            print(f"Refresh: {CHANGELOG_REFRESH_COMMAND}")
     return 0
 
 

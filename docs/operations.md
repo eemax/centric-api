@@ -184,6 +184,7 @@ Use `rebuild-db --yes` when the SQLite cache is stale, corrupted, or has an old 
 
 ```bash
 uv run centric-api rebuild-db --yes
+uv run centric-api rebuild-db --yes --skip-changelog
 uv run centric-api rebuild-db --yes --json
 ```
 
@@ -192,7 +193,11 @@ The command:
 1. Backs up the current database, WAL, and SHM files with timestamped suffixes.
 2. Replays completed raw evidence from `CENTRIC_API_HOME/raw/runs` when using the default
    `CENTRIC_API_HOME/raw` root, or from `--raw-dir`.
-3. Rebuilds changelog from current cached records.
+3. Rebuilds changelog from current cached records, unless `--skip-changelog` is used.
 4. Reinstalls feature tables and dashboard views.
+
+`--skip-changelog` is useful after schema or ingest-rule changes where the cache must be replayed
+from raw evidence but changelog views do not need to be refreshed immediately. Run
+`centric-api changelog update` afterward when those views need to match the rebuilt cache.
 
 `rebuild-db` refuses to run without `--yes`.

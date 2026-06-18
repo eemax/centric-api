@@ -136,8 +136,8 @@ adds rules to the defaults or an earlier shared schema file.
 
 The bundled endpoint schema tombstones inactive records for standard active/inactive endpoints.
 `compositions` uses `ok_for_material: false` because that endpoint does not expose the standard
-`active` field. `bom_sections` also tombstones ad hoc sections because load workflows validate
-against active, standard BOM sections only.
+`active` field. `bom_sections` are intentionally kept even when inactive or ad hoc because
+historical BOM rows can still reference those section records.
 
 ## Download Config
 

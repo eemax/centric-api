@@ -75,9 +75,4 @@ def test_default_configs_load_outside_repo_root(
     assert "product_sources" in endpoint_schemas
     assert "bom_subtypes" in endpoint_schemas
     bom_sections_schema = endpoint_schemas["bom_sections"]
-    assert ("active", False) in {
-        (condition.field, condition.equals) for condition in bom_sections_schema.delete_when_any
-    }
-    assert ("ad_hoc", True) in {
-        (condition.field, condition.equals) for condition in bom_sections_schema.delete_when_any
-    }
+    assert bom_sections_schema.delete_when_any == ()
