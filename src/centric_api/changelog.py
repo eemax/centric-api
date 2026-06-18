@@ -22,10 +22,9 @@ from ._changelog.queries import (
     list_change_summary,
     list_changelog_runs,
     list_changes,
-    list_field_summary,
     parse_since,
 )
-from ._changelog.recording import record_changelog
+from ._changelog.recording import prune_changelog, record_changelog, seed_changelog_index
 
 __all__ = [
     "ACTIVITY_AT_SQL",
@@ -47,7 +46,8 @@ __all__ = [
     "list_change_summary",
     "list_changelog_runs",
     "list_changes",
-    "list_field_summary",
     "parse_since",
+    "prune_changelog",
     "record_changelog",
+    "seed_changelog_index",
 ]

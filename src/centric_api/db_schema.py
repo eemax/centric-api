@@ -75,7 +75,6 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "endpoint",
         "record_id",
         "payload_hash",
-        "payload_json",
         "changelog_source_sha256",
         "updated_at",
         "run_id",
@@ -94,37 +93,12 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "previous_payload_json",
         "current_payload_json",
     },
-    "endpoint_change_fields": {
-        "run_id",
-        "event_id",
-        "endpoint",
-        "record_id",
-        "changed_at",
-        "field",
-        "field_change_type",
-        "event_change_type",
-        "delete_type",
-        "modified_at",
-        "modified_by_id",
-        "modified_by_name",
-        "previous_value_json",
-        "current_value_json",
-    },
     "endpoint_change_summary": {
         "run_id",
         "changed_at",
         "endpoint",
         "change_type",
         "delete_type",
-        "count",
-    },
-    "endpoint_field_change_summary": {
-        "run_id",
-        "changed_at",
-        "endpoint",
-        "field",
-        "field_change_type",
-        "event_change_type",
         "count",
     },
     "endpoint_actor_change_summary": {
@@ -135,17 +109,6 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "modified_by_name",
         "change_type",
         "delete_type",
-        "count",
-    },
-    "endpoint_actor_field_change_summary": {
-        "run_id",
-        "changed_at",
-        "endpoint",
-        "modified_by_id",
-        "modified_by_name",
-        "field",
-        "field_change_type",
-        "event_change_type",
         "count",
     },
     "download_runs": {
@@ -481,7 +444,6 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
             endpoint TEXT NOT NULL,
             record_id TEXT NOT NULL,
             payload_hash TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
             changelog_source_sha256 TEXT,
             updated_at TEXT NOT NULL,
             run_id TEXT NOT NULL,
@@ -506,41 +468,12 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
             current_payload_json TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS endpoint_change_fields (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_id TEXT NOT NULL,
-            event_id INTEGER NOT NULL,
-            endpoint TEXT NOT NULL,
-            record_id TEXT NOT NULL,
-            changed_at TEXT NOT NULL,
-            field TEXT NOT NULL,
-            field_change_type TEXT NOT NULL,
-            event_change_type TEXT NOT NULL,
-            delete_type TEXT,
-            modified_at TEXT,
-            modified_by_id TEXT,
-            modified_by_name TEXT,
-            previous_value_json TEXT,
-            current_value_json TEXT,
-            FOREIGN KEY (event_id) REFERENCES endpoint_change_events(id)
-        );
-
         CREATE TABLE IF NOT EXISTS endpoint_change_summary (
             run_id TEXT NOT NULL,
             changed_at TEXT NOT NULL,
             endpoint TEXT NOT NULL,
             change_type TEXT NOT NULL,
             delete_type TEXT,
-            count INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS endpoint_field_change_summary (
-            run_id TEXT NOT NULL,
-            changed_at TEXT NOT NULL,
-            endpoint TEXT NOT NULL,
-            field TEXT NOT NULL,
-            field_change_type TEXT NOT NULL,
-            event_change_type TEXT NOT NULL,
             count INTEGER NOT NULL
         );
 
@@ -555,18 +488,6 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
             count INTEGER NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS endpoint_actor_field_change_summary (
-            run_id TEXT NOT NULL,
-            changed_at TEXT NOT NULL,
-            endpoint TEXT NOT NULL,
-            modified_by_id TEXT,
-            modified_by_name TEXT,
-            field TEXT NOT NULL,
-            field_change_type TEXT NOT NULL,
-            event_change_type TEXT NOT NULL,
-            count INTEGER NOT NULL
-        );
-
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_changed_at
         ON endpoint_change_events(changed_at);
 
@@ -576,41 +497,23 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_actor
         ON endpoint_change_events(modified_by_id, changed_at);
 
-        CREATE INDEX IF NOT EXISTS idx_endpoint_change_fields_changed_at
-        ON endpoint_change_fields(changed_at);
-
-        CREATE INDEX IF NOT EXISTS idx_endpoint_change_fields_endpoint_field
-        ON endpoint_change_fields(endpoint, field);
-
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_summary_changed_at
         ON endpoint_change_summary(changed_at);
-
-        CREATE INDEX IF NOT EXISTS idx_endpoint_field_change_summary_endpoint_changed_at
-        ON endpoint_field_change_summary(endpoint, changed_at);
 
         CREATE INDEX IF NOT EXISTS idx_endpoint_actor_change_summary_actor
         ON endpoint_actor_change_summary(modified_by_id, changed_at);
 
         CREATE INDEX IF NOT EXISTS idx_endpoint_actor_change_summary_endpoint_changed_at
         ON endpoint_actor_change_summary(endpoint, changed_at);
-
-        CREATE INDEX IF NOT EXISTS idx_endpoint_actor_field_change_summary_endpoint_changed_at
-        ON endpoint_actor_field_change_summary(endpoint, changed_at);
         """
     )
 
 
-def ensure_changelog_read_indexes(
-    conn: sqlite3.Connection,
-    *,
-    include_field_indexes: bool = False,
-) -> None:
+def ensure_changelog_read_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         DROP INDEX IF EXISTS idx_endpoint_change_events_endpoint_activity_at;
         DROP INDEX IF EXISTS idx_endpoint_change_events_actor_activity_at;
-        DROP INDEX IF EXISTS idx_endpoint_change_fields_activity_at;
-        DROP INDEX IF EXISTS idx_endpoint_change_fields_endpoint_activity_at;
 
         CREATE INDEX IF NOT EXISTS idx_endpoint_change_events_activity_at
         ON endpoint_change_events(COALESCE(modified_at, changed_at));
@@ -632,13 +535,6 @@ def ensure_changelog_read_indexes(
         );
         """
     )
-    if include_field_indexes:
-        conn.executescript(
-            """
-            CREATE INDEX IF NOT EXISTS idx_endpoint_change_fields_event_id
-            ON endpoint_change_fields(event_id);
-            """
-        )
 
 
 def ensure_download_tables(conn: sqlite3.Connection) -> None:

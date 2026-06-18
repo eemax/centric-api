@@ -10,8 +10,8 @@ from ..changelog import (
     list_change_summary,
     list_changelog_runs,
     list_changes,
-    list_field_summary,
     parse_since,
+    prune_changelog,
     record_changelog,
 )
 from ..config import ConfigError
@@ -19,7 +19,6 @@ from ..defaults import db_path as resolve_db_path
 from ..rendering.changelog import (
     print_human_changelog_actor_summary,
     print_human_changelog_changes,
-    print_human_changelog_field_summary,
     print_human_changelog_leaderboard,
     print_human_changelog_runs,
     print_human_changelog_summary,
@@ -31,6 +30,10 @@ from ..rendering.logs import format_duration
 def run_changelog(args: argparse.Namespace) -> int:
     db_path = resolve_db_path(args.db)
     since = parse_since(args.since)
+    if args.action != "prune" and args.older_than is not None:
+        raise ConfigError("--older-than is only supported by changelog prune.")
+    if args.action != "update" and args.include_payloads:
+        raise ConfigError("--include-payloads is only supported by changelog update.")
     if args.action == "update":
         started = time.time()
         if not args.json:
@@ -42,6 +45,8 @@ def run_changelog(args: argparse.Namespace) -> int:
             db_path,
             endpoints=set(args.endpoint) if args.endpoint else None,
             full=True,
+            include_event_payloads=args.include_payloads,
+            seed_empty_full=True,
             progress=print if not args.json else None,
         )
         if not args.json:
@@ -63,6 +68,24 @@ def run_changelog(args: argparse.Namespace) -> int:
                 f"{run.endpoint_count} endpoints, {run.event_count} events. "
                 f"Elapsed: {format_duration(elapsed_seconds)}. Run: {run.run_id}"
             ),
+        )
+        return 0
+    if args.action == "prune":
+        if args.endpoint:
+            raise ConfigError("changelog prune does not support --endpoint.")
+        if args.since is not None:
+            raise ConfigError("Use --older-than with changelog prune, not --since.")
+        if args.older_than is None:
+            raise ConfigError("changelog prune requires --older-than.")
+        older_than = parse_since(args.older_than)
+        if older_than is None:
+            raise ConfigError("changelog prune requires a valid --older-than value.")
+        counts = prune_changelog(db_path, older_than=older_than)
+        total = sum(counts.values())
+        print_or_json(
+            args.json,
+            {"older_than": older_than.isoformat(), "deleted": counts, "total_deleted": total},
+            f"Changelog pruned: {total} rows deleted.",
         )
         return 0
     endpoint = _read_endpoint_filter(args)
@@ -92,31 +115,6 @@ def run_changelog(args: argparse.Namespace) -> int:
             return 0
         print_human_changelog_changes(
             rows,
-            since=args.since,
-            endpoint=endpoint,
-        )
-        return 0
-    if args.action == "fields":
-        rows = list_field_summary(
-            db_path,
-            endpoint=endpoint,
-            since=since,
-            limit=args.limit if args.json or args.endpoint else 10000,
-        )
-        if args.json:
-            return print_rows(rows, True, empty_message="No changelog field changes found.")
-        if not rows:
-            print("No changelog field changes found.")
-            return 0
-        change_rows = list_change_summary(
-            db_path,
-            endpoint=endpoint,
-            since=since,
-            limit=10000,
-        )
-        print_human_changelog_field_summary(
-            rows,
-            change_rows,
             since=args.since,
             endpoint=endpoint,
         )

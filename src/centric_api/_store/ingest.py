@@ -24,7 +24,14 @@ from .discovery import RawFile
 
 
 @dataclass(frozen=True)
+class PreviousRecord:
+    payload_hash: str
+    payload_json: str
+
+
+@dataclass(frozen=True)
 class ApplyRawFileResult:
+    content_sha256: str
     records_read: int
     records_upserted: int
     records_deleted: int
@@ -33,6 +40,7 @@ class ApplyRawFileResult:
     upserted_ids: tuple[str, ...]
     deleted_ids: tuple[str, ...]
     deleted_types: Mapping[str, str]
+    previous_records: Mapping[str, PreviousRecord]
 
 
 def _apply_raw_file(
@@ -45,10 +53,12 @@ def _apply_raw_file(
     records_read = 0
     invalid_records = 0
     now = _utc_iso()
+    content_digest = hashlib.sha256()
 
-    with raw_file.path.open("r", encoding="utf-8") as fh:
+    with raw_file.path.open("rb") as fh:
         for line_number, raw_line in enumerate(fh, start=1):
-            text = raw_line.strip()
+            content_digest.update(raw_line)
+            text = raw_line.decode("utf-8").strip()
             if not text:
                 continue
             try:
@@ -75,6 +85,7 @@ def _apply_raw_file(
     upserted_ids: set[str] = set()
     deleted_ids: set[str] = set()
     deleted_types: dict[str, str] = {}
+    previous_records: dict[str, PreviousRecord] = {}
     retained_ids: set[str] = set()
     for record_id, (payload, _) in sorted(winners.items()):
         payload_json = _canonical_json(payload)
@@ -92,6 +103,7 @@ def _apply_raw_file(
 
         if is_delete:
             if existing is not None and _incoming_can_replace(modified_at, existing["modified_at"]):
+                previous_records.setdefault(record_id, _previous_record(existing))
                 conn.execute(
                     "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
                     [raw_file.endpoint, record_id],
@@ -154,20 +166,24 @@ def _apply_raw_file(
             modified_at=modified_at,
             ingested_at=now,
         )
+        previous_records.setdefault(record_id, _previous_record(existing))
         upserted_ids.add(record_id)
 
-    hard_deleted_ids = _reconcile_full_snapshot_hard_deletes(
+    hard_deleted = _reconcile_full_snapshot_hard_deletes(
         conn,
         raw_file=raw_file,
         retained_ids=retained_ids,
         invalid_records=invalid_records,
         ingested_at=now,
     )
+    hard_deleted_ids = set(hard_deleted)
     deleted_ids.update(hard_deleted_ids)
-    for record_id in hard_deleted_ids:
+    for record_id, previous in hard_deleted.items():
         deleted_types[record_id] = DELETE_TYPE_HARD_DELETE
+        previous_records.setdefault(record_id, previous)
 
     return ApplyRawFileResult(
+        content_sha256=content_digest.hexdigest(),
         records_read=records_read,
         records_upserted=len(upserted_ids),
         records_deleted=len(deleted_ids) - len(hard_deleted_ids),
@@ -176,6 +192,7 @@ def _apply_raw_file(
         upserted_ids=tuple(sorted(upserted_ids)),
         deleted_ids=tuple(sorted(deleted_ids)),
         deleted_types=MappingProxyType(dict(sorted(deleted_types.items()))),
+        previous_records=MappingProxyType(dict(sorted(previous_records.items()))),
     )
 
 
@@ -186,13 +203,13 @@ def _reconcile_full_snapshot_hard_deletes(
     retained_ids: set[str],
     invalid_records: int,
     ingested_at: str,
-) -> set[str]:
+) -> dict[str, PreviousRecord]:
     if raw_file.run_mode != "full" or raw_file.is_delta or invalid_records:
-        return set()
+        return {}
 
     rows = conn.execute(
         """
-        SELECT record_id
+        SELECT record_id, payload_json, payload_sha256
         FROM endpoint_records
         WHERE endpoint = ?
         """,
@@ -200,7 +217,12 @@ def _reconcile_full_snapshot_hard_deletes(
     ).fetchall()
     current_ids = {str(row["record_id"]) for row in rows}
     hard_deleted_ids = current_ids - retained_ids
-    for record_id in sorted(hard_deleted_ids):
+    hard_deleted: dict[str, PreviousRecord] = {}
+    for row in rows:
+        record_id = str(row["record_id"])
+        if record_id not in hard_deleted_ids:
+            continue
+        hard_deleted[record_id] = _previous_record(row)
         payload = {
             PRIMARY_KEY_FIELD: record_id,
             HARD_DELETE_TYPE_FIELD: DELETE_TYPE_HARD_DELETE,
@@ -223,7 +245,14 @@ def _reconcile_full_snapshot_hard_deletes(
             modified_at=None,
             ingested_at=ingested_at,
         )
-    return hard_deleted_ids
+    return hard_deleted
+
+
+def _previous_record(row: sqlite3.Row) -> PreviousRecord:
+    return PreviousRecord(
+        payload_hash=str(row["payload_sha256"]),
+        payload_json=str(row["payload_json"]),
+    )
 
 
 def _record_is_newer(

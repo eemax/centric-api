@@ -38,11 +38,7 @@ def list_changelog_runs(
     return [dict(row) for row in rows]
 
 
-def ensure_changelog_read_schema(
-    db_path: Path,
-    *,
-    include_field_indexes: bool = False,
-) -> None:
+def ensure_changelog_read_schema(db_path: Path) -> None:
     if not db_path.is_file():
         return
     with sqlite3.connect(str(db_path)) as conn:
@@ -51,16 +47,12 @@ def ensure_changelog_read_schema(
             conn,
             "endpoint_changelog_runs",
         ):
-            ensure_changelog_read_indexes(conn, include_field_indexes=include_field_indexes)
+            ensure_changelog_read_indexes(conn)
 
 
-def _try_ensure_changelog_read_schema(
-    db_path: Path,
-    *,
-    include_field_indexes: bool = False,
-) -> None:
+def _try_ensure_changelog_read_schema(db_path: Path) -> None:
     try:
-        ensure_changelog_read_schema(db_path, include_field_indexes=include_field_indexes)
+        ensure_changelog_read_schema(db_path)
     except sqlite3.OperationalError as exc:
         if "locked" not in str(exc).lower():
             raise
@@ -201,86 +193,6 @@ def _list_actor_totals_by_activity(
             {clause}
             GROUP BY modified_by_id, modified_by_name
             ORDER BY count DESC, modified_by_name, modified_by_id
-            LIMIT ?
-            """,
-            [*params, limit],
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def list_field_summary(
-    db_path: Path,
-    *,
-    endpoint: str | None = None,
-    since: datetime | None = None,
-    limit: int = 100,
-) -> list[dict[str, Any]]:
-    if not db_path.is_file():
-        return []
-    if since is not None:
-        if _since_covers_all_activity(db_path, since, endpoint=endpoint):
-            return list_field_summary(db_path, endpoint=endpoint, limit=limit)
-        return _list_field_summary_by_activity(
-            db_path,
-            endpoint=endpoint,
-            since=since,
-            limit=limit,
-        )
-    clauses: list[str] = []
-    params: list[Any] = []
-    if endpoint:
-        clauses.append("endpoint = ?")
-        params.append(endpoint)
-    if since is not None:
-        clauses.append("changed_at >= ?")
-        params.append(_datetime_to_db(since))
-    clause = "WHERE " + " AND ".join(clauses) if clauses else ""
-    with connect_readonly(db_path) as conn:
-        if not table_exists(conn, "endpoint_field_change_summary"):
-            return []
-        rows = conn.execute(
-            f"""
-            SELECT endpoint, field, field_change_type, event_change_type, SUM(count) AS count
-            FROM endpoint_field_change_summary
-            {clause}
-            GROUP BY endpoint, field, field_change_type, event_change_type
-            ORDER BY count DESC, endpoint, field, field_change_type, event_change_type
-            LIMIT ?
-            """,
-            [*params, limit],
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def _list_field_summary_by_activity(
-    db_path: Path,
-    *,
-    endpoint: str | None,
-    since: datetime,
-    limit: int,
-) -> list[dict[str, Any]]:
-    ensure_changelog_read_schema(db_path, include_field_indexes=True)
-    clauses = ["COALESCE(e.modified_at, e.changed_at) >= ?"]
-    params: list[Any] = [_datetime_to_db(since)]
-    if endpoint:
-        clauses.insert(0, "e.endpoint = ?")
-        params.insert(0, endpoint)
-    clause = "WHERE " + " AND ".join(clauses)
-    with connect_readonly(db_path) as conn:
-        if not table_exists(conn, "endpoint_change_events") or not table_exists(
-            conn,
-            "endpoint_change_fields",
-        ):
-            return []
-        rows = conn.execute(
-            f"""
-            SELECT f.endpoint, f.field, f.field_change_type, f.event_change_type,
-                   COUNT(*) AS count
-            FROM endpoint_change_events AS e INDEXED BY idx_endpoint_change_events_activity_at
-            JOIN endpoint_change_fields f ON f.event_id = e.id
-            {clause}
-            GROUP BY f.endpoint, f.field, f.field_change_type, f.event_change_type
-            ORDER BY count DESC, f.endpoint, f.field, f.field_change_type, f.event_change_type
             LIMIT ?
             """,
             [*params, limit],

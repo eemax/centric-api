@@ -14,7 +14,7 @@ from ..record_constants import (
     USER_NAME_FIELD,
 )
 
-CHANGELOG_SOURCE = "full-payload"
+CHANGELOG_SOURCE = "payload-hash"
 CHANGELOG_SOURCE_SHA = hashlib.sha256(CHANGELOG_SOURCE.encode("utf-8")).hexdigest()
 ACTIVITY_AT_SQL = "COALESCE(modified_at, changed_at)"
 ProgressCallback = Callable[[str], None]
@@ -50,7 +50,7 @@ class _IndexRow:
     endpoint: str
     record_id: str
     payload_hash: str
-    payload_json: str
+    payload_json: str | None
 
 
 @dataclass(frozen=True)

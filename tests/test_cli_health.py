@@ -406,10 +406,23 @@ def test_rebuild_db_can_skip_changelog(tmp_path, monkeypatch, capsys) -> None:
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["changelog"] is None
-    assert "full changelog rebuild skipped" in payload["changelog_skipped"]
+    assert payload["changelog_index"]["record_count"] == 1
+    assert payload["changelog_index"]["event_count"] == 0
+    assert "compact changelog index seeded" in payload["changelog_skipped"]
     with sqlite3.connect(db_path) as conn:
         count = conn.execute("SELECT COUNT(*) FROM endpoint_records").fetchone()[0]
+        index_count = conn.execute(
+            "SELECT COUNT(*) FROM endpoint_changelog_index_current"
+        ).fetchone()[0]
+        event_count = conn.execute("SELECT COUNT(*) FROM endpoint_change_events").fetchone()[0]
+        index_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(endpoint_changelog_index_current)")
+        }
     assert count == 1
+    assert index_count == 1
+    assert event_count == 0
+    assert "payload_json" not in index_columns
 
 
 def test_failed_rebuild_keeps_existing_db_active(tmp_path, monkeypatch, capsys) -> None:
@@ -524,7 +537,8 @@ def test_rebuild_db_reports_skipped_changelog(tmp_path, capsys) -> None:
 
     output = capsys.readouterr().out
     assert exit_code == 0
-    assert "Skipping changelog rebuild..." in output
+    assert "Skipping changelog event rebuild..." in output
+    assert "Seeding changelog index..." in output
     assert "Updating changelog..." not in output
-    assert "Skipped: yes" in output
-    assert "Refresh: centric-api changelog update" in output
+    assert "Events:  skipped" in output
+    assert "Index:   seeded (1 records)" in output

@@ -13,11 +13,11 @@ from centric_api.changelog import (
     list_change_summary,
     list_changelog_runs,
     list_changes,
-    list_field_summary,
+    prune_changelog,
     record_changelog,
 )
 from centric_api.db_schema import ensure_changelog_tables
-from centric_api.store import connect
+from centric_api.store import PreviousRecord, connect
 
 
 def test_changelog_reads_do_not_create_tables(tmp_path: Path) -> None:
@@ -27,7 +27,6 @@ def test_changelog_reads_do_not_create_tables(tmp_path: Path) -> None:
 
     assert list_changelog_runs(db_path) == []
     assert list_change_summary(db_path) == []
-    assert list_field_summary(db_path) == []
     assert list_actor_summary(db_path) == []
     assert list_actor_leaderboard(db_path) == []
     assert list_changes(db_path) == []
@@ -41,6 +40,24 @@ def test_changelog_reads_do_not_create_tables(tmp_path: Path) -> None:
             """
         ).fetchall()
     assert tables == []
+
+
+def _previous_records(conn, pairs: list[tuple[str, str]]) -> dict[str, dict[str, PreviousRecord]]:
+    records: dict[str, dict[str, PreviousRecord]] = {}
+    for endpoint, record_id in pairs:
+        row = conn.execute(
+            """
+            SELECT payload_json, payload_sha256
+            FROM endpoint_records
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            [endpoint, record_id],
+        ).fetchone()
+        records.setdefault(endpoint, {})[record_id] = PreviousRecord(
+            payload_hash=row[1],
+            payload_json=row[0],
+        )
+    return records
 
 
 def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
@@ -97,6 +114,14 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     assert first.event_count == 1
 
     with sqlite3.connect(db_path) as conn:
+        previous_row = conn.execute(
+            """
+            SELECT payload_json, payload_sha256
+            FROM endpoint_records
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            ["styles", "S1"],
+        ).fetchone()
         conn.execute(
             """
             UPDATE endpoint_records
@@ -124,16 +149,18 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
         db_path,
         endpoints={"styles"},
         record_ids_by_endpoint={"styles": {"S1"}},
+        previous_records_by_endpoint={
+            "styles": {
+                "S1": PreviousRecord(
+                    payload_hash=previous_row[1],
+                    payload_json=previous_row[0],
+                )
+            }
+        },
+        include_event_payloads=True,
     )
     changes = list_changes(db_path, endpoint="styles", limit=10)
-    field_summary = list_field_summary(db_path, endpoint="styles", limit=10)
     actor_summary = list_actor_summary(db_path, endpoint="styles", limit=10)
-    field_summary_since = list_field_summary(
-        db_path,
-        endpoint="styles",
-        since=datetime(1970, 1, 1, tzinfo=UTC),
-        limit=10,
-    )
     changed_event = next(change for change in changes if change["change_type"] == "changed")
 
     assert second.event_count == 1
@@ -154,7 +181,6 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     assert lightweight_changed_event["changed_fields"] == ["_modified_at", "extra"]
     assert "previous_payload" not in lightweight_changed_event
     assert "current_payload" not in lightweight_changed_event
-    assert field_summary_since
     assert {
         (row["modified_by_id"], row["modified_by_name"], row["change_type"]): row["count"]
         for row in actor_summary
@@ -162,60 +188,79 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
         ("U1", "Ava Admin", "added"): 1,
         ("U1", "Ava Admin", "changed"): 1,
     }
-    expected_field_summary = [
-        {
-            "endpoint": "styles",
-            "field": "_modified_at",
-            "field_change_type": "added_field",
-            "event_change_type": "added",
-            "count": 1,
-        },
-        {
-            "endpoint": "styles",
-            "field": "_modified_at",
-            "field_change_type": "changed_field",
-            "event_change_type": "changed",
-            "count": 1,
-        },
-        {
-            "endpoint": "styles",
-            "field": "code",
-            "field_change_type": "added_field",
-            "event_change_type": "added",
-            "count": 1,
-        },
-        {
-            "endpoint": "styles",
-            "field": "extra",
-            "field_change_type": "added_field",
-            "event_change_type": "added",
-            "count": 1,
-        },
-        {
-            "endpoint": "styles",
-            "field": "extra",
-            "field_change_type": "changed_field",
-            "event_change_type": "changed",
-            "count": 1,
-        },
-        {
-            "endpoint": "styles",
-            "field": "id",
-            "field_change_type": "added_field",
-            "event_change_type": "added",
-            "count": 1,
-        },
-        {
-            "endpoint": "styles",
-            "field": "modified_by",
-            "field_change_type": "added_field",
-            "event_change_type": "added",
-            "count": 1,
-        },
-    ]
-    assert sorted(field_summary, key=lambda row: (row["field"], row["field_change_type"])) == (
-        expected_field_summary
+    with sqlite3.connect(db_path) as conn:
+        field_tables = conn.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name IN (
+                  'endpoint_change_fields',
+                  'endpoint_field_change_summary',
+                  'endpoint_actor_field_change_summary'
+              )
+            ORDER BY name
+            """
+        ).fetchall()
+    assert field_tables == []
+
+
+def test_changelog_omits_event_payload_snapshots_by_default(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    before_payload = {"id": "S1", "code": "A", "_modified_at": "2026-01-01T00:00:00Z"}
+    after_payload = {"id": "S1", "code": "B", "_modified_at": "2026-01-02T00:00:00Z"}
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "styles",
+                "S1",
+                json.dumps(before_payload, sort_keys=True),
+                "hash-before",
+                "2026-01-01T00:00:00Z",
+                "styles.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+    record_changelog(db_path, endpoints={"styles"}, full=True)
+    with sqlite3.connect(db_path) as conn:
+        previous_records = _previous_records(conn, [("styles", "S1")])
+        conn.execute(
+            """
+            UPDATE endpoint_records
+            SET payload_json = ?, payload_sha256 = ?, modified_at = ?
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            [
+                json.dumps(after_payload, sort_keys=True),
+                "hash-after",
+                "2026-01-02T00:00:00Z",
+                "styles",
+                "S1",
+            ],
+        )
+
+    record_changelog(
+        db_path,
+        record_ids_by_endpoint={"styles": {"S1"}},
+        previous_records_by_endpoint=previous_records,
     )
+
+    changed_event = next(
+        change
+        for change in list_changes(db_path, endpoint="styles", limit=10, include_payloads=True)
+        if change["change_type"] == "changed"
+    )
+    assert changed_event["changed_fields"] == ["_modified_at", "code"]
+    assert changed_event["previous_payload"] == {}
+    assert changed_event["current_payload"] == {}
 
 
 def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
@@ -260,24 +305,6 @@ def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
         )
         conn.execute(
             """
-            INSERT INTO endpoint_field_change_summary (
-                run_id, changed_at, endpoint, field, field_change_type,
-                event_change_type, count
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                "run-1",
-                "2026-01-02T00:00:00Z",
-                "styles",
-                "code",
-                "changed_field",
-                "changed",
-                5,
-            ],
-        )
-        conn.execute(
-            """
             INSERT INTO endpoint_actor_change_summary (
                 run_id, changed_at, endpoint, modified_by_id, modified_by_name,
                 change_type, delete_type, count
@@ -304,15 +331,6 @@ def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
             "change_type": "changed",
             "delete_type": None,
             "count": 7,
-        }
-    ]
-    assert list_field_summary(db_path, since=wide_since, limit=10) == [
-        {
-            "endpoint": "styles",
-            "field": "code",
-            "field_change_type": "changed_field",
-            "event_change_type": "changed",
-            "count": 5,
         }
     ]
     assert list_actor_totals(db_path, since=wide_since, limit=10) == [
@@ -346,7 +364,7 @@ def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
     assert activity_index is None
 
 
-def test_changelog_scoped_refresh_falls_back_when_index_source_is_stale(tmp_path: Path) -> None:
+def test_changelog_scoped_refresh_stays_scoped_when_index_source_is_stale(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
         conn.execute(
@@ -394,7 +412,7 @@ def test_changelog_scoped_refresh_falls_back_when_index_source_is_stale(tmp_path
 
     run = record_changelog(db_path, record_ids_by_endpoint={"styles": {"S1"}})
 
-    assert run.full_refresh is True
+    assert run.full_refresh is False
     assert run.event_count == 1
 
 
@@ -576,6 +594,7 @@ def test_changelog_actor_leaderboard_rolls_up_endpoint_footprint(tmp_path: Path)
 
     record_changelog(db_path, endpoints={"styles", "boms", "documents"}, full=True)
     with sqlite3.connect(db_path) as conn:
+        style_previous = _previous_records(conn, [("styles", "S1")])
         conn.execute(
             """
             UPDATE endpoint_records
@@ -598,8 +617,13 @@ def test_changelog_actor_leaderboard_rolls_up_endpoint_footprint(tmp_path: Path)
                 "S1",
             ],
         )
-    record_changelog(db_path, record_ids_by_endpoint={"styles": {"S1"}})
+    record_changelog(
+        db_path,
+        record_ids_by_endpoint={"styles": {"S1"}},
+        previous_records_by_endpoint=style_previous,
+    )
     with sqlite3.connect(db_path) as conn:
+        delete_previous = _previous_records(conn, [("boms", "B1"), ("documents", "D1")])
         conn.execute(
             "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
             ["boms", "B1"],
@@ -615,6 +639,7 @@ def test_changelog_actor_leaderboard_rolls_up_endpoint_footprint(tmp_path: Path)
             "boms": {"B1": "tombstone"},
             "documents": {"D1": "hard_delete"},
         },
+        previous_records_by_endpoint=delete_previous,
     )
 
     leaderboard = list_actor_leaderboard(db_path)
@@ -711,6 +736,7 @@ def test_changelog_records_delete_type_for_removed_records(tmp_path: Path) -> No
 
     record_changelog(db_path, endpoints={"styles"}, full=True)
     with sqlite3.connect(db_path) as conn:
+        previous_records = _previous_records(conn, [("styles", "S1")])
         conn.execute(
             "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
             ["styles", "S1"],
@@ -721,6 +747,7 @@ def test_changelog_records_delete_type_for_removed_records(tmp_path: Path) -> No
         endpoints={"styles"},
         deleted_record_ids_by_endpoint={"styles": {"S1"}},
         deleted_record_delete_types_by_endpoint={"styles": {"S1": "hard_delete"}},
+        previous_records_by_endpoint=previous_records,
     )
 
     removed_event = next(
@@ -741,6 +768,104 @@ def test_changelog_records_delete_type_for_removed_records(tmp_path: Path) -> No
         and row["modified_by_name"] == "Ava Admin"
         for row in actor_summary
     )
+
+
+def test_hard_delete_uses_previous_record_actor_when_tombstone_has_no_actor(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        _insert_record_payload = json.dumps(
+            {
+                "id": "S1",
+                "code": "A",
+                "modified_by": "U1",
+                "_modified_at": "2026-01-01T00:00:00Z",
+            },
+            sort_keys=True,
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "styles",
+                "S1",
+                _insert_record_payload,
+                "hash-before",
+                "2026-01-01T00:00:00Z",
+                "styles.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_records (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "users",
+                "U1",
+                json.dumps({"id": "U1", "node_name": "Ava Admin"}, sort_keys=True),
+                "hash-user",
+                "2026-01-01T00:00:00Z",
+                "users.jsonl",
+                "run-1",
+                "2026-01-01T00:00:00Z",
+            ],
+        )
+
+    record_changelog(db_path, endpoints={"styles"}, full=True)
+    with sqlite3.connect(db_path) as conn:
+        previous_records = _previous_records(conn, [("styles", "S1")])
+        conn.execute(
+            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+            ["styles", "S1"],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_tombstones (
+                endpoint, record_id, payload_json, payload_sha256, modified_at,
+                source_file, source_run_id, ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "styles",
+                "S1",
+                json.dumps({"id": "S1", "_delete_type": "hard_delete"}, sort_keys=True),
+                "hard-delete-hash",
+                None,
+                "styles.jsonl",
+                "run-2",
+                "2026-01-02T00:00:00Z",
+            ],
+        )
+
+    record_changelog(
+        db_path,
+        endpoints={"styles"},
+        deleted_record_ids_by_endpoint={"styles": {"S1"}},
+        deleted_record_delete_types_by_endpoint={"styles": {"S1": "hard_delete"}},
+        previous_records_by_endpoint=previous_records,
+    )
+
+    removed_event = next(
+        row
+        for row in list_changes(db_path, endpoint="styles", limit=10)
+        if row["change_type"] == "removed"
+    )
+    assert removed_event["delete_type"] == "hard_delete"
+    assert removed_event["modified_by_id"] == "U1"
+    assert removed_event["modified_by_name"] == "Ava Admin"
 
 
 def test_changelog_allows_missing_modified_by(tmp_path: Path) -> None:
@@ -874,3 +999,103 @@ def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> No
         "idx_endpoint_change_events_activity_sort",
         "idx_endpoint_change_events_endpoint_activity_sort",
     }
+
+
+def test_prune_changelog_removes_old_history_but_keeps_seed_runs(tmp_path: Path) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        ensure_changelog_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO endpoint_changelog_runs (
+                run_id, created_at, changelog_source, changelog_source_sha256,
+                endpoint_count, record_count, event_count, full_refresh,
+                scoped_record_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ["seed", "2026-01-01T00:00:00Z", "test", "sha", 1, 1, 0, 1, 0],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_changelog_runs (
+                run_id, created_at, changelog_source, changelog_source_sha256,
+                endpoint_count, record_count, event_count, full_refresh,
+                scoped_record_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ["old-run", "2026-01-01T00:00:00Z", "test", "sha", 1, 1, 1, 0, 1],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_change_events (
+                run_id, endpoint, record_id, changed_at, change_type, delete_type,
+                modified_at, modified_by_id, modified_by_name, previous_hash,
+                current_hash, changed_fields_json, previous_payload_json,
+                current_payload_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "old-run",
+                "styles",
+                "S1",
+                "2026-01-01T00:00:00Z",
+                "changed",
+                None,
+                "2026-01-01T00:00:00Z",
+                "U1",
+                "Ava Admin",
+                "before",
+                "after",
+                json.dumps(["code"]),
+                None,
+                None,
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_change_summary (
+                run_id, changed_at, endpoint, change_type, delete_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ["old-run", "2026-01-01T00:00:00Z", "styles", "changed", None, 1],
+        )
+        conn.execute(
+            """
+            INSERT INTO endpoint_actor_change_summary (
+                run_id, changed_at, endpoint, modified_by_id, modified_by_name,
+                change_type, delete_type, count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                "old-run",
+                "2026-01-01T00:00:00Z",
+                "styles",
+                "U1",
+                "Ava Admin",
+                "changed",
+                None,
+                1,
+            ],
+        )
+
+    counts = prune_changelog(
+        db_path,
+        older_than=datetime(2026, 2, 1, tzinfo=UTC),
+    )
+
+    assert counts["events"] == 1
+    assert counts["change_summary"] == 1
+    assert counts["actor_summary"] == 1
+    assert counts["runs"] == 1
+    with sqlite3.connect(db_path) as conn:
+        runs = conn.execute(
+            "SELECT run_id FROM endpoint_changelog_runs ORDER BY run_id"
+        ).fetchall()
+        event_count = conn.execute("SELECT COUNT(*) FROM endpoint_change_events").fetchone()[0]
+    assert [row[0] for row in runs] == ["seed"]
+    assert event_count == 0

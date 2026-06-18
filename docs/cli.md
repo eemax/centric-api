@@ -8,7 +8,7 @@ Most commands accept `--db` to point at a non-default SQLite database.
 Human output is the default. `--json` switches to machine-readable output, but the shape varies by
 command:
 
-- `fetch --json`, `changelog --json`, `changelog fields --json`, `changelog actors --json`,
+- `fetch --json`, `changelog --json`, `changelog changes --json`, `changelog actors --json`,
   `changelog leaderboard --json`, `changelog runs --json`, `changelog changes --json`, and
   `bundle list --json`, `view list --json`, `load list --json`, `model list --json`,
   `swagger history --json`, `swagger endpoints --json`, `swagger fields --json`, and
@@ -197,12 +197,12 @@ commands are meant to catch drift early.
 
 ```bash
 uv run centric-api changelog
-uv run centric-api changelog fields
 uv run centric-api changelog actors
 uv run centric-api changelog leaderboard
 uv run centric-api changelog runs
 uv run centric-api changelog changes
 uv run centric-api changelog update
+uv run centric-api changelog prune --older-than 90d
 ```
 
 Common options:
@@ -213,12 +213,13 @@ Common options:
   `runs` does not support endpoint filtering.
 - `--limit N`: limits displayed rows or actors, depending on the action.
 - `--json`: emits JSON Lines for read views; `update --json` emits one JSON object.
+- `--older-than VALUE`: retention cutoff for `prune`.
+- `--include-payloads`: stores previous/current payload snapshots for `update`; default changelog
+  events stay hash-and-field based.
 
 Actions:
 
 - `summary` (default): endpoint totals plus top modified-by actors.
-- `fields`: field-level rollups. Without `--endpoint`, shows endpoint-level field activity; with
-  `--endpoint`, shows field-event counts for that endpoint.
 - `actors`: operational actor-by-endpoint table.
 - `leaderboard`: ranked actor activity view. Score is records touched, not fields touched: one added
   record, one changed record, and one removed record each count as one. Human output shows a ranked
@@ -226,9 +227,12 @@ Actions:
   endpoint breakdowns stay complete for those actors.
 - `runs`: changelog run history.
 - `changes`: recent event rows with changed-field summaries.
-- `update`: rebuilds changelog from current cached records. Human output shows progress through the
-  long-running phases; `--json` keeps stdout to a single summary object. This is normally automatic
-  after fetch.
+- `update`: refreshes changelog tracking from current cached records. On an empty changelog index,
+  it seeds the baseline instead of generating a synthetic "everything added" run. Human output shows
+  progress through the long-running phases; `--json` keeps stdout to a single summary object. This
+  is normally automatic after fetch.
+- `prune`: deletes event history and rollups older than `--older-than` without touching the current
+  hash index used for future diffs.
 
 Removal breakdowns are always present in `leaderboard --json` as `tombstone`, `hard_delete`, and
 `unknown_delete`. Human output keeps tombstone-only removals folded into `Removed`; it adds `Tomb`,
@@ -576,6 +580,7 @@ uv run centric-api rebuild-db --yes --json
 
 `rebuild-db` is the recovery path for SQLite. It refuses to run without `--yes`, backs up the current
 database files, replays raw evidence into a fresh database, rebuilds changelog, and reinstalls
-dashboard views. Use `--skip-changelog` for faster cache-only rebuilds when changelog views can be
-refreshed later with `centric-api changelog update`. Human output shows progress through the
+dashboard views. Use `--skip-changelog` for faster cache-only rebuilds when changelog event history
+can be omitted; it skips event-history rebuild but seeds the compact hash index for future scoped
+updates with a SQL-native insert from `endpoint_records`. Human output shows progress through the
 long-running rebuild phases; `--json` keeps stdout to a single summary object.

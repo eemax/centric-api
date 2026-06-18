@@ -66,18 +66,17 @@ background scheduler on Linux.
 
 ## Changelog
 
-Changelog stores record-level events and field-level details:
+Changelog stores record-level events and compact summaries:
 
 - `endpoint_changelog_runs`
 - `endpoint_change_events`
-- `endpoint_change_fields`
 - `endpoint_change_summary`
-- `endpoint_field_change_summary`
 - `endpoint_actor_change_summary`
-- `endpoint_actor_field_change_summary`
 
-Record-level summaries count records, not fields. Field-level tables are available for detailed churn
-analysis.
+Record-level summaries count records, not fields. Each event keeps hashes and `changed_fields_json`.
+Previous/current payload snapshots are not stored by default; pass `changelog update
+--include-payloads` only for explicit debug runs. Field-level changelog tables are not materialized
+by default so the main SQLite cache stays lean.
 
 Removal types:
 
@@ -197,7 +196,11 @@ The command:
 4. Reinstalls feature tables and dashboard views.
 
 `--skip-changelog` is useful after schema or ingest-rule changes where the cache must be replayed
-from raw evidence but changelog views do not need to be refreshed immediately. Run
-`centric-api changelog update` afterward when those views need to match the rebuilt cache.
+from raw evidence but event history does not need to be rebuilt. It still seeds the compact
+hash-only changelog index from the rebuilt cache, so future scoped fetches can produce accurate changed and
+removed events without first generating a giant synthetic "all records added" run.
+
+Use `centric-api changelog prune --older-than 90d` to delete old event history and rollups while
+leaving the current hash index intact for future diffs.
 
 `rebuild-db` refuses to run without `--yes`.

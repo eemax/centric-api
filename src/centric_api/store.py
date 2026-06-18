@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._store.discovery import RawFile, _sha256, discover_raw_files
@@ -16,6 +16,7 @@ from ._store.ingest import (
     HARD_DELETE_TYPE_FIELD,
     MODIFIED_AT_FIELD,
     PRIMARY_KEY_FIELD,
+    PreviousRecord,
     _apply_raw_file,
     _utc_iso,
 )
@@ -24,6 +25,7 @@ from .schema import EndpointSchema
 
 # Keep repr/pickle/introspection compatible with the original public facade.
 RawFile.__module__ = __name__
+PreviousRecord.__module__ = __name__
 
 __all__ = [
     "DELETE_TYPE_HARD_DELETE",
@@ -35,6 +37,7 @@ __all__ = [
     "IngestResult",
     "MODIFIED_AT_FIELD",
     "PRIMARY_KEY_FIELD",
+    "PreviousRecord",
     "RawFile",
     "connect",
     "connect_readonly",
@@ -60,6 +63,7 @@ class IngestResult:
     upserted_record_ids_by_endpoint: dict[str, tuple[str, ...]]
     deleted_record_ids_by_endpoint: dict[str, tuple[str, ...]]
     deleted_record_delete_types_by_endpoint: dict[str, dict[str, str]]
+    previous_records_by_endpoint: dict[str, dict[str, PreviousRecord]] = field(default_factory=dict)
 
     @property
     def changed_record_ids_by_endpoint(self) -> dict[str, tuple[str, ...]]:
@@ -215,29 +219,36 @@ def ingest_raw_dir(
     upserted_ids: defaultdict[str, set[str]] = defaultdict(set)
     deleted_ids: defaultdict[str, set[str]] = defaultdict(set)
     deleted_types: defaultdict[str, dict[str, str]] = defaultdict(dict)
+    previous_records: defaultdict[str, dict[str, PreviousRecord]] = defaultdict(dict)
     touched_endpoints: set[str] = set()
 
     with connect(db_path) as conn:
         state_was_empty = _endpoint_state_is_empty(conn)
         for raw_file in raw_files:
-            content_hash = _sha256(raw_file.path)
             applied_hash, applied_manifest_hash = _applied_hashes(conn, raw_file.path)
-            if applied_hash == content_hash and applied_manifest_hash == raw_file.manifest_sha256:
-                skipped_files += 1
-                continue
-            if applied_hash is not None and applied_hash != content_hash:
-                raise ValueError(
-                    f"Raw file changed after ingest: {raw_file.path}. "
-                    "Raw evidence files are expected to be immutable."
-                )
-            if applied_hash == content_hash and applied_manifest_hash != raw_file.manifest_sha256:
-                raise ValueError(
-                    f"Raw manifest changed after ingest: {raw_file.manifest_path}. "
-                    "Raw evidence manifests are expected to be immutable."
-                )
+            content_hash = None
+            if applied_hash is not None:
+                content_hash = _sha256(raw_file.path)
+                if (
+                    applied_hash == content_hash
+                    and applied_manifest_hash == raw_file.manifest_sha256
+                ):
+                    skipped_files += 1
+                    continue
+                if applied_hash != content_hash:
+                    raise ValueError(
+                        f"Raw file changed after ingest: {raw_file.path}. "
+                        "Raw evidence files are expected to be immutable."
+                    )
+                if applied_manifest_hash != raw_file.manifest_sha256:
+                    raise ValueError(
+                        f"Raw manifest changed after ingest: {raw_file.manifest_path}. "
+                        "Raw evidence manifests are expected to be immutable."
+                    )
 
             schema = schemas.get(raw_file.endpoint, EndpointSchema(name=raw_file.endpoint))
             file_result = _apply_raw_file(conn, raw_file=raw_file, schema=schema)
+            content_hash = content_hash or file_result.content_sha256
             conn.execute(
                 """
                 INSERT INTO applied_raw_files (
@@ -271,6 +282,8 @@ def ingest_raw_dir(
             upserted_ids[raw_file.endpoint].update(file_result.upserted_ids)
             deleted_ids[raw_file.endpoint].update(file_result.deleted_ids)
             deleted_types[raw_file.endpoint].update(file_result.deleted_types)
+            for record_id, previous in file_result.previous_records.items():
+                previous_records[raw_file.endpoint].setdefault(record_id, previous)
             touched_endpoints.add(raw_file.endpoint)
 
         if touched_endpoints and state_was_empty:
@@ -303,6 +316,11 @@ def ingest_raw_dir(
             endpoint: dict(sorted(record_types.items()))
             for endpoint, record_types in sorted(deleted_types.items())
             if record_types
+        },
+        previous_records_by_endpoint={
+            endpoint: dict(sorted(records.items()))
+            for endpoint, records in sorted(previous_records.items())
+            if records
         },
     )
 

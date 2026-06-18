@@ -12,10 +12,6 @@ def _json_dict(value: str | None) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _json_or_none(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
 def _string_value(value: Any) -> str | None:
     if value is None:
         return None

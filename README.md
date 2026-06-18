@@ -188,8 +188,9 @@ normal scoped changelog from the ingest result.
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays completed raw evidence from `CENTRIC_API_HOME/raw/runs` into a fresh DB, rebuilds changelog,
 and reinstalls dashboard views. Use `--skip-changelog` for faster cache-only rebuilds after schema
-or ingest-rule changes; run `centric-api changelog update` later if changelog views need to match
-the rebuilt cache. Use `--raw-dir` or `--db` to override the defaults.
+or ingest-rule changes; it skips event-history rebuild but seeds the compact changelog index so
+future scoped updates can diff from the rebuilt cache. Use `--raw-dir` or `--db` to override the
+defaults.
 
 If `~/.centric-api/delta.yml` does not exist, the first delta fetch starts with no floor, so it
 fetches all configured records and writes the delta state after successful endpoint fetches. To seed
@@ -221,10 +222,12 @@ endpoints:
 
 Private schema overlays resolve from `~/.centric-api/endpoint-schema.yml`.
 
-Changelog tracking is automatic. It compares canonical full payloads for current records and records
-added, changed, and removed events after ingest. Event rows keep the previous and current payloads
-for drill-down, plus delete type for removals and actor fields from `modified_by`. Actor names are
-resolved from the `users` endpoint `node_name`.
+Changelog tracking is automatic after ingest. Ingest captures previous payloads for touched records
+before overwriting the cache, then changelog records added, changed, and removed events. The compact
+current index stores hashes for future diffs, not a second copy of every payload. Event rows keep
+hashes, changed-field names, delete type for removals, and actor fields from `modified_by`; previous
+and current payload snapshots are only stored for explicit debug updates with `--include-payloads`.
+Actor names are resolved from the `users` endpoint `node_name`.
 Changelog activity filters such as `--since 7d` use Centric `_modified_at` rather than the local
 fetch or changelog detection time. `changelog runs --since` remains based on local run creation time.
 
@@ -232,10 +235,11 @@ Full fetch ingest is authoritative per successful endpoint. Current local record
 successful full snapshot are removed from `endpoint_records` and written as synthetic hard-delete
 tombstones.
 
-For dashboard-style queries, changelog also writes field-level rows and compact rollups:
-`endpoint_change_summary`, `endpoint_field_change_summary`, `endpoint_actor_change_summary`, and
-`endpoint_actor_field_change_summary`. SQLite also exposes stable dashboard views:
+For dashboard-style queries, changelog writes compact record-level rollups:
+`endpoint_change_summary` and `endpoint_actor_change_summary`. Field-level changelog rows are not
+materialized by default to keep the main SQLite cache lean. SQLite also exposes stable dashboard views:
 `dashboard_latest_fetch_runs`, `dashboard_endpoint_state`, `dashboard_recent_changes`,
 `dashboard_actor_activity`, `dashboard_download_jobs`, `dashboard_bundle_runs`, and
-`dashboard_bundle_file_changes`. Use `centric-api changelog fields`,
-`centric-api changelog actors`, and `centric-api changelog leaderboard` for quick aggregate views.
+`dashboard_bundle_file_changes`. Use `centric-api changelog changes` for per-record changed-field
+details, and `centric-api changelog actors` or `centric-api changelog leaderboard` for quick
+aggregate views.

@@ -33,6 +33,7 @@ def run_changelog_after_ingest(
             deleted_record_delete_types_by_endpoint=(
                 ingest_result.deleted_record_delete_types_by_endpoint
             ),
+            previous_records_by_endpoint=ingest_result.previous_records_by_endpoint,
             progress=progress,
         ),
         None,

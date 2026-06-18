@@ -128,7 +128,15 @@ def build_parser() -> argparse.ArgumentParser:
     changelog_parser.add_argument(
         "action",
         nargs="?",
-        choices=["summary", "fields", "actors", "leaderboard", "runs", "changes", "update"],
+        choices=[
+            "summary",
+            "actors",
+            "leaderboard",
+            "runs",
+            "changes",
+            "update",
+            "prune",
+        ],
         default="summary",
         help="Changelog action to run.",
     )
@@ -149,11 +157,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Relative window like 7d/24h/10m or an ISO timestamp.",
     )
     changelog_parser.add_argument(
+        "--older-than",
+        metavar="VALUE",
+        default=None,
+        help="Prune changelog history older than a relative window or ISO timestamp.",
+    )
+    changelog_parser.add_argument(
         "--limit",
         metavar="N",
         type=_parse_positive_int,
         default=50,
         help="Row limit.",
+    )
+    changelog_parser.add_argument(
+        "--include-payloads",
+        action="store_true",
+        help="Store previous/current payload snapshots during changelog update.",
     )
     changelog_parser.add_argument("--json", action="store_true", help="Emit JSON output.")
 

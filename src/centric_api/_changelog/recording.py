@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from ..db_schema import ensure_changelog_read_indexes, ensure_changelog_tables
-from ..store import connect
+from ..store import PreviousRecord, connect
 from .models import (
     CHANGELOG_SOURCE,
     CHANGELOG_SOURCE_SHA,
+    DELETE_TYPE_HARD_DELETE,
     DELETE_TYPE_TOMBSTONE,
     DELETE_TYPE_UNKNOWN,
     MODIFIED_AT_FIELD,
@@ -23,7 +24,7 @@ from .models import (
     _ChangeEvent,
     _IndexRow,
 )
-from .utils import _datetime_to_db, _json_dict, _json_or_none, _string_value
+from .utils import _datetime_to_db, _json_dict, _string_value
 
 # Keep room for the endpoint bind parameter on SQLite builds with the classic
 # 999-variable ceiling.
@@ -37,8 +38,11 @@ def record_changelog(
     record_ids_by_endpoint: dict[str, set[str]] | None = None,
     deleted_record_ids_by_endpoint: dict[str, set[str]] | None = None,
     deleted_record_delete_types_by_endpoint: dict[str, dict[str, str]] | None = None,
+    previous_records_by_endpoint: dict[str, dict[str, PreviousRecord]] | None = None,
     full: bool = False,
     progress: ProgressCallback | None = None,
+    include_event_payloads: bool = False,
+    seed_empty_full: bool = False,
 ) -> ChangelogRun:
     created_at = datetime.now(UTC)
     with connect(db_path) as conn:
@@ -58,14 +62,16 @@ def record_changelog(
             record_ids_by_endpoint=record_ids_by_endpoint,
             deleted_record_ids_by_endpoint=deleted_record_ids_by_endpoint,
         )
-        full_refresh = (
-            full
-            or not has_record_scope
-            or not _index_has_all_endpoints(
+        full_refresh = full or not has_record_scope
+        if seed_empty_full and full_refresh and not _index_has_any_endpoints(conn, endpoint_names):
+            _emit_progress(progress, "Empty changelog index; seeding baseline...")
+            return _seed_changelog_index_conn(
                 conn,
-                endpoint_names,
+                created_at=created_at,
+                run_id=run_id,
+                endpoint_names=endpoint_names,
+                progress=progress,
             )
-        )
         _emit_progress(
             progress,
             f"Mode: {'full refresh' if full_refresh else 'scoped refresh'}",
@@ -80,6 +86,9 @@ def record_changelog(
         else:
             _emit_progress(progress, "Loading scoped changelog index...")
             previous_index = _load_current_index_for_keys(conn, keys=scoped_keys)
+            previous_index.update(
+                _previous_records_index(previous_records_by_endpoint or {})
+            )
             _emit_progress(progress, "Loading scoped cache records...")
             current_index = _build_scoped_current_index(
                 conn,
@@ -101,6 +110,7 @@ def record_changelog(
             tombstone_index=tombstone_index,
             user_names=user_names,
             delete_types_by_endpoint=deleted_record_delete_types_by_endpoint or {},
+            include_event_payloads=include_event_payloads,
         )
         scoped_record_count = _scoped_record_count(scoped_keys)
 
@@ -128,9 +138,9 @@ def record_changelog(
                     scoped_record_count,
                 ],
             )
-            inserted_event_rows = _insert_change_events_and_fields(conn, events) if events else []
             if events:
-                _insert_rollups(conn, events, inserted_event_rows)
+                _insert_change_events(conn, events)
+                _insert_rollups(conn, events)
             _replace_current_index(
                 conn,
                 full_refresh=full_refresh,
@@ -157,9 +167,86 @@ def record_changelog(
     )
 
 
+def seed_changelog_index(
+    db_path: Path,
+    *,
+    endpoints: set[str] | None = None,
+    progress: ProgressCallback | None = None,
+) -> ChangelogRun:
+    """Seed the compact changelog baseline without writing synthetic events."""
+    created_at = datetime.now(UTC)
+    with connect(db_path) as conn:
+        _emit_progress(progress, "Preparing changelog tables...")
+        ensure_changelog_tables(conn)
+        run_id = _allocate_run_id(conn, created_at)
+        endpoint_names = _resolve_endpoint_scope(
+            conn,
+            endpoints=endpoints,
+            record_ids_by_endpoint=None,
+            deleted_record_ids_by_endpoint=None,
+        )
+        return _seed_changelog_index_conn(
+            conn,
+            created_at=created_at,
+            run_id=run_id,
+            endpoint_names=endpoint_names,
+            progress=progress,
+        )
+
+
+def prune_changelog(
+    db_path: Path,
+    *,
+    older_than: datetime,
+) -> dict[str, int]:
+    with connect(db_path) as conn:
+        ensure_changelog_tables(conn)
+        cutoff = _datetime_to_db(older_than)
+        event_count = _delete_count(
+            conn,
+            "endpoint_change_events",
+            "COALESCE(modified_at, changed_at) < ?",
+            [cutoff],
+        )
+        change_summary_count = _delete_count(
+            conn,
+            "endpoint_change_summary",
+            "changed_at < ?",
+            [cutoff],
+        )
+        actor_summary_count = _delete_count(
+            conn,
+            "endpoint_actor_change_summary",
+            "changed_at < ?",
+            [cutoff],
+        )
+        run_count = _delete_count(
+            conn,
+            "endpoint_changelog_runs",
+            "created_at < ? AND event_count > 0",
+            [cutoff],
+        )
+    return {
+        "events": event_count,
+        "change_summary": change_summary_count,
+        "actor_summary": actor_summary_count,
+        "runs": run_count,
+    }
+
+
 def _emit_progress(progress: ProgressCallback | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _delete_count(
+    conn: sqlite3.Connection,
+    table: str,
+    where: str,
+    params: list[Any],
+) -> int:
+    cursor = conn.execute(f"DELETE FROM {table} WHERE {where}", params)
+    return int(cursor.rowcount if cursor.rowcount is not None and cursor.rowcount >= 0 else 0)
 
 
 def _resolve_endpoint_scope(
@@ -184,27 +271,73 @@ def _resolve_endpoint_scope(
     return {str(row["endpoint"]) for row in rows}
 
 
-def _index_has_all_endpoints(conn: sqlite3.Connection, endpoint_names: set[str]) -> bool:
+def _index_has_any_endpoints(conn: sqlite3.Connection, endpoint_names: set[str]) -> bool:
     if not endpoint_names:
-        return True
-    rows = conn.execute(
+        return False
+    row = conn.execute(
         f"""
-        SELECT endpoint,
-               COUNT(*) AS rows,
-               SUM(CASE WHEN changelog_source_sha256 = ? THEN 1 ELSE 0 END) AS compatible_rows
+        SELECT 1
         FROM endpoint_changelog_index_current
         WHERE endpoint IN ({",".join("?" for _ in endpoint_names)})
-        GROUP BY endpoint
+        LIMIT 1
         """,
-        [CHANGELOG_SOURCE_SHA, *sorted(endpoint_names)],
-    ).fetchall()
-    indexed = {
-        row["endpoint"]
-        for row in rows
-        if int(row["rows"] or 0) > 0
-        and int(row["rows"] or 0) == int(row["compatible_rows"] or 0)
-    }
-    return endpoint_names <= indexed
+        sorted(endpoint_names),
+    ).fetchone()
+    return row is not None
+
+
+def _seed_changelog_index_conn(
+    conn: sqlite3.Connection,
+    *,
+    created_at: datetime,
+    run_id: str,
+    endpoint_names: set[str],
+    progress: ProgressCallback | None,
+) -> ChangelogRun:
+    _emit_progress(progress, "Counting current cache...")
+    record_count = _count_current_records(conn, endpoints=endpoint_names)
+    _emit_progress(progress, "Writing changelog index...")
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            """
+            INSERT INTO endpoint_changelog_runs (
+                run_id, created_at, changelog_source, changelog_source_sha256,
+                endpoint_count, record_count, event_count, full_refresh,
+                scoped_record_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                run_id,
+                _datetime_to_db(created_at),
+                CHANGELOG_SOURCE,
+                CHANGELOG_SOURCE_SHA,
+                len(endpoint_names),
+                record_count,
+                0,
+                1,
+                0,
+            ],
+        )
+        _replace_current_index_from_records(
+            conn,
+            endpoint_names=sorted(endpoint_names),
+            run_id=run_id,
+            created_at=created_at,
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return ChangelogRun(
+        run_id=run_id,
+        endpoint_count=len(endpoint_names),
+        record_count=record_count,
+        event_count=0,
+        full_refresh=True,
+        scoped_record_count=0,
+    )
 
 
 def _build_current_index(
@@ -224,6 +357,24 @@ def _build_current_index(
         sorted(endpoints),
     ).fetchall()
     return _index_from_rows(rows, hash_column="payload_sha256")
+
+
+def _count_current_records(
+    conn: sqlite3.Connection,
+    *,
+    endpoints: set[str],
+) -> int:
+    if not endpoints:
+        return 0
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*)
+        FROM endpoint_records
+        WHERE endpoint IN ({",".join("?" for _ in endpoints)})
+        """,
+        sorted(endpoints),
+    ).fetchone()
+    return int(row[0] or 0)
 
 
 def _build_scoped_current_index(
@@ -298,13 +449,13 @@ def _load_current_index(
         return {}
     rows = conn.execute(
         f"""
-        SELECT endpoint, record_id, payload_hash, payload_json
+        SELECT endpoint, record_id, payload_hash
         FROM endpoint_changelog_index_current
         WHERE endpoint IN ({",".join("?" for _ in endpoints)})
         """,
         sorted(endpoints),
     ).fetchall()
-    return _index_from_rows(rows, hash_column="payload_hash")
+    return _index_from_rows(rows, hash_column="payload_hash", payload_column=None)
 
 
 def _load_current_index_for_keys(
@@ -317,14 +468,16 @@ def _load_current_index_for_keys(
         for record_id_chunk in _record_id_chunks(record_ids):
             rows = conn.execute(
                 f"""
-                SELECT endpoint, record_id, payload_hash, payload_json
+                SELECT endpoint, record_id, payload_hash
                 FROM endpoint_changelog_index_current
                 WHERE endpoint = ?
                   AND record_id IN ({",".join("?" for _ in record_id_chunk)})
                 """,
                 [endpoint, *record_id_chunk],
             ).fetchall()
-            index.update(_index_from_rows(rows, hash_column="payload_hash"))
+            index.update(
+                _index_from_rows(rows, hash_column="payload_hash", payload_column=None)
+            )
     return index
 
 
@@ -338,13 +491,14 @@ def _index_from_rows(
     rows: list[sqlite3.Row],
     *,
     hash_column: str,
+    payload_column: str | None = "payload_json",
 ) -> dict[tuple[str, str], _IndexRow]:
     return {
         (row["endpoint"], row["record_id"]): _IndexRow(
             endpoint=row["endpoint"],
             record_id=row["record_id"],
             payload_hash=row[hash_column],
-            payload_json=row["payload_json"],
+            payload_json=row[payload_column] if payload_column else None,
         )
         for row in rows
     }
@@ -363,6 +517,21 @@ def _scoped_record_keys(
     return keys
 
 
+def _previous_records_index(
+    previous_records_by_endpoint: dict[str, dict[str, PreviousRecord]],
+) -> dict[tuple[str, str], _IndexRow]:
+    rows: dict[tuple[str, str], _IndexRow] = {}
+    for endpoint, records in previous_records_by_endpoint.items():
+        for record_id, previous in records.items():
+            rows[(endpoint, record_id)] = _IndexRow(
+                endpoint=endpoint,
+                record_id=record_id,
+                payload_hash=previous.payload_hash,
+                payload_json=previous.payload_json,
+            )
+    return rows
+
+
 def _diff_indexes(
     *,
     run_id: str,
@@ -372,6 +541,7 @@ def _diff_indexes(
     tombstone_index: dict[tuple[str, str], _IndexRow],
     user_names: dict[str, str],
     delete_types_by_endpoint: dict[str, dict[str, str]],
+    include_event_payloads: bool,
 ) -> list[_ChangeEvent]:
     events: list[_ChangeEvent] = []
     changed_at_text = _datetime_to_db(changed_at)
@@ -396,7 +566,12 @@ def _diff_indexes(
                 record_id,
                 DELETE_TYPE_TOMBSTONE if tombstone is not None else DELETE_TYPE_UNKNOWN,
             )
-        actor_payload = _actor_payload(previous=previous, current=current, tombstone=tombstone)
+        actor_payload = _actor_payload(
+            previous=previous,
+            current=current,
+            tombstone=tombstone,
+            delete_type=delete_type,
+        )
         modified_by_id = _string_value(actor_payload.get(MODIFIED_BY_FIELD))
         events.append(
             _ChangeEvent(
@@ -412,20 +587,23 @@ def _diff_indexes(
                 previous_hash=previous.payload_hash if previous else None,
                 current_hash=current.payload_hash if current else None,
                 changed_fields=_changed_fields(previous, current),
-                previous_payload_json=previous.payload_json if previous else None,
-                current_payload_json=current.payload_json if current else None,
+                previous_payload_json=(
+                    previous.payload_json if include_event_payloads and previous else None
+                ),
+                current_payload_json=(
+                    current.payload_json if include_event_payloads and current else None
+                ),
             )
         )
     return events
 
 
-def _insert_change_events_and_fields(
+def _insert_change_events(
     conn: sqlite3.Connection,
     events: list[_ChangeEvent],
-) -> list[tuple[int, list[list[Any]]]]:
-    inserted_event_rows: list[tuple[int, list[list[Any]]]] = []
+) -> None:
     for event in events:
-        cursor = conn.execute(
+        conn.execute(
             """
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type,
@@ -452,74 +630,16 @@ def _insert_change_events_and_fields(
                 event.current_payload_json,
             ],
         )
-        event_id = int(cursor.lastrowid)
-        field_rows = _field_change_rows(event_id, event)
-        if field_rows:
-            conn.executemany(
-                """
-                INSERT INTO endpoint_change_fields (
-                    run_id, event_id, endpoint, record_id, changed_at, field,
-                    field_change_type, event_change_type, delete_type, modified_at,
-                    modified_by_id, modified_by_name, previous_value_json,
-                    current_value_json
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                field_rows,
-            )
-        inserted_event_rows.append((event_id, field_rows))
-    return inserted_event_rows
-
-
-def _field_change_rows(event_id: int, event: _ChangeEvent) -> list[list[Any]]:
-    previous_payload = _json_dict(event.previous_payload_json)
-    current_payload = _json_dict(event.current_payload_json)
-    rows: list[list[Any]] = []
-    for field in sorted(set(previous_payload) | set(current_payload)):
-        previous_exists = field in previous_payload
-        current_exists = field in current_payload
-        previous_value = previous_payload.get(field)
-        current_value = current_payload.get(field)
-        if previous_exists and current_exists and previous_value == current_value:
-            continue
-        if previous_exists and current_exists:
-            field_change_type = "changed_field"
-        elif current_exists:
-            field_change_type = "added_field"
-        else:
-            field_change_type = "removed_field"
-        rows.append(
-            [
-                event.run_id,
-                event_id,
-                event.endpoint,
-                event.record_id,
-                event.changed_at,
-                field,
-                field_change_type,
-                event.change_type,
-                event.delete_type,
-                event.modified_at,
-                event.modified_by_id,
-                event.modified_by_name,
-                _json_or_none(previous_value) if previous_exists else None,
-                _json_or_none(current_value) if current_exists else None,
-            ]
-        )
-    return rows
 
 
 def _insert_rollups(
     conn: sqlite3.Connection,
     events: list[_ChangeEvent],
-    inserted_event_rows: list[tuple[int, list[list[Any]]]],
 ) -> None:
     change_counts: dict[tuple[str, str, str, str | None], int] = {}
     actor_counts: dict[tuple[str, str, str | None, str | None, str, str | None], int] = {}
-    field_counts: dict[tuple[str, str, str, str, str], int] = {}
-    actor_field_counts: dict[tuple[str, str, str | None, str | None, str, str, str], int] = {}
 
-    for (_event_id, field_rows), event in zip(inserted_event_rows, events, strict=True):
+    for event in events:
         change_key = (event.run_id, event.endpoint, event.change_type, event.delete_type)
         change_counts[change_key] = change_counts.get(change_key, 0) + 1
         actor_key = (
@@ -531,28 +651,6 @@ def _insert_rollups(
             event.delete_type,
         )
         actor_counts[actor_key] = actor_counts.get(actor_key, 0) + 1
-        for field_row in field_rows:
-            field = field_row[5]
-            field_change_type = field_row[6]
-            event_change_type = field_row[7]
-            field_key = (
-                event.run_id,
-                event.endpoint,
-                field,
-                field_change_type,
-                event_change_type,
-            )
-            actor_field_key = (
-                event.run_id,
-                event.endpoint,
-                event.modified_by_id,
-                event.modified_by_name,
-                field,
-                field_change_type,
-                event_change_type,
-            )
-            field_counts[field_key] = field_counts.get(field_key, 0) + 1
-            actor_field_counts[actor_field_key] = actor_field_counts.get(actor_field_key, 0) + 1
 
     if change_counts:
         conn.executemany(
@@ -565,34 +663,6 @@ def _insert_rollups(
             [
                 [run_id, events[0].changed_at, endpoint, change_type, delete_type, count]
                 for (run_id, endpoint, change_type, delete_type), count in change_counts.items()
-            ],
-        )
-    if field_counts:
-        conn.executemany(
-            """
-            INSERT INTO endpoint_field_change_summary (
-                run_id, changed_at, endpoint, field, field_change_type,
-                event_change_type, count
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                [
-                    run_id,
-                    events[0].changed_at,
-                    endpoint,
-                    field,
-                    field_change_type,
-                    event_change_type,
-                    count,
-                ]
-                for (
-                    run_id,
-                    endpoint,
-                    field,
-                    field_change_type,
-                    event_change_type,
-                ), count in field_counts.items()
             ],
         )
     if actor_counts:
@@ -623,38 +693,6 @@ def _insert_rollups(
                     change_type,
                     delete_type,
                 ), count in actor_counts.items()
-            ],
-        )
-    if actor_field_counts:
-        conn.executemany(
-            """
-            INSERT INTO endpoint_actor_field_change_summary (
-                run_id, changed_at, endpoint, modified_by_id, modified_by_name,
-                field, field_change_type, event_change_type, count
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                [
-                    run_id,
-                    events[0].changed_at,
-                    endpoint,
-                    modified_by_id,
-                    modified_by_name,
-                    field,
-                    field_change_type,
-                    event_change_type,
-                    count,
-                ]
-                for (
-                    run_id,
-                    endpoint,
-                    modified_by_id,
-                    modified_by_name,
-                    field,
-                    field_change_type,
-                    event_change_type,
-                ), count in actor_field_counts.items()
             ],
         )
 
@@ -689,17 +727,16 @@ def _replace_current_index(
         conn.executemany(
             """
             INSERT INTO endpoint_changelog_index_current (
-                endpoint, record_id, payload_hash, payload_json,
+                endpoint, record_id, payload_hash,
                 changelog_source_sha256, updated_at, run_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
                 [
                     row.endpoint,
                     row.record_id,
                     row.payload_hash,
-                    row.payload_json,
                     CHANGELOG_SOURCE_SHA,
                     _datetime_to_db(created_at),
                     run_id,
@@ -709,7 +746,45 @@ def _replace_current_index(
         )
 
 
+def _replace_current_index_from_records(
+    conn: sqlite3.Connection,
+    *,
+    endpoint_names: list[str],
+    run_id: str,
+    created_at: datetime,
+) -> None:
+    if not endpoint_names:
+        return
+    placeholders = ",".join("?" for _ in endpoint_names)
+    conn.execute(
+        f"""
+        DELETE FROM endpoint_changelog_index_current
+        WHERE endpoint IN ({placeholders})
+        """,
+        endpoint_names,
+    )
+    updated_at = _datetime_to_db(created_at)
+    conn.execute(
+        f"""
+        INSERT INTO endpoint_changelog_index_current (
+            endpoint, record_id, payload_hash,
+            changelog_source_sha256, updated_at, run_id
+        )
+        SELECT endpoint, record_id, payload_sha256, ?, ?, ?
+        FROM endpoint_records
+        WHERE endpoint IN ({placeholders})
+        """,
+        [CHANGELOG_SOURCE_SHA, updated_at, run_id, *endpoint_names],
+    )
+
+
 def _changed_fields(previous: _IndexRow | None, current: _IndexRow | None) -> list[str]:
+    if (
+        previous is not None
+        and current is not None
+        and (previous.payload_json is None or current.payload_json is None)
+    ):
+        return []
     previous_payload = _json_dict(previous.payload_json if previous else None)
     current_payload = _json_dict(current.payload_json if current else None)
     return sorted(
@@ -724,8 +799,11 @@ def _actor_payload(
     previous: _IndexRow | None,
     current: _IndexRow | None,
     tombstone: _IndexRow | None,
+    delete_type: str | None,
 ) -> dict[str, Any]:
-    if tombstone is not None:
+    if delete_type == DELETE_TYPE_HARD_DELETE and previous is not None:
+        payload_json = previous.payload_json
+    elif tombstone is not None:
         payload_json = tombstone.payload_json
     elif current is not None:
         payload_json = current.payload_json

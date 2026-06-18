@@ -8,7 +8,7 @@ import pytest
 from centric_api.changelog import record_changelog
 from centric_api.cli import main
 from centric_api.rendering.changelog import print_human_changelog_changes
-from centric_api.store import connect
+from centric_api.store import PreviousRecord, connect
 from tests.helpers_cli import _insert_endpoint_record
 
 
@@ -39,6 +39,24 @@ def _insert_endpoint_tombstone(
             "2026-01-01T00:00:00Z",
         ],
     )
+
+
+def _previous_records(conn, pairs: list[tuple[str, str]]) -> dict[str, dict[str, PreviousRecord]]:
+    records: dict[str, dict[str, PreviousRecord]] = {}
+    for endpoint, record_id in pairs:
+        row = conn.execute(
+            """
+            SELECT payload_json, payload_sha256
+            FROM endpoint_records
+            WHERE endpoint = ? AND record_id = ?
+            """,
+            [endpoint, record_id],
+        ).fetchone()
+        records.setdefault(endpoint, {})[record_id] = PreviousRecord(
+            payload_hash=row["payload_sha256"],
+            payload_json=row["payload_json"],
+        )
+    return records
 
 
 def test_changelog_summary_empty_db(tmp_path, capsys) -> None:
@@ -99,11 +117,9 @@ def test_changelog_update_reports_human_progress(tmp_path, capsys) -> None:
     assert "Updating changelog" in output
     assert f"DB:    {db_path}" in output
     assert "Scope: all endpoints" in output
-    assert "Mode: full refresh" in output
-    assert "Loading current cache..." in output
-    assert "Diffing records..." in output
-    assert "Writing changelog tables..." in output
-    assert "Preparing changelog read indexes..." in output
+    assert "Empty changelog index; seeding baseline..." in output
+    assert "Counting current cache..." in output
+    assert "Writing changelog index..." in output
     assert "Changelog updated:" in output
     assert "Elapsed:" in output
 
@@ -128,7 +144,7 @@ def test_changelog_update_json_suppresses_progress(tmp_path, capsys) -> None:
     assert "Loading current cache" not in output
     assert payload["endpoint_count"] == 1
     assert payload["record_count"] == 1
-    assert payload["event_count"] == 1
+    assert payload["event_count"] == 0
     assert isinstance(payload["elapsed_seconds"], float)
 
 
@@ -353,7 +369,7 @@ def test_changelog_read_views_reject_repeated_endpoint_filters(tmp_path, capsys)
     exit_code = main(
         [
             "changelog",
-            "fields",
+            "actors",
             "--db",
             str(db_path),
             "--endpoint",
@@ -427,13 +443,6 @@ def test_changelog_detail_actions_use_human_tables(tmp_path, capsys) -> None:
         )
     record_changelog(db_path, record_ids_by_endpoint={"styles": {"S1"}})
 
-    assert main(["changelog", "fields", "--db", str(db_path)]) == 0
-    fields_output = capsys.readouterr().out
-    assert "Changelog Fields" in fields_output
-    assert "Top changed fields" in fields_output
-    assert "code" in fields_output
-    assert "field_change_type=" not in fields_output
-
     assert main(["changelog", "actors", "--db", str(db_path)]) == 0
     actors_output = capsys.readouterr().out
     assert "Changelog Actors" in actors_output
@@ -500,6 +509,7 @@ def test_changelog_leaderboard_limits_actors_not_endpoints(tmp_path, capsys) -> 
         )
     record_changelog(db_path, endpoints={"styles", "boms", "documents"}, full=True)
     with connect(db_path) as conn:
+        previous_records = _previous_records(conn, [("boms", "B1"), ("documents", "D1")])
         conn.execute(
             "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
             ["boms", "B1"],
@@ -515,6 +525,7 @@ def test_changelog_leaderboard_limits_actors_not_endpoints(tmp_path, capsys) -> 
             "boms": {"B1": "tombstone"},
             "documents": {"D1": "hard_delete"},
         },
+        previous_records_by_endpoint=previous_records,
     )
 
     assert main(["changelog", "leaderboard", "--db", str(db_path), "--limit", "1"]) == 0
