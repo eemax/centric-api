@@ -4,8 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from centric_api.cli import main
 from centric_api.swagger import build_swagger_index
+from centric_api.swagger.history import history_diff_snapshots
 
 
 def test_swagger_endpoints_lists_local_schema(tmp_path: Path, monkeypatch, capsys) -> None:
@@ -439,6 +442,26 @@ def test_swagger_diff_compares_history_positions(
         {"endpoint": "materials", "method": "GET", "path": "/v2/materials"}
     ]
     assert payload["field_added_count"] == 2
+
+
+def test_swagger_diff_rejects_negative_history_indexes(tmp_path: Path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("CENTRIC_API_HOME", str(home))
+    _write_history_snapshot(
+        home,
+        "20260614T100000000000",
+        _swagger_doc(paths=["/v2/styles"]),
+        fetched_at="2026-06-14T10:00:00.000000Z",
+    )
+    _write_history_snapshot(
+        home,
+        "20260614T110000000000",
+        _swagger_doc(paths=["/v2/styles", "/v2/materials"]),
+        fetched_at="2026-06-14T11:00:00.000000Z",
+    )
+
+    with pytest.raises(ValueError, match="Available indexes: 0..1"):
+        history_diff_snapshots([-1, 0])
 
 
 def test_swagger_status_reports_unreadable_metadata(tmp_path: Path, monkeypatch, capsys) -> None:

@@ -28,7 +28,12 @@ def history_diff_snapshots(indexes: list[int]) -> tuple[dict[str, Any], dict[str
     if not rows:
         raise ValueError(f"Swagger history is empty: {resolve_swagger_history_dir()}")
     max_index = len(rows) - 1
-    if current_index > max_index or baseline_index > max_index:
+    if (
+        current_index < 0
+        or baseline_index < 0
+        or current_index > max_index
+        or baseline_index > max_index
+    ):
         raise ValueError(f"Swagger history index out of range. Available indexes: 0..{max_index}.")
     if current_index == baseline_index:
         raise ValueError("Swagger history indexes must be different.")
