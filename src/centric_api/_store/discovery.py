@@ -34,6 +34,8 @@ def discover_raw_files(raw_dir: Path) -> list[RawFile]:
 def _append_raw_file(files: list[RawFile], *, raw_dir: Path, path: Path) -> None:
     if path.name.startswith("."):
         return
+    if path.name.endswith(".index.jsonl"):
+        return
     endpoint, is_delta = _endpoint_from_filename(path.name)
     if endpoint is None:
         return

@@ -185,6 +185,14 @@ reports lifecycle state, and reports whether its files are already applied to th
 `ingest raw-run RAW_RUN` applies only completed evidence to SQLite; pass `--changelog` to run the
 normal scoped changelog from the ingest result.
 
+`raw` is the evidence inspection surface. New fetches write `.index.jsonl` sidecars beside raw JSONL
+files so `raw check`, `raw inspect`, `raw diff`, and `raw compact` can verify, trace, compare, and
+compact payload evidence without turning changelog into a payload archive. Successful checks write
+a small `.verified.json` seal per run, letting compaction skip expensive re-verification when the
+manifest and file fingerprints are unchanged. If copied or legacy evidence is missing sidecars, use
+`raw index RAW_RUN` or `raw index --all` to repair it explicitly; compaction will not auto-repair
+missing indexes.
+
 `rebuild-db --yes` is the SQLite recovery path. It backs up the current SQLite database files,
 replays completed raw evidence from `CENTRIC_API_HOME/raw/runs` into a fresh DB, rebuilds changelog,
 and reinstalls dashboard views. Use `--skip-changelog` for faster cache-only rebuilds after schema

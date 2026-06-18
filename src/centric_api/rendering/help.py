@@ -75,6 +75,7 @@ def top_level_help(*, color: bool = False) -> str:
             command("doctor", "Check local setup"),
             command("status", "Show cache and runtime state"),
             command("ingest", "Inspect or ingest raw evidence"),
+            command("raw", "Check, inspect, diff, and compact raw evidence"),
             command("rebuild-db", "Rebuild SQLite from raw evidence"),
             command("swagger", "Inspect and refresh local API schema"),
             command("cron", "Run scheduled delta fetches"),

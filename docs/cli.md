@@ -21,6 +21,8 @@ command:
   `load check --json`, `load run --json`, `load retry --json`, `model show --json`,
   `model check --json`, `model run --json`, `validate show --json`,
   `validate run NAME --json`, `ingest check --json`, `ingest raw-run --json`,
+  `raw check --json`, `raw index --json`, `raw inspect --json`, `raw diff --json`,
+  `raw compact --json`,
   `map endpoints --json`, `swagger refresh --json`, `swagger status --json`,
   `swagger diff --json`, `swagger coverage --json`, and units commands emit one JSON object.
   `validate history --json` also emits one JSON object with artifact paths and history counts.
@@ -96,6 +98,11 @@ Raw run lifecycle:
   source for `ingest raw-run RUN_ID` and `rebuild-db`.
 - `raw/failed/RUN_ID`: failed or partial fetch evidence with `.failed.json`; this is intentionally
   skipped by raw-root ingest/rebuild discovery and can be inspected or deleted as a group.
+
+Successful fetches also write one record index beside each raw JSONL file, such as
+`styles.delta.index.jsonl`. The run manifest records raw file hashes, index hashes, counts, and
+sizes so raw evidence can be checked, inspected, diffed, and compacted without making changelog a
+payload archive.
 
 Useful options:
 
@@ -266,6 +273,51 @@ Useful options:
 - `--db PATH`: target SQLite database; defaults to `CENTRIC_API_HOME/centric.db`.
 - `--schema PATH`: endpoint tombstone schema overlay.
 - `--json`: emits one JSON object.
+
+## Raw Evidence
+
+```bash
+uv run centric-api raw check
+uv run centric-api raw check 2026-06-16T124501Z-full
+uv run centric-api raw index 2026-06-16T124501Z-full
+uv run centric-api raw index --all
+uv run centric-api raw inspect styles C123
+uv run centric-api raw inspect styles C123 --show-payload
+uv run centric-api raw diff styles C123
+uv run centric-api raw diff styles C123 --from HASH_A --to HASH_B
+uv run centric-api raw compact --dry-run
+uv run centric-api raw compact --dry-run --exact
+uv run centric-api raw compact --archive-old
+```
+
+`raw` is the payload-evidence surface. Changelog tells you which records moved; raw indexes tell you
+where the exact evidence lives and allow payload inspection or diffs on demand.
+
+Actions:
+
+- `check`: verifies raw manifests, raw files, index files, hashes, counts, and legacy missing-index
+  cases. Omit `RAW_RUN` to check all run manifests under `raw/runs`.
+- `index`: explicitly repairs missing sidecar indexes from raw JSONL evidence and refreshes manifest
+  metadata. Use a run id/path for one run, or `--all` for trusted non-partial runs. This is the only
+  compatibility path for missing indexes; `compact` does not silently repair them.
+- `inspect`: lists indexed observations for one endpoint record. Use `--hash` to filter by payload
+  hash prefix, `--latest` for the newest observation, and `--show-payload` to print the raw payload.
+- `diff`: compares two raw payload observations. Without hashes, it compares the latest two distinct
+  payload hashes for that record.
+- `compact`: creates a new immutable compacted full raw run from indexed evidence. All completed
+  source runs must pass `raw check`; legacy runs without indexes are refused instead of silently
+  skipped. Successful checks write `.verified.json` seals so later compactions can trust unchanged
+  evidence without re-reading every payload. `--dry-run` is index-only by default; add `--exact` to
+  hydrate payloads and count written/deleted winners. `--archive-old` moves source runs to
+  `raw/archive` only after the compacted run is written and verified.
+
+Useful options:
+
+- `--raw-dir PATH`: raw root directory; defaults to `CENTRIC_API_HOME/raw`.
+- `--schema PATH`: endpoint tombstone schema overlay for `compact`.
+- `--output PATH`: explicit compacted run output directory.
+- `--exact`: with `compact --dry-run`, compute exact written/deleted winner counts.
+- `--json`: emits machine-readable output.
 
 ## Download
 

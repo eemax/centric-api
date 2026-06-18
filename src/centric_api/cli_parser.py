@@ -124,6 +124,100 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ingest_raw_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+    raw_parser = subparsers.add_parser("raw", help="Inspect and compact raw evidence")
+    raw_actions = raw_parser.add_subparsers(dest="action", required=True)
+
+    raw_check_parser = raw_actions.add_parser("check", help="Verify raw evidence indexes")
+    raw_check_parser.add_argument(
+        "raw_run",
+        metavar="RAW_RUN",
+        nargs="?",
+        default=None,
+        help="Raw run id or path. Omit to check all runs under raw/runs.",
+    )
+    raw_check_parser.add_argument(
+        "--raw-dir", metavar="PATH", default=None, help="Raw root directory."
+    )
+    raw_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    raw_index_parser = raw_actions.add_parser("index", help="Repair missing raw evidence indexes")
+    raw_index_parser.add_argument(
+        "raw_run",
+        metavar="RAW_RUN",
+        nargs="?",
+        default=None,
+        help="Raw run id or path.",
+    )
+    raw_index_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Repair missing indexes for all trusted runs under raw/runs.",
+    )
+    raw_index_parser.add_argument(
+        "--raw-dir", metavar="PATH", default=None, help="Raw root directory."
+    )
+    raw_index_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    raw_inspect_parser = raw_actions.add_parser(
+        "inspect",
+        help="Show raw observations for a record",
+    )
+    raw_inspect_parser.add_argument("endpoint", metavar="ENDPOINT", help="Endpoint name.")
+    raw_inspect_parser.add_argument("record_id", metavar="RECORD_ID", help="Record id.")
+    raw_inspect_parser.add_argument(
+        "--hash", metavar="SHA", default=None, help="Filter to a payload hash prefix."
+    )
+    raw_inspect_parser.add_argument(
+        "--latest", action="store_true", help="Show only the latest observation."
+    )
+    raw_inspect_parser.add_argument(
+        "--show-payload", action="store_true", help="Include raw payload JSON."
+    )
+    raw_inspect_parser.add_argument(
+        "--raw-dir", metavar="PATH", default=None, help="Raw root directory."
+    )
+    raw_inspect_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    raw_diff_parser = raw_actions.add_parser("diff", help="Diff raw payload observations")
+    raw_diff_parser.add_argument("endpoint", metavar="ENDPOINT", help="Endpoint name.")
+    raw_diff_parser.add_argument("record_id", metavar="RECORD_ID", help="Record id.")
+    raw_diff_parser.add_argument(
+        "--from", dest="from_hash", metavar="SHA", default=None, help="Source payload hash prefix."
+    )
+    raw_diff_parser.add_argument(
+        "--to", dest="to_hash", metavar="SHA", default=None, help="Target payload hash prefix."
+    )
+    raw_diff_parser.add_argument(
+        "--raw-dir", metavar="PATH", default=None, help="Raw root directory."
+    )
+    raw_diff_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
+    raw_compact_parser = raw_actions.add_parser(
+        "compact",
+        help="Create a compacted full raw run from indexed evidence",
+    )
+    raw_compact_parser.add_argument(
+        "--raw-dir", metavar="PATH", default=None, help="Raw root directory."
+    )
+    raw_compact_parser.add_argument(
+        "--output", metavar="PATH", default=None, help="Compacted run output directory."
+    )
+    raw_compact_parser.add_argument(
+        "--schema", metavar="PATH", default=None, help="Endpoint schema config path."
+    )
+    raw_compact_parser.add_argument(
+        "--archive-old",
+        action="store_true",
+        help="Move source runs to raw/archive after compacting.",
+    )
+    raw_compact_parser.add_argument("--dry-run", action="store_true", help="Plan without writing.")
+    raw_compact_parser.add_argument(
+        "--exact",
+        action="store_true",
+        help="Hydrate payloads during dry-run to count written/deleted winners exactly.",
+    )
+    raw_compact_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
     changelog_parser = subparsers.add_parser("changelog", help="Inspect or update changelog")
     changelog_parser.add_argument(
         "action",

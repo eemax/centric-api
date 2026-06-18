@@ -18,7 +18,7 @@ from centric_api.fetch_common import (
 from centric_api.fetch_delta_state import write_delta_state
 from centric_api.fetch_manifest import write_run_manifest
 from centric_api.fetcher import run_endpoint
-from centric_api.models import CountSpec, EndpointSpec, FetcherConfig
+from centric_api.models import CountSpec, EndpointSpec, FetcherConfig, FetchRunResult
 
 
 def test_fetcher_fetches_pages_and_writes_completed_checkpoint(tmp_path: Path) -> None:
@@ -468,6 +468,61 @@ def test_write_run_manifest_cleans_temp_file_on_replace_failure(
 
     assert not (output_dir / "manifest.json").exists()
     assert not (output_dir / ".manifest.json.tmp").exists()
+
+
+def test_write_run_manifest_adds_raw_index_metadata(tmp_path: Path) -> None:
+    output_dir = tmp_path / "raw" / "runs" / "run1"
+    output_dir.mkdir(parents=True)
+    raw_path = output_dir / "styles.delta.jsonl"
+    raw_path.write_text(
+        json.dumps({"id": "S1", "node_name": "Style"}, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    finished_at = datetime(2026, 1, 1, 0, 0, 1, tzinfo=UTC)
+
+    manifest_path = write_run_manifest(
+        output_dir=output_dir,
+        run_id="run1",
+        mode="delta",
+        run_started_at=started_at,
+        run_finished_at=finished_at,
+        selected_specs=[_endpoint(limit=50)],
+        results=[
+            FetchRunResult(
+                endpoint="styles",
+                pages_fetched=1,
+                items_fetched=1,
+                expected_count=1,
+                retries_used=0,
+                start_skip=0,
+                next_skip=50,
+                duration_seconds=0.1,
+                output_file=raw_path,
+                checkpoint_file=tmp_path / "checkpoint.json",
+            )
+        ],
+        failures=[],
+        endpoint_records=[
+            {
+                "endpoint": "styles",
+                "file": "styles.delta.jsonl",
+                "items_fetched": 1,
+            }
+        ],
+        modified_since=None,
+        utc_iso=lambda value: value.isoformat(),
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    endpoint = manifest["endpoints"]["styles"]
+    assert endpoint["index_file"] == "styles.delta.index.jsonl"
+    assert endpoint["record_count"] == 1
+    assert endpoint["line_count"] == 1
+    assert endpoint["byte_size"] == raw_path.stat().st_size
+    assert len(endpoint["content_sha256"]) == 64
+    assert len(endpoint["index_sha256"]) == 64
+    assert (output_dir / "styles.delta.index.jsonl").is_file()
 
 
 def _endpoint(*, limit: int) -> EndpointSpec:

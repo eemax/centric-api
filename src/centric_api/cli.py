@@ -14,6 +14,7 @@ from .commands.ingest import run_ingest_command
 from .commands.load import run_load_command
 from .commands.map import run_map_command
 from .commands.model import run_model_command
+from .commands.raw import run_raw_command
 from .commands.rebuild_db import run_rebuild_db
 from .commands.snapshot import run_snapshot_command
 from .commands.status import run_status
@@ -38,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_fetch(args)
         if args.command == "ingest":
             return run_ingest_command(args)
+        if args.command == "raw":
+            return run_raw_command(args)
         if args.command == "changelog":
             return run_changelog(args)
         if args.command == "cron":

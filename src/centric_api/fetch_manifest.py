@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import EndpointSpec, FetchRunResult
+from .raw_evidence import raw_index_manifest_fields
 
 
 def write_run_manifest(
@@ -28,7 +29,11 @@ def write_run_manifest(
         if len(failures) == len(selected_specs) and selected_specs
         else ("PARTIAL" if failures else ("WARN" if endpoints_warn else "OK"))
     )
+    endpoint_records_with_indexes = [
+        _record_with_raw_index(output_dir, record) for record in endpoint_records
+    ]
     manifest = {
+        "schema_version": 2,
         "run_id": run_id,
         "mode": mode,
         "status": status,
@@ -45,7 +50,7 @@ def write_run_manifest(
         "total_items": sum(result.items_fetched for result in results),
         "modified_since": modified_since,
         "failures": [{"endpoint": endpoint, "error": message} for endpoint, message in failures],
-        "endpoints": {record["endpoint"]: record for record in endpoint_records},
+        "endpoints": {record["endpoint"]: record for record in endpoint_records_with_indexes},
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "manifest.json"
@@ -57,6 +62,20 @@ def write_run_manifest(
         temp_path.unlink(missing_ok=True)
         raise
     return manifest_path
+
+
+def _record_with_raw_index(output_dir: Path, record: dict[str, Any]) -> dict[str, Any]:
+    file_name = record.get("file")
+    endpoint = record.get("endpoint")
+    if not isinstance(file_name, str) or not isinstance(endpoint, str):
+        return record
+    raw_path = output_dir / file_name
+    if not raw_path.is_file():
+        return record
+    return {
+        **record,
+        **raw_index_manifest_fields(raw_path, endpoint=endpoint),
+    }
 
 
 def endpoint_manifest_record(

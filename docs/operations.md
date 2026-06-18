@@ -58,6 +58,19 @@ Important behavior:
   `applied_raw_files`.
 - Changelog runs automatically after ingest when current records changed.
 
+Each new raw JSONL file gets a sibling `.index.jsonl` file with one canonical payload hash per
+record plus the raw line number. The run manifest stores both raw-file and index-file hashes. Use
+`raw check` to verify evidence, `raw inspect` and `raw diff` to trace payload truth on demand, and
+`raw compact` to create a new compacted full raw run from indexed evidence. Compaction does not
+rewrite SQLite cache or changelog; it creates new trusted raw evidence for future rebuilds.
+Compaction requires every completed source run to pass `raw check`, so runs without indexes are
+refused instead of silently skipped. Use `raw index RAW_RUN` or `raw index --all` to explicitly
+repair missing sidecars from raw JSONL evidence; compaction never auto-repairs them. Successful
+checks write `.verified.json` seals so unchanged runs do not need full re-verification before later
+compactions. `raw compact --dry-run` stays index-only and fast by default; use `--exact` when you
+want precise written/deleted winner counts. With `--archive-old`, covered source runs are moved to
+`raw/archive` only after the compacted run is written and verified.
+
 Fetch exits nonzero when any selected endpoint fails or when the ingest/changelog pipeline fails.
 
 For unattended Linux fetches, use the systemd timer examples in [Deployment](deployment.md). The
