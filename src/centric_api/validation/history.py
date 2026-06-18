@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from ..config import ConfigError, runtime_home
 
-HistoryGroup = Literal["day", "week", "month"]
+HistoryGroup = Literal["run", "day", "week", "month"]
 
 DEFAULT_VALIDATION_HISTORY_DIR = Path("validation/history")
 DEFAULT_VALIDATION_RUNS_DIR = Path("validation/runs")
@@ -51,8 +51,8 @@ def build_validation_history(
         if output_dir
         else runtime_home() / DEFAULT_VALIDATION_HISTORY_DIR
     )
-    if group not in {"day", "week", "month"}:
-        raise ConfigError("History group must be one of: day, week, month.")
+    if group not in {"run", "day", "week", "month"}:
+        raise ConfigError("History group must be one of: run, day, week, month.")
 
     raw_points = _load_history_metrics(resolved_runs_dir, validators=set(validators))
     points = _group_latest_points(raw_points, group=group)
@@ -188,13 +188,17 @@ def _group_latest_points(
             str(point["scope"]),
             point.get("brand"),
             _dimension_key(point.get("dimensions")),
-            _isoformat(bucket_start),
+            _run_bucket_key(point) if group == "run" else _isoformat(bucket_start),
         )
         current = grouped.get(key)
         if current is None or str(point["started_at"]) > str(current["started_at"]):
             grouped[key] = {
                 **point,
-                "bucket": _bucket_label(bucket_start, group),
+                "bucket": (
+                    str(point["run_id"])
+                    if group == "run"
+                    else _bucket_label(bucket_start, group)
+                ),
                 "bucket_start": _isoformat(bucket_start),
             }
     return sorted(
@@ -357,6 +361,8 @@ def _parse_datetime(value: str) -> datetime | None:
 
 def _bucket_start(value: datetime, group: HistoryGroup) -> datetime:
     value = value.astimezone(UTC)
+    if group == "run":
+        return value
     if group == "day":
         return value.replace(hour=0, minute=0, second=0, microsecond=0)
     if group == "month":
@@ -372,6 +378,16 @@ def _bucket_label(value: datetime, group: HistoryGroup) -> str:
         return value.strftime("%Y-%m")
     year, week, _day = value.isocalendar()
     return f"{year}-W{week:02d}"
+
+
+def _run_bucket_key(point: dict[str, Any]) -> str:
+    return "|".join(
+        (
+            str(point.get("run_id") or ""),
+            str(point.get("history_path") or ""),
+            str(point.get("started_at") or ""),
+        )
+    )
 
 
 def _isoformat(value: datetime) -> str:

@@ -137,6 +137,76 @@ def test_validate_history_counts_same_run_id_per_validator_and_skips_bad_schema(
     assert history_payload["validators"] == ["dpp-readiness", "style-readiness"]
 
 
+def test_validate_history_run_group_keeps_every_run(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    runs_dir = tmp_path / "runs"
+    week_output_dir = tmp_path / "history-week"
+    run_output_dir = tmp_path / "history-run"
+    _write_history_run(
+        runs_dir,
+        validator="style-readiness",
+        run_id="run-one",
+        started_at="2026-06-03T09:00:00Z",
+        value=20.0,
+        brand="CRAFT",
+    )
+    _write_history_run(
+        runs_dir,
+        validator="style-readiness",
+        run_id="run-two",
+        started_at="2026-06-03T14:00:00Z",
+        value=35.0,
+        brand="CRAFT",
+    )
+
+    assert (
+        main(
+            [
+                "validate",
+                "history",
+                "--runs-dir",
+                str(runs_dir),
+                "--output-dir",
+                str(week_output_dir),
+                "--group",
+                "week",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    week_payload = json.loads(capsys.readouterr().out)
+    assert week_payload["point_count"] == 1
+    week_history = json.loads((week_output_dir / "history.json").read_text(encoding="utf-8"))
+    assert [point["run_id"] for point in week_history["points"]] == ["run-two"]
+
+    assert (
+        main(
+            [
+                "validate",
+                "history",
+                "--runs-dir",
+                str(runs_dir),
+                "--output-dir",
+                str(run_output_dir),
+                "--group",
+                "run",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    run_payload = json.loads(capsys.readouterr().out)
+    assert run_payload["point_count"] == 2
+    run_history = json.loads((run_output_dir / "history.json").read_text(encoding="utf-8"))
+    assert [(point["bucket"], point["run_id"]) for point in run_history["points"]] == [
+        ("run-one", "run-one"),
+        ("run-two", "run-two"),
+    ]
+
+
 def test_validate_history_marks_downward_metric_improvement(
     tmp_path: Path,
     capsys,

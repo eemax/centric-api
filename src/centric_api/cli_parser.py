@@ -496,7 +496,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_history_parser.add_argument(
         "--group",
-        choices=("day", "week", "month"),
+        choices=("run", "day", "week", "month"),
         default="week",
         help="Time bucket for grouped history points. Default: week.",
     )

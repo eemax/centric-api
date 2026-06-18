@@ -373,6 +373,7 @@ uv run centric-api validate show my-validator
 uv run centric-api validate run my-validator
 uv run centric-api validate run all
 uv run centric-api validate history
+uv run centric-api validate history --group run
 uv run centric-api validate history --group month
 ```
 
@@ -389,7 +390,7 @@ Useful options:
 - `--units-config PATH`: use an explicit unit registry.
 - `--db PATH`: use a non-default SQLite cache for `run`.
 - `--output-dir PATH`: choose the validation artifact root.
-- `--group day|week|month`: choose `validate history` grouping; default is `week`.
+- `--group run|day|week|month`: choose `validate history` grouping; default is `week`.
 - `--validator NAME`: filter `validate history`; repeat for multiple validators.
 - `--json`: emit machine-readable output.
 

@@ -355,6 +355,7 @@ Refresh validation history artifacts from first-class `history.json` files:
 
 ```bash
 centric-api validate history
+centric-api validate history --group run
 centric-api validate history --group day
 centric-api validate history --group week
 centric-api validate history --group month
@@ -362,7 +363,8 @@ centric-api validate history --validator style-readiness
 ```
 
 The default grouping is `week`. If multiple runs land in the same bucket for the same
-validator/metric/scope/brand, the latest run in that bucket wins. The command writes:
+validator/metric/scope/brand, the latest run in that bucket wins. Use `--group run` to keep every
+run as its own point when inspecting repeated runs from the same day or week. The command writes:
 
 ```text
 CENTRIC_API_HOME/validation/history/
