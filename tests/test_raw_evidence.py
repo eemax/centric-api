@@ -2,11 +2,61 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pickle
 from pathlib import Path
 
 from centric_api.cli import main
-from centric_api.raw_evidence import raw_index_manifest_fields, raw_index_path
+from centric_api.raw_evidence import (
+    RawCompactResult,
+    RawIndexRunResult,
+    RawObservation,
+    raw_index_manifest_fields,
+    raw_index_path,
+)
 from centric_api.store import discover_raw_files
+
+
+def test_raw_evidence_result_types_keep_public_facade_identity() -> None:
+    values = (
+        RawIndexRunResult(
+            run_path=Path("raw/runs/run-1"),
+            run_id="run-1",
+            status="ok",
+            indexed_files=1,
+            skipped_files=0,
+            errors=(),
+        ),
+        RawObservation(
+            endpoint="styles",
+            record_id="S1",
+            run_id="run-1",
+            run_started_at="2026-01-01T00:00:00Z",
+            raw_file=Path("styles.jsonl"),
+            index_file=Path("styles.index.jsonl"),
+            line=1,
+            payload_sha256="payload",
+            raw_line_sha256="line",
+            modified_at="2026-01-01T00:00:00Z",
+            delete_type=None,
+            manifest_path=Path("manifest.json"),
+        ),
+        RawCompactResult(
+            status="ok",
+            output_dir=Path("raw/runs/compact"),
+            source_run_count=1,
+            source_record_count=1,
+            winner_count=1,
+            written_count=1,
+            deleted_winner_count=0,
+            archived_count=0,
+            dry_run=False,
+            counts_exact=True,
+        ),
+    )
+
+    for value in values:
+        assert type(value).__module__ == "centric_api.raw_evidence"
+        assert pickle.loads(pickle.dumps(value)) == value
 
 
 def test_raw_check_inspect_and_diff_use_record_indexes(
@@ -108,6 +158,41 @@ def test_raw_compact_writes_full_run_and_can_archive_sources(
     assert not (tmp_path / "raw" / "runs" / "run-2").exists()
     assert (tmp_path / "raw" / "archive" / "run-1").is_dir()
     assert (tmp_path / "raw" / "archive" / "run-2").is_dir()
+
+
+def test_raw_compact_respects_full_snapshot_omissions(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
+    _write_indexed_run(
+        tmp_path,
+        "run-1",
+        [
+            {"id": "S1", "node_name": "Keep", "_modified_at": "2026-01-01T00:00:00Z"},
+            {"id": "S2", "node_name": "Deleted", "_modified_at": "2026-01-01T00:00:00Z"},
+        ],
+        mode="full",
+    )
+    _write_indexed_run(
+        tmp_path,
+        "run-2",
+        [{"id": "S1", "node_name": "Keep", "_modified_at": "2026-01-02T00:00:00Z"}],
+        mode="full",
+    )
+    output = tmp_path / "raw" / "runs" / "compact-1"
+
+    assert main(["raw", "compact", "--output", str(output), "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    rows = [
+        json.loads(line)
+        for line in (output / "styles.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert payload["winner_count"] == 1
+    assert payload["written_count"] == 1
+    assert [row["id"] for row in rows] == ["S1"]
 
 
 def test_raw_discovery_ignores_index_sidecars(tmp_path: Path) -> None:
@@ -407,14 +492,22 @@ def test_raw_compact_includes_markerless_trusted_runs_and_skips_partial_runs(
     assert payload["counts_exact"] is True
 
 
-def _write_indexed_run(tmp_path: Path, run_id: str, rows: list[dict[str, str]]) -> Path:
-    return _write_indexed_run_at_raw_root(tmp_path / "raw", run_id, rows)
+def _write_indexed_run(
+    tmp_path: Path,
+    run_id: str,
+    rows: list[dict[str, str]],
+    *,
+    mode: str = "delta",
+) -> Path:
+    return _write_indexed_run_at_raw_root(tmp_path / "raw", run_id, rows, mode=mode)
 
 
 def _write_indexed_run_at_raw_root(
     raw_root: Path,
     run_id: str,
     rows: list[dict[str, str]],
+    *,
+    mode: str = "delta",
 ) -> Path:
     run_dir = raw_root / "runs" / run_id
     run_dir.mkdir(parents=True)
@@ -429,14 +522,14 @@ def _write_indexed_run_at_raw_root(
             {
                 "schema_version": 2,
                 "run_id": run_id,
-                "mode": "delta",
+                "mode": mode,
                 "started_at": rows[-1]["_modified_at"],
                 "finished_at": rows[-1]["_modified_at"],
                 "endpoints": {
                     "styles": {
                         "endpoint": "styles",
                         "file": "styles.delta.jsonl",
-                        "is_delta": True,
+                        "is_delta": mode != "full",
                         "items_fetched": len(rows),
                         **index_fields,
                     }
