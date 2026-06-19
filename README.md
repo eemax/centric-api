@@ -6,6 +6,7 @@ directory.
 Docs:
 
 - [CLI reference](docs/cli.md)
+- [Architecture notes](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
 - [Load jobs](docs/load.md)
@@ -15,6 +16,21 @@ Docs:
 - [Units](docs/units.md)
 - [Validation](docs/validation.md)
 - [View exports](docs/views.md)
+
+Local checks:
+
+```bash
+just check
+```
+
+`just check` runs lint, bytecode compilation, and the full test suite. Without `just`, run the same
+gate directly:
+
+```bash
+uv run ruff check
+uv run python -m compileall -q src/centric_api
+uv run pytest
+```
 
 ```bash
 uv run centric-api fetch
