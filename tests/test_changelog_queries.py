@@ -50,10 +50,9 @@ def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type, delete_type,
                 modified_at, modified_by_id, modified_by_name, previous_hash,
-                current_hash, changed_fields_json, previous_payload_json,
-                current_payload_json
+                current_hash, changed_fields_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 "run-1",
@@ -68,8 +67,6 @@ def test_wide_since_uses_compact_summary_tables(tmp_path: Path) -> None:
                 "before",
                 "after",
                 json.dumps(["code"]),
-                json.dumps({"id": "S1", "code": "A"}),
-                json.dumps({"id": "S1", "code": "B"}),
             ],
         )
         conn.execute(
@@ -317,10 +314,9 @@ def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> No
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type, delete_type,
                 modified_at, modified_by_id, modified_by_name, previous_hash,
-                current_hash, changed_fields_json, previous_payload_json,
-                current_payload_json
+                current_hash, changed_fields_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 "run-1",
@@ -335,8 +331,6 @@ def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> No
                 "before-1",
                 "after-1",
                 json.dumps(["code"]),
-                json.dumps({"id": "older-detection-newer-modified"}),
-                json.dumps({"id": "older-detection-newer-modified"}),
             ],
         )
         conn.execute(
@@ -344,10 +338,9 @@ def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> No
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type, delete_type,
                 modified_at, modified_by_id, modified_by_name, previous_hash,
-                current_hash, changed_fields_json, previous_payload_json,
-                current_payload_json
+                current_hash, changed_fields_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 "run-1",
@@ -362,8 +355,6 @@ def test_list_changes_orders_by_modified_at_when_available(tmp_path: Path) -> No
                 "before-2",
                 "after-2",
                 json.dumps(["code"]),
-                json.dumps({"id": "newer-detection-older-modified"}),
-                json.dumps({"id": "newer-detection-older-modified"}),
             ],
         )
 

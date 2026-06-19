@@ -41,7 +41,6 @@ def record_changelog(
     previous_records_by_endpoint: dict[str, dict[str, PreviousRecord]] | None = None,
     full: bool = False,
     progress: ProgressCallback | None = None,
-    include_event_payloads: bool = False,
     seed_empty_full: bool = False,
 ) -> ChangelogRun:
     created_at = datetime.now(UTC)
@@ -108,7 +107,6 @@ def record_changelog(
             tombstone_index=tombstone_index,
             user_names=user_names,
             delete_types_by_endpoint=deleted_record_delete_types_by_endpoint or {},
-            include_event_payloads=include_event_payloads,
         )
         scoped_record_count = _scoped_record_count(scoped_keys)
 
@@ -537,7 +535,6 @@ def _diff_indexes(
     tombstone_index: dict[tuple[str, str], _IndexRow],
     user_names: dict[str, str],
     delete_types_by_endpoint: dict[str, dict[str, str]],
-    include_event_payloads: bool,
 ) -> list[_ChangeEvent]:
     events: list[_ChangeEvent] = []
     changed_at_text = _datetime_to_db(changed_at)
@@ -581,12 +578,6 @@ def _diff_indexes(
                 previous_hash=previous.payload_hash if previous else None,
                 current_hash=current.payload_hash if current else None,
                 changed_fields=_changed_fields(previous, current),
-                previous_payload_json=(
-                    previous.payload_json if include_event_payloads and previous else None
-                ),
-                current_payload_json=(
-                    current.payload_json if include_event_payloads and current else None
-                ),
             )
         )
     return events
@@ -602,10 +593,9 @@ def _insert_change_events(
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type,
                 delete_type, modified_at, modified_by_id, modified_by_name,
-                previous_hash, current_hash, changed_fields_json,
-                previous_payload_json, current_payload_json
+                previous_hash, current_hash, changed_fields_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 event.run_id,
@@ -620,8 +610,6 @@ def _insert_change_events(
                 event.previous_hash,
                 event.current_hash,
                 json.dumps(event.changed_fields, sort_keys=True),
-                event.previous_payload_json,
-                event.current_payload_json,
             ],
         )
 
@@ -779,12 +767,12 @@ def _changed_fields(previous: _IndexRow | None, current: _IndexRow | None) -> li
         and (previous.payload_json is None or current.payload_json is None)
     ):
         return []
-    previous_payload = _json_dict(previous.payload_json if previous else None)
-    current_payload = _json_dict(current.payload_json if current else None)
+    previous_data = _json_dict(previous.payload_json if previous else None)
+    current_data = _json_dict(current.payload_json if current else None)
     return sorted(
         field
-        for field in set(previous_payload) | set(current_payload)
-        if previous_payload.get(field) != current_payload.get(field)
+        for field in set(previous_data) | set(current_data)
+        if previous_data.get(field) != current_data.get(field)
     )
 
 

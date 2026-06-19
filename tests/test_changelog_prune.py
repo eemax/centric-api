@@ -41,10 +41,9 @@ def test_prune_changelog_removes_old_history_but_keeps_seed_runs(tmp_path: Path)
             INSERT INTO endpoint_change_events (
                 run_id, endpoint, record_id, changed_at, change_type, delete_type,
                 modified_at, modified_by_id, modified_by_name, previous_hash,
-                current_hash, changed_fields_json, previous_payload_json,
-                current_payload_json
+                current_hash, changed_fields_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 "old-run",
@@ -59,8 +58,6 @@ def test_prune_changelog_removes_old_history_but_keeps_seed_runs(tmp_path: Path)
                 "before",
                 "after",
                 json.dumps(["code"]),
-                None,
-                None,
             ],
         )
         conn.execute(

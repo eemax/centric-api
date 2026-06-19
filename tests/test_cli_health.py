@@ -273,6 +273,30 @@ def test_doctor_reports_stale_schema_shape(tmp_path, monkeypatch, capsys) -> Non
     assert schema_check["repair"] == "centric-api rebuild-db --yes"
 
 
+def test_doctor_reports_old_db_schema_version(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
+    monkeypatch.setenv("CENTRIC_USERNAME", "user")
+    monkeypatch.setenv("CENTRIC_PASSWORD", "pass")
+    db_path = tmp_path / "centric.db"
+    with connect(db_path):
+        pass
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE local_metadata SET value = ? WHERE key = ?",
+            ["1", "db_schema_version"],
+        )
+
+    exit_code = main(["doctor", "--db", str(db_path), "--json"])
+
+    checks = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    version_check = next(check for check in checks if check["name"] == "db_schema_version")
+    schema_check = next(check for check in checks if check["name"] == "db_schema_shape")
+    assert exit_code == 1
+    assert version_check["status"] == "FAIL"
+    assert "expected 2, found 1" in version_check["message"]
+    assert schema_check["status"] == "OK"
+
+
 def test_doctor_human_output_is_grouped_with_repair(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_BASE_URL", "https://centric.example.com")
     monkeypatch.setenv("CENTRIC_USERNAME", "user")

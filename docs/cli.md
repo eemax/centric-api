@@ -221,8 +221,6 @@ Common options:
 - `--limit N`: limits displayed rows or actors, depending on the action.
 - `--json`: emits JSON Lines for read views; `update --json` emits one JSON object.
 - `--older-than VALUE`: retention cutoff for `prune`.
-- `--include-payloads`: stores previous/current payload snapshots for `update`; default changelog
-  events stay hash-and-field based.
 
 Actions:
 

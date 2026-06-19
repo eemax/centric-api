@@ -4,7 +4,7 @@ import sqlite3
 
 from .modeling.tables import ensure_model_tables
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 REBUILD_DB_MESSAGE = "stale local DB; run centric-api rebuild-db --yes"
 REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
     "local_metadata": {
@@ -90,8 +90,6 @@ REQUIRED_TABLE_COLUMNS: dict[str, set[str]] = {
         "modified_by_id",
         "modified_by_name",
         "changed_fields_json",
-        "previous_payload_json",
-        "current_payload_json",
     },
     "endpoint_change_summary": {
         "run_id",
@@ -463,9 +461,7 @@ def ensure_changelog_tables(conn: sqlite3.Connection) -> None:
             modified_by_name TEXT,
             previous_hash TEXT,
             current_hash TEXT,
-            changed_fields_json TEXT NOT NULL,
-            previous_payload_json TEXT,
-            current_payload_json TEXT
+            changed_fields_json TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS endpoint_change_summary (

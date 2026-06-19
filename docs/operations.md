@@ -87,9 +87,9 @@ Changelog stores record-level events and compact summaries:
 - `endpoint_actor_change_summary`
 
 Record-level summaries count records, not fields. Each event keeps hashes and `changed_fields_json`.
-Previous/current payload snapshots are not stored by default; pass `changelog update
---include-payloads` only for explicit debug runs. Field-level changelog tables are not materialized
-by default so the main SQLite cache stays lean.
+Changelog does not store previous/current payload snapshots; use `raw inspect` and `raw diff` when
+payload truth is needed. Field-level changelog tables are not materialized by default so the main
+SQLite cache stays lean.
 
 Removal types:
 

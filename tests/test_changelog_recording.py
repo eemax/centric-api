@@ -107,7 +107,6 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
                 )
             }
         },
-        include_event_payloads=True,
     )
     changes = list_changes(db_path, endpoint="styles", limit=10)
     actor_summary = list_actor_summary(db_path, endpoint="styles", limit=10)
@@ -115,22 +114,21 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
 
     assert second.event_count == 1
     assert changed_event["changed_fields"] == ["_modified_at", "extra"]
-    assert changed_event["previous_payload"]["extra"] == "before"
-    assert changed_event["current_payload"]["extra"] == "after"
+    assert set(changed_event) == {
+        "change_type",
+        "changed_at",
+        "changed_fields",
+        "changed_fields_json",
+        "delete_type",
+        "endpoint",
+        "modified_at",
+        "modified_by_id",
+        "modified_by_name",
+        "record_id",
+        "run_id",
+    }
     assert changed_event["modified_by_id"] == "U1"
     assert changed_event["modified_by_name"] == "Ava Admin"
-    lightweight_changes = list_changes(
-        db_path,
-        endpoint="styles",
-        limit=10,
-        include_payloads=False,
-    )
-    lightweight_changed_event = next(
-        change for change in lightweight_changes if change["change_type"] == "changed"
-    )
-    assert lightweight_changed_event["changed_fields"] == ["_modified_at", "extra"]
-    assert "previous_payload" not in lightweight_changed_event
-    assert "current_payload" not in lightweight_changed_event
     assert {
         (row["modified_by_id"], row["modified_by_name"], row["change_type"]): row["count"]
         for row in actor_summary
@@ -155,7 +153,7 @@ def test_changelog_tracks_full_payload_changes(tmp_path: Path) -> None:
     assert field_tables == []
 
 
-def test_changelog_omits_event_payload_snapshots_by_default(tmp_path: Path) -> None:
+def test_changelog_changes_return_event_metadata(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
     before_payload = {"id": "S1", "code": "A", "_modified_at": "2026-01-01T00:00:00Z"}
     after_payload = {"id": "S1", "code": "B", "_modified_at": "2026-01-02T00:00:00Z"}
@@ -205,12 +203,23 @@ def test_changelog_omits_event_payload_snapshots_by_default(tmp_path: Path) -> N
 
     changed_event = next(
         change
-        for change in list_changes(db_path, endpoint="styles", limit=10, include_payloads=True)
+        for change in list_changes(db_path, endpoint="styles", limit=10)
         if change["change_type"] == "changed"
     )
     assert changed_event["changed_fields"] == ["_modified_at", "code"]
-    assert changed_event["previous_payload"] == {}
-    assert changed_event["current_payload"] == {}
+    assert set(changed_event) == {
+        "change_type",
+        "changed_at",
+        "changed_fields",
+        "changed_fields_json",
+        "delete_type",
+        "endpoint",
+        "modified_at",
+        "modified_by_id",
+        "modified_by_name",
+        "record_id",
+        "run_id",
+    }
 
 
 def test_changelog_scoped_refresh_stays_scoped_when_index_source_is_stale(tmp_path: Path) -> None:

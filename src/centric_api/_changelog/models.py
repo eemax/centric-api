@@ -67,5 +67,3 @@ class _ChangeEvent:
     previous_hash: str | None
     current_hash: str | None
     changed_fields: list[str]
-    previous_payload_json: str | None
-    current_payload_json: str | None

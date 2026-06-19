@@ -247,11 +247,6 @@ def add_changelog_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
         default=50,
         help="Row limit.",
     )
-    changelog_parser.add_argument(
-        "--include-payloads",
-        action="store_true",
-        help="Store previous/current payload snapshots during changelog update.",
-    )
     changelog_parser.add_argument("--json", action="store_true", help="Emit JSON output.")
 
 

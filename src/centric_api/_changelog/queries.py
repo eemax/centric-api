@@ -9,7 +9,7 @@ from typing import Any
 from ..db_schema import ensure_changelog_read_indexes
 from ..store import connect_readonly, table_exists
 from .models import ACTIVITY_AT_SQL, DELETE_TYPE_HARD_DELETE, DELETE_TYPE_TOMBSTONE
-from .utils import _datetime_to_db, _json_dict
+from .utils import _datetime_to_db
 
 
 def list_changelog_runs(
@@ -345,7 +345,6 @@ def list_changes(
     endpoint: str | None = None,
     since: datetime | None = None,
     limit: int = 50,
-    include_payloads: bool = True,
 ) -> list[dict[str, Any]]:
     if not db_path.is_file():
         return []
@@ -361,9 +360,6 @@ def list_changes(
         clauses.append(f"{ACTIVITY_AT_SQL} >= ?")
         params.append(_datetime_to_db(since))
     clause = "WHERE " + " AND ".join(clauses) if clauses else ""
-    payload_columns = ""
-    if include_payloads:
-        payload_columns = ", previous_payload_json, current_payload_json"
     with connect_readonly(db_path) as conn:
         if not table_exists(conn, "endpoint_change_events"):
             return []
@@ -372,7 +368,7 @@ def list_changes(
             f"""
             SELECT run_id, endpoint, record_id, changed_at, change_type,
                    delete_type, modified_at, modified_by_id, modified_by_name,
-                   changed_fields_json{payload_columns}
+                   changed_fields_json
             FROM {table_ref}
             {clause}
             ORDER BY COALESCE(modified_at, changed_at) DESC, changed_at DESC, endpoint, record_id
@@ -384,19 +380,9 @@ def list_changes(
         {
             **dict(row),
             "changed_fields": json.loads(row["changed_fields_json"]),
-            **_change_payloads(row, include_payloads=include_payloads),
         }
         for row in rows
     ]
-
-
-def _change_payloads(row: sqlite3.Row, *, include_payloads: bool) -> dict[str, Any]:
-    if not include_payloads:
-        return {}
-    return {
-        "previous_payload": _json_dict(row["previous_payload_json"]),
-        "current_payload": _json_dict(row["current_payload_json"]),
-    }
 
 
 def _change_events_table_ref(conn: sqlite3.Connection, *, endpoint: str | None) -> str:

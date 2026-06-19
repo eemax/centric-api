@@ -32,8 +32,6 @@ def run_changelog(args: argparse.Namespace) -> int:
     since = parse_since(args.since)
     if args.action != "prune" and args.older_than is not None:
         raise ConfigError("--older-than is only supported by changelog prune.")
-    if args.action != "update" and args.include_payloads:
-        raise ConfigError("--include-payloads is only supported by changelog update.")
     if args.action == "update":
         started = time.time()
         if not args.json:
@@ -45,7 +43,6 @@ def run_changelog(args: argparse.Namespace) -> int:
             db_path,
             endpoints=set(args.endpoint) if args.endpoint else None,
             full=True,
-            include_event_payloads=args.include_payloads,
             seed_empty_full=True,
             progress=print if not args.json else None,
         )
@@ -106,7 +103,6 @@ def run_changelog(args: argparse.Namespace) -> int:
             endpoint=endpoint,
             since=since,
             limit=args.limit,
-            include_payloads=args.json,
         )
         if args.json:
             return print_rows(rows, True, empty_message="No changelog changes found.")

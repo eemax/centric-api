@@ -251,9 +251,9 @@ Private schema overlays resolve from `~/.centric-api/endpoint-schema.yml`.
 Changelog tracking is automatic after ingest. Ingest captures previous payloads for touched records
 before overwriting the cache, then changelog records added, changed, and removed events. The compact
 current index stores hashes for future diffs, not a second copy of every payload. Event rows keep
-hashes, changed-field names, delete type for removals, and actor fields from `modified_by`; previous
-and current payload snapshots are only stored for explicit debug updates with `--include-payloads`.
-Actor names are resolved from the `users` endpoint `node_name`.
+hashes, changed-field names, delete type for removals, and actor fields from `modified_by`. Payload
+inspection and payload diffs are handled from raw evidence with `raw inspect` and `raw diff`, not
+from changelog tables. Actor names are resolved from the `users` endpoint `node_name`.
 Changelog activity filters such as `--since 7d` use Centric `_modified_at` rather than the local
 fetch or changelog detection time. `changelog runs --since` remains based on local run creation time.
 
