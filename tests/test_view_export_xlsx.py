@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -60,6 +61,24 @@ def test_view_export_writes_flat_xlsx_from_joined_cache_records(tmp_path: Path) 
         "Acme Mills",
         1,
     ]
+
+
+def test_view_export_default_output_path_uses_shared_artifact_name(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path / "home"))
+    db_path = tmp_path / "centric.db"
+    _seed_bom_line_view_records(db_path)
+    config = load_view_config(_view_config(tmp_path))
+    view = select_view(config, "bom-lines")
+
+    first = export_view(db_path, config, view, export_format="xlsx")
+    second = export_view(db_path, config, view, export_format="xlsx")
+
+    assert first.output_path.parent == config.output_dir
+    assert re.fullmatch(r"bom-lines-\d{4}-\d{2}-\d{2}-\d{4}\.xlsx", first.output_path.name)
+    assert re.fullmatch(r"bom-lines-\d{4}-\d{2}-\d{2}-\d{4}-2\.xlsx", second.output_path.name)
 
 
 def test_view_export_leaves_blank_xlsx_cells_untyped(tmp_path: Path) -> None:

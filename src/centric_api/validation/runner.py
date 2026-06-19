@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from math import isfinite
 from pathlib import Path
-from uuid import uuid4
 
+from ..artifact_names import allocate_artifact_dir, artifact_slug
 from ..config import ConfigError, runtime_home
 from ..store import connect_readonly
 from ..units import load_unit_registry
@@ -34,8 +34,11 @@ def run_validator(
 ) -> ValidationRunSummary:
     started_at = _utc_iso()
     artifact_timestamp = validation_artifact_timestamp(started_at)
-    run_id = _run_id(validator.definition.name)
-    output_dir = _output_dir(validator.definition.name, run_id, output_root)
+    run_id, output_dir = _allocate_output_dir(
+        validator.definition.name,
+        started_at=started_at,
+        output_root=output_root,
+    )
     try:
         with connect_readonly(db_path) as conn:
             ctx = ValidationContext(
@@ -49,7 +52,6 @@ def run_validator(
             )
             for endpoint in validator.definition.required_endpoints:
                 ctx.resolve_endpoint(endpoint)
-            output_dir.mkdir(parents=True, exist_ok=True)
             result = validator.run(ctx)
         _validate_result(validator.definition.name, result)
         finished_at = _utc_iso()
@@ -98,13 +100,29 @@ def run_validator(
     )
 
 
-def _output_dir(validator_name: str, run_id: str, output_root: str | Path | None) -> Path:
-    root = (
-        Path(output_root).expanduser()
-        if output_root is not None
-        else runtime_home() / DEFAULT_VALIDATION_RUNS_DIR
-    )
-    return root / validator_name / run_id
+def _allocate_output_dir(
+    validator_name: str,
+    *,
+    started_at: str,
+    output_root: str | Path | None,
+) -> tuple[str, Path]:
+    root = _output_root(output_root)
+    try:
+        return allocate_artifact_dir(
+            root / artifact_slug(validator_name),
+            validator_name,
+            started_at,
+        )
+    except RuntimeError as exc:
+        raise ConfigError(
+            f"Unable to allocate validation output directory for {validator_name}."
+        ) from exc
+
+
+def _output_root(output_root: str | Path | None) -> Path:
+    if output_root is not None:
+        return Path(output_root).expanduser()
+    return runtime_home() / DEFAULT_VALIDATION_RUNS_DIR
 
 
 def _remove_empty_output_dirs(output_dir: Path) -> None:
@@ -285,15 +303,6 @@ def _total_value(validator_name: str, field_name: str, value: object) -> int:
             f"Validator {validator_name} finding_totals.{field_name} must be an integer."
         ) from exc
     return total
-
-
-def _run_id(validator_name: str) -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}-{_safe_name(validator_name)}-{uuid4().hex[:8]}"
-
-
-def _safe_name(value: str) -> str:
-    return "".join(character if character.isalnum() else "-" for character in value).strip("-")
 
 
 def _utc_iso() -> str:

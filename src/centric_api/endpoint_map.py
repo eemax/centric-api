@@ -3,14 +3,13 @@ from __future__ import annotations
 import html
 import json
 import sqlite3
-import uuid
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from .artifact_names import allocate_artifact_dir
 from .config import ConfigError, runtime_path
 from .store import connect_readonly, table_exists
 
@@ -48,14 +47,12 @@ def build_endpoint_map(
     endpoint_names, relationships = _infer_endpoint_relationships_from_db(db_path)
     if not endpoint_names:
         raise ConfigError("Endpoint map requires cached endpoint records. Run fetch first.")
-    run_id = _run_id()
     root = (
         Path(output_root).expanduser()
         if output_root is not None
         else runtime_path(ENDPOINT_MAP_DIR)
     )
-    artifact_dir = root / run_id
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    run_id, artifact_dir = allocate_artifact_dir(root, "endpoint-map")
 
     json_path = artifact_dir / "relationships.json"
     markdown_path = artifact_dir / "endpoint-map.md"
@@ -455,7 +452,3 @@ def _write_text(path: Path, content: str) -> None:
     temp_path = path.with_suffix(path.suffix + ".tmp")
     temp_path.write_text(content, encoding="utf-8")
     temp_path.replace(path)
-
-
-def _run_id() -> str:
-    return f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-endpoint-map-{uuid.uuid4().hex[:8]}"

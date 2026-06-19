@@ -348,7 +348,8 @@ Useful options:
 - `--log-level summary|http|debug|off`: controls `logs/download.log` for non-dry-run downloads.
 
 Non-dry-run downloads use `CENTRIC_API_HOME/download.lock`. They write files under
-`downloads/files`, manifests under `downloads/runs`, and state into `download_*` SQLite tables.
+`downloads/files`, `{job}-YYYY-MM-DD-HHMM` manifests under `downloads/runs`, and state into
+`download_*` SQLite tables.
 
 ## Bundle
 
@@ -382,7 +383,8 @@ History commands:
   same bundle. Use `--to` for an exact comparison target.
 
 Non-dry-run bundle runs use `CENTRIC_API_HOME/bundle.lock`, write run artifacts under
-`bundles/runs`, create zips under `bundles/` by default, and track state in `bundle_*` SQLite tables.
+`bundles/runs`, create `{bundle}-YYYY-MM-DD-HHMM.zip` archives under `bundles/` by default, and
+track state in `bundle_*` SQLite tables.
 
 ## View Exports
 
@@ -410,7 +412,8 @@ Options:
   `config/views.yml`.
 - `--db PATH`: SQLite cache to read.
 - `--format xlsx|csv`: output format. Defaults to `xlsx`, or is inferred from `--output`.
-- `--output PATH`: output file path. Defaults to `CENTRIC_API_HOME/exports/{view}-{timestamp}.xlsx`.
+- `--output PATH`: output file path. Defaults to
+  `CENTRIC_API_HOME/exports/{view}-YYYY-MM-DD-HHMM.xlsx`.
 - `--json`: machine-readable output.
 
 See [View exports](views.md) for the schema contract and authoring rules.
@@ -429,8 +432,8 @@ uv run centric-api validate history --group month
 
 `validate` runs private cache validation modules and writes artifacts instead of database history
 tables. A run writes `report_<YY-MM-DD-HHMM>.xlsx`, `summary.json`, `findings.json`, and
-`history.json` under
-`CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/`.
+`history.json` under a minute-level run folder such as
+`CENTRIC_API_HOME/validation/runs/style-readiness/style-readiness-2026-06-19-1234/`.
 `validate history` refreshes `CENTRIC_API_HOME/validation/history/history.html`,
 and `history.json` from first-class run `history.json` files.
 

@@ -36,7 +36,7 @@ from .models import (
     LoadRunResult,
 )
 from .references import _build_reference_indexes, _build_value_set_indexes, _row_values
-from .utils import _run_id, _utc_iso
+from .utils import _allocate_run_dir, _utc_iso
 
 ParsedRows = dict[str, Any]
 RowFactory = Callable[[int, dict[str, Any]], Any]
@@ -219,9 +219,7 @@ def run_chained_workflow(
         progress_callback=progress_callback,
     )
     started_at = _utc_iso()
-    run_id = _run_id(job.name)
-    run_dir = runtime_path(LOAD_RUNS_DIR / run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_id, run_dir = _allocate_run_dir(runtime_path(LOAD_RUNS_DIR), job.name, started_at)
 
     materialized = materialized or _materialized_without_progress(
         job,
@@ -376,9 +374,7 @@ def run_planning_workflow(
         progress_callback=progress_callback,
     )
     started_at = _utc_iso()
-    run_id = _run_id(job.name)
-    run_dir = runtime_path(LOAD_RUNS_DIR / run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_id, run_dir = _allocate_run_dir(runtime_path(LOAD_RUNS_DIR), job.name, started_at)
 
     responses: list[LoadResponse] = []
     if dry_run:

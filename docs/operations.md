@@ -112,7 +112,7 @@ Download selection reads cached source records, `documents`, and `document_revis
 State and artifacts:
 
 - Files are stored under `downloads/files`.
-- Run manifests are stored under `downloads/runs`.
+- Run manifests are stored under `downloads/runs` with `{job}-YYYY-MM-DD-HHMM` names.
 - Current state is tracked in `download_current`.
 - Run history and item rows are tracked in `download_runs` and `download_items`.
 
@@ -129,6 +129,7 @@ Binary downloads retry transient HTTP/server failures with a 15s/30s backoff.
 ## Bundles
 
 Bundle runs package current downloaded files whose on-disk metadata still matches download state.
+Run artifacts and zip archives use `{bundle}-YYYY-MM-DD-HHMM` names.
 Non-dry-run runs write:
 
 - `manifest.json`
@@ -153,7 +154,7 @@ API calls, locks, or SQLite writes are performed.
 
 The schema root plus any `many_expand` joins define row grain. `many_concat` joins preserve row grain
 by joining multiple values into one cell. Schema filters can trim joined records or final rows.
-Exports default to `exports/{view}-{timestamp}.xlsx` under `CENTRIC_API_HOME`.
+Exports default to `exports/{view}-YYYY-MM-DD-HHMM.xlsx` under `CENTRIC_API_HOME`.
 
 ## Status And Doctor
 

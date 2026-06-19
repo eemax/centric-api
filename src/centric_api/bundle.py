@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .artifact_names import allocate_artifact_name, artifact_base_name
 from .bundle_artifacts import (
     build_bundle_changelog,
     cleanup_bundle_artifacts,
@@ -457,14 +458,12 @@ def _allocate_run_id(
     created_at: datetime,
     bundle_name: str,
 ) -> str:
-    base = f"{created_at:%Y-%m-%dT%H%M%SZ}-{_safe_path_part(bundle_name)}"
+    base = artifact_base_name(bundle_name, created_at)
     runs_dir = output_dir / "runs"
-    for index in range(100):
-        suffix = "" if index == 0 else f"-{index + 1}"
-        run_id = f"{base}{suffix}"
-        if (runs_dir / run_id).exists() or (output_dir / f"{run_id}.zip").exists():
-            continue
-        if bundle_run_exists(conn, run_id):
-            continue
-        return run_id
-    raise RuntimeError("Could not allocate bundle run id.")
+    return allocate_artifact_name(
+        base,
+        lambda run_id: (runs_dir / run_id).exists()
+        or (output_dir / f"{run_id}.zip").exists()
+        or bundle_run_exists(conn, run_id),
+        limit=100,
+    )

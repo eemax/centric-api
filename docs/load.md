@@ -458,7 +458,8 @@ or invalid, a composition cannot be found, or a composition name is ambiguous in
 - real runs require `--yes`.
 - rows with validation or reference errors are marked `validation_error` and are not sent.
 - optional blank fields are omitted from the request body.
-- run artifacts are written under `CENTRIC_API_HOME/load/runs/{run_id}`.
+- run artifacts are written under `CENTRIC_API_HOME/load/runs/{run_id}` where run IDs use
+  `{job}-YYYY-MM-DD-HHMM` with `-2`, `-3`, and so on for same-minute collisions.
 - real runs with API responses, and any run with validation errors, write a review workbook at
   `CENTRIC_API_HOME/load/runs/{run_id}/review.xlsx`.
 

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .artifact_names import allocate_artifact_name, artifact_base_name
 from .auth import AuthContext
 from .config import ConfigError
 from .db_schema import ensure_download_tables
@@ -544,17 +545,13 @@ def _allocate_run_id(
     created_at: datetime,
     job_name: str,
 ) -> str:
-    safe_job = _safe_path_part(job_name)
-    base = f"{created_at:%Y-%m-%dT%H%M%SZ}-{safe_job}"
-    for index in range(100):
-        suffix = "" if index == 0 else f"-{index + 1}"
-        run_id = f"{base}{suffix}"
-        if (output_dir / "runs" / run_id).exists():
-            continue
-        if _download_run_exists(conn, run_id):
-            continue
-        return run_id
-    raise RuntimeError("Could not allocate download run id.")
+    base = artifact_base_name(job_name, created_at)
+    return allocate_artifact_name(
+        base,
+        lambda run_id: (output_dir / "runs" / run_id).exists()
+        or _download_run_exists(conn, run_id),
+        limit=100,
+    )
 
 
 def _download_run_exists(conn: sqlite3.Connection, run_id: str) -> bool:

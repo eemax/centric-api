@@ -22,7 +22,7 @@ Use `--validators-dir PATH` to load from another directory.
 Each run writes a timestamped artifact folder:
 
 ```text
-CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/
+CENTRIC_API_HOME/validation/runs/<validator-slug>/<validator-slug-YYYY-MM-DD-HHMM>/
   report_<YY-MM-DD-HHMM>.xlsx
   summary.json
   findings.json
@@ -30,8 +30,9 @@ CENTRIC_API_HOME/validation/runs/<validator>/<run-id>/
 ```
 
 Use `--output-dir PATH` to choose a different artifact root. The command still creates
-`<validator>/<run-id>` below that root. Private validators can also write extra files into
-`ctx.artifact_dir`.
+`<validator-slug>/<run-id>` below that root. Run IDs use minute-level artifact timestamps, such as
+`style-readiness-2026-06-19-1234`; repeat runs in the same minute append `-2`, `-3`, and so on.
+Private validators can also write extra files into `ctx.artifact_dir`.
 
 ## Validator Modules
 
@@ -263,7 +264,7 @@ JSON/XLSX artifacts to include the first `N` rows. `findings.json` always uses t
 {
   "schema_version": 2,
   "validator": "style-readiness",
-  "run_id": "20260617T043001Z-style-readiness-e207690a",
+  "run_id": "style-readiness-2026-06-17-0430",
   "started_at": "2026-06-17T04:30:01Z",
   "finished_at": "2026-06-17T04:30:07Z",
   "metrics": [

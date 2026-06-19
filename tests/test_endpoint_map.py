@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from centric_api.cli import main
 from centric_api.endpoint_map import infer_endpoint_relationships
@@ -99,6 +100,7 @@ def test_map_endpoints_cli_writes_json_markdown_and_html(
     payload = json.loads(capsys.readouterr().out)
     assert payload["endpoint_count"] == 3
     assert payload["relationship_count"] == 1
+    assert re.fullmatch(r"endpoint-map-\d{4}-\d{2}-\d{2}-\d{4}(?:-\d+)?", payload["run_id"])
 
     json_path = home / "maps" / "endpoints" / payload["run_id"] / "relationships.json"
     markdown_path = home / "maps" / "endpoints" / payload["run_id"] / "endpoint-map.md"

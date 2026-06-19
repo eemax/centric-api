@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import csv
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..artifact_names import allocate_artifact_path
 from ..config import ConfigError
 from ..view_config import ViewColumn, ViewDefinition
 from .values import _cell_text, _parse_datetime
@@ -188,8 +188,7 @@ def _sheet_name(view: ViewDefinition) -> str:
 
 
 def _default_output_path(output_dir: Path, view: ViewDefinition, export_format: str) -> Path:
-    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
-    return output_dir / f"{_safe_name(view.name)}-{timestamp}.{export_format}"
+    return allocate_artifact_path(output_dir, view.name, extension=export_format)
 
 
 def _temp_output_path(path: Path) -> Path:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from centric_api.cli import main
@@ -47,6 +48,10 @@ def test_load_cli_dry_run_writes_request_artifacts(tmp_path, monkeypatch, capsys
     assert payload["dry_run"] is True
     assert payload["requests"] == 1
     assert payload["request_samples"][0]["body"]["product_type"] == "MT1"
+    assert re.fullmatch(
+        r"material-create-\d{4}-\d{2}-\d{2}-\d{4}(?:-\d+)?",
+        Path(payload["run_dir"]).name,
+    )
     requests_path = Path(payload["run_dir"]) / "requests.jsonl"
     assert requests_path.is_file()
     assert payload["review_workbook"] is None

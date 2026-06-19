@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+from ..artifact_names import allocate_artifact_dir
 from .models import LoadProgressCallback
 
 
@@ -39,11 +40,8 @@ def _emit_progress(
         progress_callback(event)
 
 
-def _run_id(job_name: str) -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    suffix = uuid.uuid4().hex[:8]
-    safe_job = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in job_name)
-    return f"{timestamp}-{safe_job}-{suffix}"
+def _allocate_run_dir(root: Path, job_name: str, started_at: str) -> tuple[str, Path]:
+    return allocate_artifact_dir(root, job_name, started_at)
 
 
 def _utc_iso() -> str:

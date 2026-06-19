@@ -355,7 +355,7 @@ def test_bundle_run_id_checks_database_history(tmp_path: Path, monkeypatch) -> N
 
     with connect(db_path) as conn:
         ensure_download_tables(conn)
-        _insert_bundle_run(conn, run_id="2026-01-01T000000Z-style-bundle")
+        _insert_bundle_run(conn, run_id="style-bundle-2026-01-01-0000")
         _insert_record(
             conn,
             endpoint="styles",
@@ -380,7 +380,7 @@ def test_bundle_run_id_checks_database_history(tmp_path: Path, monkeypatch) -> N
         dry_run=True,
     )
 
-    assert result.run_id == "2026-01-01T000000Z-style-bundle-2"
+    assert result.run_id == "style-bundle-2026-01-01-0000-2"
 
 
 def test_bundle_dry_run_requires_existing_db_without_creating_it(tmp_path: Path) -> None:
@@ -479,7 +479,7 @@ def test_bundle_cleans_stale_temp_dir_before_writing_artifacts(
         tmp_path
         / "bundles"
         / "runs"
-        / ".2026-01-01T000000Z-style-bundle.tmp"
+        / ".style-bundle-2026-01-01-0000.tmp"
         / "files"
         / "stale.txt"
     )

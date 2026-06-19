@@ -36,7 +36,7 @@ from .models import (
     LoadRunResult,
 )
 from .references import _build_reference_indexes, _build_value_set_indexes, _row_values
-from .utils import _is_blank, _run_id, _utc_iso
+from .utils import _allocate_run_dir, _is_blank, _utc_iso
 
 
 def materialize_load(
@@ -188,9 +188,7 @@ def run_load(
     if not dry_run and not yes:
         raise ConfigError("Non-dry-run load requires --yes.")
     started_at = _utc_iso()
-    run_id = _run_id(job.name)
-    run_dir = runtime_path(LOAD_RUNS_DIR / run_id)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_id, run_dir = _allocate_run_dir(runtime_path(LOAD_RUNS_DIR), job.name, started_at)
     _write_requests(run_dir / "requests.jsonl", materialized.requests)
     _emit_progress(
         progress_callback,

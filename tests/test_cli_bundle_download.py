@@ -65,11 +65,11 @@ def test_bundle_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
 def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
-        _insert_bundle_run(conn, "2026-01-01T000000Z-style-bundle", "2026-01-01T00:00:00Z")
-        _insert_bundle_run(conn, "2026-01-02T000000Z-style-bundle", "2026-01-02T00:00:00Z")
+        _insert_bundle_run(conn, "style-bundle-2026-01-01-0000", "2026-01-01T00:00:00Z")
+        _insert_bundle_run(conn, "style-bundle-2026-01-02-0000", "2026-01-02T00:00:00Z")
         _insert_bundle_item(
             conn,
-            "2026-01-01T000000Z-style-bundle",
+            "style-bundle-2026-01-01-0000",
             "styles\x1fS1\x1fD1",
             "files/styles/Old/spec.pdf",
             "R1",
@@ -77,7 +77,7 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
         )
         _insert_bundle_item(
             conn,
-            "2026-01-02T000000Z-style-bundle",
+            "style-bundle-2026-01-02-0000",
             "styles\x1fS1\x1fD1",
             "files/styles/New/spec.pdf",
             "R2",
@@ -86,14 +86,14 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
 
     assert main(["bundle", "list", "--db", str(db_path), "--json"]) == 0
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert rows[0]["run_id"] == "2026-01-02T000000Z-style-bundle"
+    assert rows[0]["run_id"] == "style-bundle-2026-01-02-0000"
 
     assert (
         main(
             [
                 "bundle",
                 "show",
-                "2026-01-01T000000Z-style-bundle",
+                "style-bundle-2026-01-01-0000",
                 "--db",
                 str(db_path),
                 "--json",
@@ -109,7 +109,7 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
             [
                 "bundle",
                 "changelog",
-                "2026-01-01T000000Z-style-bundle",
+                "style-bundle-2026-01-01-0000",
                 "--db",
                 str(db_path),
                 "--json",
@@ -119,16 +119,16 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
     )
     changelog = json.loads(capsys.readouterr().out)
     assert changelog["summary"]["changed_count"] == 1
-    assert changelog["to_run"]["run_id"] == "2026-01-02T000000Z-style-bundle"
+    assert changelog["to_run"]["run_id"] == "style-bundle-2026-01-02-0000"
 
 
 def test_bundle_list_and_show_use_human_tables(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
-        _insert_bundle_run(conn, "2026-01-01T000000Z-style-bundle", "2026-01-01T00:00:00Z")
+        _insert_bundle_run(conn, "style-bundle-2026-01-01-0000", "2026-01-01T00:00:00Z")
         _insert_bundle_item(
             conn,
-            "2026-01-01T000000Z-style-bundle",
+            "style-bundle-2026-01-01-0000",
             "styles\x1fS1\x1fD1",
             "files/styles/Style One/spec.pdf",
             "R1",
@@ -142,7 +142,7 @@ def test_bundle_list_and_show_use_human_tables(tmp_path, capsys) -> None:
     assert "Delta" in list_output
     assert "run_id=" not in list_output
 
-    assert main(["bundle", "show", "2026-01-01T000000Z-style-bundle", "--db", str(db_path)]) == 0
+    assert main(["bundle", "show", "style-bundle-2026-01-01-0000", "--db", str(db_path)]) == 0
     show_output = capsys.readouterr().out
     assert "Bundle Run" in show_output
     assert "Files" in show_output

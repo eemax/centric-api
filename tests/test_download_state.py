@@ -50,7 +50,7 @@ def test_download_run_id_checks_database_history(tmp_path: Path, monkeypatch) ->
             record_id="R1",
             payload={"id": "R1", "file_name": "spec.pdf"},
         )
-        _insert_download_run(conn, run_id="2026-01-01T000000Z-docs")
+        _insert_download_run(conn, run_id="docs-2026-01-01-0000")
 
     result = run_download_job(
         db_path=db_path,
@@ -59,7 +59,7 @@ def test_download_run_id_checks_database_history(tmp_path: Path, monkeypatch) ->
         dry_run=True,
     )
 
-    assert result.run_id == "2026-01-01T000000Z-docs-2"
+    assert result.run_id == "docs-2026-01-01-0000-2"
 
 
 def test_download_delta_skips_current_revision_present_on_disk(tmp_path: Path) -> None:

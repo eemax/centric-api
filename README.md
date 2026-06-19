@@ -138,7 +138,7 @@ changelog compares against the previous successful run of the same bundle and re
 changed, renamed, removed, and unchanged files. Bundle state is tracked in SQLite, and non-dry-run
 runs are serialized with `CENTRIC_API_HOME/bundle.lock`.
 
-Bundle run IDs are timestamp-based and are the precise anchor for distribution support. Use
+Bundle run IDs use `{bundle}-YYYY-MM-DD-HHMM` naming and are the precise anchor for distribution support. Use
 `centric-api bundle list` to see past distributions, `centric-api bundle show BUNDLE_RUN_ID` to
 inspect one, and `centric-api bundle changelog FROM_BUNDLE_RUN_ID` to compare a received bundle
 against the latest later run of the same bundle. Pass `--to BUNDLE_RUN_ID` for an exact comparison
@@ -159,6 +159,8 @@ first-class history metrics. Validators that should trend over time should emit 
 per-brand metric sets when brand comparison matters. Metrics can also include low-cardinality
 dimensions, such as brand-season dimensions, for exact filters in the history view. Validation logic
 lives in private `CENTRIC_API_HOME/validators` modules or a directory passed with `--validators-dir`.
+User-facing artifact runs and default export files use `{name}-YYYY-MM-DD-HHMM` names, with `-2`,
+`-3`, and so on for same-minute collisions.
 
 `load` validates workbook rows and can send API requests to Centric. The repo includes
 `material-create`, which posts material rows to `/v2/materials`, and
