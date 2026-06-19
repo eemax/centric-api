@@ -54,18 +54,32 @@ class SnapshotRecordIdentity:
 
 
 @dataclass(frozen=True)
+class SnapshotFieldDiff:
+    path: str
+    old: Any = None
+    new: Any = None
+    old_display: Any = None
+    new_display: Any = None
+
+
+@dataclass(frozen=True)
 class SnapshotChange:
     change_type: str
     identity: SnapshotRecordIdentity
     path: str | None = None
     old: Any = None
     new: Any = None
+    record_display: Any = None
+    old_display: Any = None
+    new_display: Any = None
     changed_paths: tuple[str, ...] = ()
+    field_diffs: tuple[SnapshotFieldDiff, ...] = ()
     promotion_unit: str = "field"
     approval: str = "actionable"
     approval_owner: str | None = None
     reason: str | None = None
     impacts: tuple[SnapshotRecordIdentity, ...] = ()
+    impact_displays: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)

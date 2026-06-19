@@ -361,6 +361,12 @@ def add_snapshot_parser(subparsers: argparse._SubParsersAction[argparse.Argument
         default=None,
         help="Write JSON review actions for selective promotion.",
     )
+    snapshot_diff_parser.add_argument(
+        "--db",
+        metavar="PATH",
+        default=None,
+        help="SQLite database path for review display hydration.",
+    )
     snapshot_diff_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
     snapshot_promote_parser = snapshot_actions.add_parser(

@@ -6,6 +6,7 @@ from pathlib import Path
 from ..config import ConfigError, runtime_home
 from ..store import connect_readonly
 from ..units import load_unit_registry
+from ._review_display import SnapshotReviewDisplayContext
 from .artifacts import copy_snapshot_artifacts, stream_filename, write_snapshot_artifacts
 from .context import SnapshotContext
 from .contracts import SnapshotBuildSummary, SnapshotDiffSummary, SnapshotOutput, SnapshotProtocol
@@ -111,9 +112,21 @@ def diff_snapshot(
     *,
     output_root: str | Path | None = None,
     review_file: str | Path | None = None,
+    db_path: Path | None = None,
+    require_db: bool = False,
 ) -> SnapshotDiffSummary:
     baseline_dir = _output_dir(snapshot.definition.name, output_root, "baseline")
     candidate_dir = _output_dir(snapshot.definition.name, output_root, "candidate")
+    if db_path is not None and (db_path.exists() or require_db):
+        with connect_readonly(db_path) as conn:
+            return diff_snapshot_artifacts(
+                definition=snapshot.definition,
+                baseline_dir=baseline_dir,
+                candidate_dir=candidate_dir,
+                policy=_snapshot_diff_policy(snapshot),
+                review_file=Path(review_file).expanduser() if review_file is not None else None,
+                display_context=SnapshotReviewDisplayContext(conn),
+            )
     return diff_snapshot_artifacts(
         definition=snapshot.definition,
         baseline_dir=baseline_dir,

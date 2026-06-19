@@ -6,9 +6,11 @@ from pathlib import Path
 import pytest
 
 from centric_api.config import ConfigError
+from centric_api.rendering.snapshot import snapshot_diff_record
 from centric_api.snapshot import (
     SnapshotChange,
     SnapshotDefinition,
+    SnapshotFieldDiff,
     SnapshotOutput,
     SnapshotRecord,
     SnapshotRecordIdentity,
@@ -55,6 +57,10 @@ def test_snapshot_diff_marks_style_boms_record_level_and_locks_material_impacts(
     assert len(record_changes) == 1
     assert record_changes[0].promotion_unit == "record"
     assert record_changes[0].path is None
+    assert record_changes[0].field_diffs == (
+        SnapshotFieldDiff(path="/materials/0/weight_kg", old=1, new=2),
+        SnapshotFieldDiff(path="/total_weight_kg", old=1, new=2),
+    )
     assert {change.path: change.approval for change in material_changes} == {
         "/description": "actionable",
         "/uom": "locked",
@@ -72,6 +78,22 @@ def test_snapshot_diff_marks_style_boms_record_level_and_locks_material_impacts(
     review = json.loads((tmp_path / "review.json").read_text(encoding="utf-8"))
     assert review["metrics"]["locked"] == 1
     assert any(action["approval"] == "locked" for action in review["actions"])
+    locked_action = next(
+        action
+        for action in review["actions"]
+        if action["stream"] == "materials" and action["path"] == "/uom"
+    )
+    assert locked_action["field_diffs"] == [
+        {
+            "path": "/uom",
+            "old": "m",
+            "new": "yd",
+            "old_display": None,
+            "new_display": None,
+        }
+    ]
+    assert locked_action["record_display"] == {"label": "materials:MAT1"}
+    assert locked_action["impacts"][0]["display"] == {"label": "style-boms:STYLE1|BOM1|style|"}
 
 
 def test_snapshot_review_promote_applies_material_only_fields_and_rejects_locked(
@@ -477,6 +499,83 @@ def test_snapshot_diff_policy_hides_record_change_when_only_ignored_paths_change
     assert summary.changes == ()
 
 
+def test_snapshot_diff_policy_can_add_review_display_values(tmp_path: Path) -> None:
+    definition = SnapshotDefinition(name="demo", title="Demo Snapshot")
+    group = ("Concept A",)
+    baseline_dir = tmp_path / "baseline"
+    candidate_dir = tmp_path / "candidate"
+    review_file = tmp_path / "review.json"
+    write_snapshot_artifacts(
+        baseline_dir,
+        definition=definition,
+        output=SnapshotOutput(
+            records=(
+                SnapshotRecord(
+                    stream="materials",
+                    key="MAT1",
+                    group=group,
+                    data={"_key": "MAT1", "technical_composition": ["MC1"]},
+                ),
+            )
+        ),
+        clean=True,
+    )
+    write_snapshot_artifacts(
+        candidate_dir,
+        definition=definition,
+        output=SnapshotOutput(
+            records=(
+                SnapshotRecord(
+                    stream="materials",
+                    key="MAT1",
+                    group=group,
+                    data={"_key": "MAT1", "technical_composition": ["MC2"]},
+                ),
+            )
+        ),
+        clean=True,
+    )
+
+    summary = diff_snapshot_artifacts(
+        definition=definition,
+        baseline_dir=baseline_dir,
+        candidate_dir=candidate_dir,
+        policy=_DisplayPolicy(),
+        display_context=_DisplayContext(),
+        review_file=review_file,
+    )
+
+    change = summary.changes[0]
+    assert change.old == "MC1"
+    assert change.new == "MC2"
+    assert change.old_display == {
+        "endpoint": "material_compositions",
+        "id": "MC1",
+        "label": "Cotton 60%",
+    }
+    assert change.new_display == {
+        "endpoint": "material_compositions",
+        "id": "MC2",
+        "label": "Polyester 40%",
+    }
+    review = json.loads(review_file.read_text(encoding="utf-8"))
+    action = review["actions"][0]
+    assert action["old_display"] == change.old_display
+    assert action["new_display"] == change.new_display
+    assert action["field_diffs"] == [
+        {
+            "path": "/technical_composition/0",
+            "old": "MC1",
+            "new": "MC2",
+            "old_display": change.old_display,
+            "new_display": change.new_display,
+        }
+    ]
+    rendered = snapshot_diff_record(summary)
+    assert rendered["changes"][0]["old_display"] == change.old_display
+    assert rendered["changes"][0]["field_diffs"] == action["field_diffs"]
+
+
 def _write_snapshot_artifact_set(
     target_dir: Path,
     definition: SnapshotDefinition,
@@ -567,6 +666,15 @@ class _TestDppPolicy:
             )
         )
 
+    def record_display(
+        self,
+        identity: SnapshotRecordIdentity,
+        baseline,
+        candidate,
+        context,
+    ) -> dict[str, str]:
+        return {"label": f"{identity.stream}:{identity.key}"}
+
 
 class _IgnoreDebugPolicy:
     def ignored_change_path(
@@ -579,3 +687,34 @@ class _IgnoreDebugPolicy:
 
 class _RecordIgnoreDebugPolicy(_IgnoreDebugPolicy):
     record_promotion_streams = frozenset({"records"})
+
+
+class _DisplayPolicy:
+    def display_value(
+        self,
+        _identity: SnapshotRecordIdentity,
+        path: str,
+        value: object,
+        _side: str,
+        context,
+    ) -> dict[str, object] | None:
+        if path.startswith("/technical_composition"):
+            return context.display_ref("material_compositions", value)
+        return None
+
+
+class _DisplayContext:
+    _labels = {
+        "MC1": "Cotton 60%",
+        "MC2": "Polyester 40%",
+    }
+
+    def display_ref(self, endpoint: str, value: object) -> dict[str, object] | None:
+        ref_id = str(value or "").strip()
+        if not ref_id:
+            return None
+        return {
+            "endpoint": endpoint,
+            "id": ref_id,
+            "label": self._labels[ref_id],
+        }

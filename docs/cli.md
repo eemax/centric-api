@@ -470,6 +470,9 @@ for Git review workflows. Builds write to a snapshot workspace target: `candidat
 `baseline` when explicitly selected. `snapshot promote --yes` copies all reviewed candidate artifacts
 to baseline exactly. `snapshot diff` compares `baseline/` to `candidate/`; with `--review-file`, it
 writes selectable actions that `snapshot promote --review-file` can apply for selective promotion.
+Review actions keep raw `old` and `new` values for promotion and may include `record_display`,
+impact `display`, per-path `field_diffs`, and `old_display` / `new_display` reference labels for
+review tooling when the snapshot policy can provide them.
 Private diff policies can hide diagnostic paths from the review diff. Full promotion requires
 `--yes`; selective review-file promotion does not. There are no bundled snapshots. Private modules
 load from `CENTRIC_API_HOME/snapshots/*.py` by default, or from `--snapshots-dir PATH`.
@@ -478,7 +481,8 @@ Useful options:
 
 - `--snapshots-dir PATH`: load private snapshots from a specific directory.
 - `--units-config PATH`: use an explicit unit registry.
-- `--db PATH`: use a non-default SQLite cache for `check` or `build`.
+- `--db PATH`: use a non-default SQLite cache for `check`, `build`, or diff review display
+  hydration.
 - `--output-dir PATH`: choose the snapshot workspace root for `build`, `diff`, or `promote`.
 - `--target candidate|baseline`: choose the workspace target for `build`; default is `candidate`.
 - `promote --yes`: copy all of `candidate/` to `baseline/` after review.

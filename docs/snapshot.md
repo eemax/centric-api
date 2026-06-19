@@ -41,6 +41,16 @@ review file includes `schema_version: 1` and starts with all actions set to `ski
 actions to `promote`, then run `snapshot promote NAME --review-file review.json` to apply only those
 approved changes to `baseline/`.
 
+Review actions always keep raw `old` and `new` values as the promotion truth. When a private
+snapshot policy knows how to present a record, `snapshot diff` writes `record_display` for the action
+subject and `display` on impacted owner records. When the policy also knows how to resolve a changed
+reference path, it writes `old_display` and `new_display` objects with the referenced endpoint, id,
+and label. Every changed field that is part of an action is also listed in `field_diffs` with raw
+`old` / `new` values and any available display values, which lets review UIs render record-level
+actions without reopening the snapshot artifacts. Those display fields are for review tools and
+humans only; selective promotion ignores them. `snapshot diff` uses the default cache DB for
+reference display hydration when it exists, or use `--db PATH` to point at a specific cache.
+
 The generic diff engine promotes changed fields by default. A private snapshot can hide
 non-reviewable diagnostic paths from the diff, opt specific streams into record-level promotion, mark
 fields as locked, and report impacted owner records. Locked fields cannot be promoted directly from

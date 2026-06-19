@@ -85,16 +85,49 @@ def review_action(change: SnapshotChange) -> dict[str, Any]:
         "approval": change.approval,
         "approval_owner": change.approval_owner,
         "reason": change.reason,
-        "impacts": [_identity_payload(identity) for identity in change.impacts],
+        "record_display": change.record_display,
+        "impacts": [
+            _identity_payload(identity, display=display)
+            for identity, display in _impacts_with_displays(change)
+        ],
         "old": change.old,
         "new": change.new,
+        "old_display": change.old_display,
+        "new_display": change.new_display,
         "changed_paths": list(change.changed_paths),
+        "field_diffs": [_field_diff_payload(field_diff) for field_diff in change.field_diffs],
     }
 
 
-def _identity_payload(identity: SnapshotRecordIdentity) -> dict[str, Any]:
-    return {
+def _impacts_with_displays(
+    change: SnapshotChange,
+) -> tuple[tuple[SnapshotRecordIdentity, Any], ...]:
+    displays = list(change.impact_displays)
+    if len(displays) < len(change.impacts):
+        displays.extend([None] * (len(change.impacts) - len(displays)))
+    return tuple(zip(change.impacts, displays, strict=False))
+
+
+def _identity_payload(
+    identity: SnapshotRecordIdentity,
+    *,
+    display: Any = None,
+) -> dict[str, Any]:
+    payload = {
         "stream": identity.stream,
         "group": list(identity.group),
         "key": identity.key,
+    }
+    if display is not None:
+        payload["display"] = display
+    return payload
+
+
+def _field_diff_payload(field_diff: Any) -> dict[str, Any]:
+    return {
+        "path": field_diff.path,
+        "old": field_diff.old,
+        "new": field_diff.new,
+        "old_display": field_diff.old_display,
+        "new_display": field_diff.new_display,
     }

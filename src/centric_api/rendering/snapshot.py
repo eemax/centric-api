@@ -54,17 +54,35 @@ def snapshot_diff_record(summary: SnapshotDiffSummary) -> dict[str, Any]:
                 "approval": change.approval,
                 "approval_owner": change.approval_owner,
                 "reason": change.reason,
+                "record_display": change.record_display,
                 "impacts": [
                     {
                         "stream": impact.stream,
                         "group": list(impact.group),
                         "key": impact.key,
+                        "display": (
+                            change.impact_displays[index]
+                            if index < len(change.impact_displays)
+                            else None
+                        ),
                     }
-                    for impact in change.impacts
+                    for index, impact in enumerate(change.impacts)
                 ],
                 "old": change.old,
                 "new": change.new,
+                "old_display": change.old_display,
+                "new_display": change.new_display,
                 "changed_paths": list(change.changed_paths),
+                "field_diffs": [
+                    {
+                        "path": field_diff.path,
+                        "old": field_diff.old,
+                        "new": field_diff.new,
+                        "old_display": field_diff.old_display,
+                        "new_display": field_diff.new_display,
+                    }
+                    for field_diff in change.field_diffs
+                ],
             }
             for change in summary.changes
         ],

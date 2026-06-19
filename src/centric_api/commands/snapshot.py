@@ -57,6 +57,8 @@ def run_snapshot_command(args: argparse.Namespace) -> int:
             snapshot,
             output_root=args.output_dir,
             review_file=args.review_file,
+            db_path=resolve_db_path(args.db),
+            require_db=args.db is not None,
         )
         if args.json:
             print(json.dumps(snapshot_diff_record(diff), default=str))

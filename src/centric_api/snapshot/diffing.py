@@ -20,6 +20,7 @@ from .contracts import (
     SnapshotChange,
     SnapshotDefinition,
     SnapshotDiffSummary,
+    SnapshotFieldDiff,
     SnapshotOutput,
     SnapshotRecord,
     SnapshotRecordIdentity,
@@ -58,6 +59,25 @@ class DefaultSnapshotDiffPolicy:
     ) -> tuple[SnapshotRecordIdentity, ...]:
         return ()
 
+    def display_value(
+        self,
+        _identity: SnapshotRecordIdentity,
+        _path: str,
+        _value: Any,
+        _side: str,
+        _context: Any,
+    ) -> Any:
+        return None
+
+    def record_display(
+        self,
+        _identity: SnapshotRecordIdentity,
+        _baseline: SnapshotArtifactSet,
+        _candidate: SnapshotArtifactSet,
+        _context: Any | None,
+    ) -> Any:
+        return None
+
 
 def diff_snapshot_artifacts(
     *,
@@ -66,15 +86,22 @@ def diff_snapshot_artifacts(
     candidate_dir: Path,
     policy: Any | None = None,
     review_file: Path | None = None,
+    display_context: Any | None = None,
 ) -> SnapshotDiffSummary:
     policy = policy or DefaultSnapshotDiffPolicy()
     baseline = read_snapshot_artifacts(baseline_dir)
     candidate = read_snapshot_artifacts(candidate_dir)
-    changes = _changes_with_impacts(
-        _diff_artifacts(baseline, candidate, policy),
+    changes = _changes_with_review_displays(
+        _changes_with_impacts(
+            _diff_artifacts(baseline, candidate, policy),
+            policy,
+            baseline,
+            candidate,
+        ),
         policy,
         baseline,
         candidate,
+        display_context,
     )
     summary = SnapshotDiffSummary(
         snapshot_name=definition.name,
@@ -214,6 +241,9 @@ def _record_level_change(
         change_type="record_changed",
         identity=identity,
         changed_paths=tuple(path for path, _old, _new in changed_fields),
+        field_diffs=tuple(
+            SnapshotFieldDiff(path=path, old=old, new=new) for path, old, new in changed_fields
+        ),
         promotion_unit="record",
         approval="actionable",
         approval_owner=_policy_approval_owner(policy, identity, None),
@@ -235,6 +265,7 @@ def _field_level_changes(
                 path=path,
                 old=old,
                 new=new,
+                field_diffs=(SnapshotFieldDiff(path=path, old=old, new=new),),
                 promotion_unit="field",
                 approval="locked" if locked_reason else "actionable",
                 approval_owner=_policy_approval_owner(policy, identity, path),
@@ -297,6 +328,121 @@ def _with_owner_approval_changes(
             )
         )
     return tuple(output)
+
+
+def _changes_with_review_displays(
+    changes: tuple[SnapshotChange, ...],
+    policy: Any,
+    baseline: SnapshotArtifactSet,
+    candidate: SnapshotArtifactSet,
+    display_context: Any | None,
+) -> tuple[SnapshotChange, ...]:
+    return tuple(
+        _with_review_displays(change, policy, baseline, candidate, display_context)
+        for change in sorted(changes, key=_change_sort_key)
+    )
+
+
+def _with_review_displays(
+    change: SnapshotChange,
+    policy: Any,
+    baseline: SnapshotArtifactSet,
+    candidate: SnapshotArtifactSet,
+    display_context: Any | None,
+) -> SnapshotChange:
+    record_display = _policy_record_display(
+        policy,
+        change.identity,
+        baseline,
+        candidate,
+        display_context,
+    )
+    impact_displays = tuple(
+        _policy_record_display(policy, impact, baseline, candidate, display_context)
+        for impact in change.impacts
+    )
+    old_display = None
+    new_display = None
+    field_diffs = _field_diffs_with_displays(
+        change.field_diffs,
+        policy,
+        change.identity,
+        display_context,
+    )
+    if change.path is not None and display_context is not None:
+        old_display = _policy_display_value(
+            policy,
+            change.identity,
+            change.path,
+            change.old,
+            "old",
+            display_context,
+        )
+        new_display = _policy_display_value(
+            policy,
+            change.identity,
+            change.path,
+            change.new,
+            "new",
+            display_context,
+        )
+    if (
+        record_display is None
+        and old_display is None
+        and new_display is None
+        and field_diffs == change.field_diffs
+        and not any(display is not None for display in impact_displays)
+    ):
+        return change
+    return replace(
+        change,
+        record_display=record_display,
+        old_display=old_display,
+        new_display=new_display,
+        field_diffs=field_diffs,
+        impact_displays=impact_displays,
+    )
+
+
+def _field_diffs_with_displays(
+    field_diffs: tuple[SnapshotFieldDiff, ...],
+    policy: Any,
+    identity: SnapshotRecordIdentity,
+    display_context: Any | None,
+) -> tuple[SnapshotFieldDiff, ...]:
+    if display_context is None or not field_diffs:
+        return field_diffs
+    output: list[SnapshotFieldDiff] = []
+    changed = False
+    for field_diff in field_diffs:
+        old_display = _policy_display_value(
+            policy,
+            identity,
+            field_diff.path,
+            field_diff.old,
+            "old",
+            display_context,
+        )
+        new_display = _policy_display_value(
+            policy,
+            identity,
+            field_diff.path,
+            field_diff.new,
+            "new",
+            display_context,
+        )
+        if old_display is not None or new_display is not None:
+            changed = True
+            output.append(
+                replace(
+                    field_diff,
+                    old_display=old_display,
+                    new_display=new_display,
+                )
+            )
+        else:
+            output.append(field_diff)
+    return tuple(output) if changed else field_diffs
 
 
 def _review_action_change(
@@ -497,3 +643,30 @@ def _policy_impacts(
     if method is None:
         return ()
     return tuple(method(change, baseline, candidate))
+
+
+def _policy_display_value(
+    policy: Any,
+    identity: SnapshotRecordIdentity,
+    path: str,
+    value: Any,
+    side: str,
+    display_context: Any,
+) -> Any:
+    method = getattr(policy, "display_value", None)
+    if method is None:
+        return None
+    return method(identity, path, value, side, display_context)
+
+
+def _policy_record_display(
+    policy: Any,
+    identity: SnapshotRecordIdentity,
+    baseline: SnapshotArtifactSet,
+    candidate: SnapshotArtifactSet,
+    display_context: Any | None,
+) -> Any:
+    method = getattr(policy, "record_display", None)
+    if method is None:
+        return None
+    return method(identity, baseline, candidate, display_context)
