@@ -60,6 +60,7 @@ def _insert_record(
         ],
     )
 
+
 def _review_row(path: Path, row_number: int = 2) -> dict[str, object]:
     workbook = load_workbook(path)
     try:
@@ -70,6 +71,7 @@ def _review_row(path: Path, row_number: int = 2) -> dict[str, object]:
     finally:
         workbook.close()
 
+
 class _FakeAuthContext:
     base_url = "https://example.test"
 
@@ -79,6 +81,7 @@ class _FakeAuthContext:
         assert isinstance(json_body, dict)
         return _FakeResponse()
 
+
 class _FakeResponse:
     status_code = 201
     text = '{"id":"created"}'
@@ -86,11 +89,13 @@ class _FakeResponse:
     def json(self) -> dict[str, str]:
         return {"id": "created"}
 
+
 class _FailingAuthContext:
     base_url = "https://example.test"
 
     def request(self, method: str, url: str, *, json_body: object) -> object:
         raise RuntimeError("connection dropped")
+
 
 class _MixedAuthContext:
     base_url = "https://example.test"
@@ -103,6 +108,7 @@ class _MixedAuthContext:
         if self.calls == 1:
             return _FakeResponse()
         return _FailedResponse()
+
 
 class _FailedResponse:
     status_code = 400

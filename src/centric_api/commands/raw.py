@@ -24,9 +24,7 @@ from ..schema import load_endpoint_schemas
 
 def run_raw_command(args: argparse.Namespace) -> int:
     raw_root = (
-        Path(args.raw_dir).expanduser()
-        if getattr(args, "raw_dir", None)
-        else runtime_path("raw")
+        Path(args.raw_dir).expanduser() if getattr(args, "raw_dir", None) else runtime_path("raw")
     )
     if args.action == "check":
         results = check_raw_runs(raw_root, args.raw_run)
@@ -332,8 +330,7 @@ def _print_diff(payload: dict[str, Any]) -> None:
         return
     for change in payload["changes"][:50]:
         print(
-            f"{change['path']}: "
-            f"{_compact_value(change['from'])} -> {_compact_value(change['to'])}"
+            f"{change['path']}: {_compact_value(change['from'])} -> {_compact_value(change['to'])}"
         )
     remaining = payload["change_count"] - 50
     if remaining > 0:

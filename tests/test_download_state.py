@@ -27,6 +27,7 @@ def test_download_dry_run_requires_existing_db_without_creating_it(tmp_path: Pat
 
     assert not db_path.exists()
 
+
 def test_download_run_id_checks_database_history(tmp_path: Path, monkeypatch) -> None:
     class FixedDateTime(datetime):
         @classmethod
@@ -59,6 +60,7 @@ def test_download_run_id_checks_database_history(tmp_path: Path, monkeypatch) ->
     )
 
     assert result.run_id == "2026-01-01T000000Z-docs-2"
+
 
 def test_download_delta_skips_current_revision_present_on_disk(tmp_path: Path) -> None:
     db_path = tmp_path / "centric.db"
@@ -324,6 +326,7 @@ def test_download_sync_uses_stored_content_disposition_path(tmp_path: Path) -> N
 
     assert sync.already_present_count == 1
     assert sync.items[0]["file_path"].endswith("/real-name.pdf")
+
 
 def test_download_rebuild_failure_preserves_previous_current_revision(
     tmp_path: Path,

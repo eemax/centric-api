@@ -14,6 +14,7 @@ def _write_material_create_composition_workbook(path: Path) -> None:
         rows=[["MAT-001", "Fabric", "Test fabric", "100% Cotton"]],
     )
 
+
 def _write_material_create_composition_quote_workbook(path: Path) -> None:
     _write_material_workbook(
         path,
@@ -45,6 +46,7 @@ def _write_material_create_composition_quote_workbook(path: Path) -> None:
         ],
     )
 
+
 def _seed_material_create_composition_cache(db_path: Path) -> None:
     with connect(db_path) as conn:
         _insert_record(
@@ -60,9 +62,11 @@ def _seed_material_create_composition_cache(db_path: Path) -> None:
             payload={"id": "COTTON", "node_name": "Cotton", "ok_for_material": True},
         )
 
+
 def _seed_material_create_composition_quote_cache(db_path: Path) -> None:
     _seed_material_create_composition_cache(db_path)
     _seed_style_supplier_quote_cache(db_path)
+
 
 def _write_style_bom_workbook(path: Path) -> None:
     _write_material_workbook(
@@ -103,6 +107,7 @@ def _write_style_bom_workbook(path: Path) -> None:
             ],
         ],
     )
+
 
 def _seed_style_bom_load_cache(
     db_path: Path,
@@ -166,6 +171,7 @@ def _seed_style_bom_load_cache(
             payload={"id": "M2", "code": "MAT-002"},
         )
 
+
 def _write_style_supplier_quote_workbook(
     path: Path,
     *,
@@ -198,6 +204,7 @@ def _write_style_supplier_quote_workbook(
         ],
     )
 
+
 def _write_material_supplier_quote_workbook(
     path: Path,
     *,
@@ -228,6 +235,7 @@ def _write_material_supplier_quote_workbook(
         ],
     )
 
+
 def _seed_material_supplier_quote_cache(
     db_path: Path,
     *,
@@ -248,6 +256,7 @@ def _seed_material_supplier_quote_cache(
             record_id="M1",
             payload={"id": "M1", "code": "MAT-001"},
         )
+
 
 def _seed_style_supplier_quote_cache(
     db_path: Path,
@@ -309,6 +318,7 @@ def _seed_style_supplier_quote_cache(
                 },
             )
 
+
 class _StyleBomAuthContext:
     base_url = "https://example.test"
 
@@ -336,6 +346,7 @@ class _StyleBomAuthContext:
             return _JsonResponse(201, {"id": "LINE"})
         return _JsonResponse(404, {"message": "unexpected url"})
 
+
 class _JsonResponse:
     def __init__(self, status_code: int, payload: object) -> None:
         self.status_code = status_code
@@ -344,6 +355,7 @@ class _JsonResponse:
 
     def json(self) -> object:
         return self._payload
+
 
 class _MaterialCreateCompositionAuthContext:
     base_url = "https://example.test"
@@ -361,6 +373,7 @@ class _MaterialCreateCompositionAuthContext:
         if url.endswith("/technical_compositions"):
             return _JsonResponse(201, [{"id": "COMP1"}])
         return _JsonResponse(404, {"message": "unexpected url"})
+
 
 class _MaterialCreateCompositionQuoteAuthContext:
     base_url = "https://example.test"
@@ -393,6 +406,7 @@ class _MaterialCreateCompositionQuoteAuthContext:
         if method == "PUT" and url.endswith("/materials/NEW-MAT"):
             return _JsonResponse(200, {"id": "NEW-MAT", "default_quote": "SQ1"})
         return _JsonResponse(404, {"message": "unexpected url"})
+
 
 class _StyleSupplierQuoteAuthContext:
     base_url = "https://example.test"

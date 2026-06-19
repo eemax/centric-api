@@ -225,8 +225,8 @@ def render_endpoint_map_markdown(payload: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-        "## Endpoints",
-        "",
+            "## Endpoints",
+            "",
         ]
     )
     for endpoint in endpoints:
@@ -235,8 +235,7 @@ def render_endpoint_map_markdown(payload: dict[str, Any]) -> str:
         lines.append("Outgoing:")
         if endpoint_outgoing:
             lines.extend(
-                f"- `{item['source_path']}` -> `{item['target_endpoint']}` "
-                f"via `{item['join']}`"
+                f"- `{item['source_path']}` -> `{item['target_endpoint']}` via `{item['join']}`"
                 for item in endpoint_outgoing
             )
         else:

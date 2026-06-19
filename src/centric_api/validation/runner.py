@@ -269,13 +269,11 @@ def _validate_optional_history_number(
         return
     if not isinstance(value, int | float) or isinstance(value, bool):
         raise ConfigError(
-            f"Validator {validator_name} history metric {metric_name} {field_name} "
-            "must be numeric."
+            f"Validator {validator_name} history metric {metric_name} {field_name} must be numeric."
         )
     if not isfinite(float(value)):
         raise ConfigError(
-            f"Validator {validator_name} history metric {metric_name} {field_name} "
-            "must be finite."
+            f"Validator {validator_name} history metric {metric_name} {field_name} must be finite."
         )
 
 

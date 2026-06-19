@@ -196,7 +196,7 @@ def test_snapshot_rejects_unsafe_snapshot_name(tmp_path: Path, capsys) -> None:
     snapshots_dir = tmp_path / "snapshots-private"
     snapshots_dir.mkdir()
     (snapshots_dir / "bad.py").write_text(
-        '''
+        """
 from centric_api.snapshot import SnapshotDefinition, SnapshotOutput
 
 
@@ -208,7 +208,7 @@ class BadSnapshot:
 
 
 SNAPSHOT = BadSnapshot()
-''',
+""",
         encoding="utf-8",
     )
 
@@ -365,9 +365,9 @@ def test_snapshot_promote_copies_candidate_to_baseline(tmp_path: Path, capsys) -
     ).read_text(encoding="utf-8")
     assert (baseline_dir / "Concept A" / "SS27" / "Brand A" / "style-boms.jsonl").read_text(
         encoding="utf-8"
-    ) == (
-        candidate_dir / "Concept A" / "SS27" / "Brand A" / "style-boms.jsonl"
-    ).read_text(encoding="utf-8")
+    ) == (candidate_dir / "Concept A" / "SS27" / "Brand A" / "style-boms.jsonl").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_snapshot_promote_requires_candidate_manifest(tmp_path: Path, capsys) -> None:
@@ -400,7 +400,7 @@ def test_snapshot_duplicate_detection_normalizes_stream_filenames(
     snapshots_dir = tmp_path / "snapshots-private"
     snapshots_dir.mkdir()
     (snapshots_dir / "dpp.py").write_text(
-        '''
+        """
 from centric_api.snapshot import SnapshotDefinition, SnapshotOutput
 
 
@@ -417,7 +417,7 @@ class DppSnapshot:
 
 
 SNAPSHOT = DppSnapshot()
-''',
+""",
         encoding="utf-8",
     )
     db_path = tmp_path / "centric.db"
@@ -466,7 +466,7 @@ def _insert_style(db_path: Path, record_id: str, payload: dict[str, object]) -> 
 
 def _write_demo_snapshot(path: Path) -> None:
     path.write_text(
-        '''
+        """
 from centric_api.snapshot import SnapshotDefinition, SnapshotOutput
 
 
@@ -500,6 +500,6 @@ class DppSnapshot:
 
 
 SNAPSHOT = DppSnapshot()
-''',
+""",
         encoding="utf-8",
     )

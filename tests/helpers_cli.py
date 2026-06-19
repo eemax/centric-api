@@ -39,6 +39,7 @@ def _insert_bundle_run(conn, run_id: str, finished_at: str) -> None:
         ],
     )
 
+
 def _insert_download_run(conn) -> None:
     conn.execute(
         """
@@ -71,6 +72,7 @@ def _insert_download_run(conn) -> None:
         ],
     )
 
+
 def _insert_endpoint_record(
     conn,
     *,
@@ -98,6 +100,7 @@ def _insert_endpoint_record(
             "2026-01-01T00:00:00Z",
         ],
     )
+
 
 def _patch_fetch_pipeline(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
@@ -180,6 +183,7 @@ def _patch_fetch_pipeline(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setattr("centric_api.commands.pipeline.record_changelog", fake_record_changelog)
 
+
 def _insert_bundle_item(
     conn,
     run_id: str,
@@ -215,6 +219,7 @@ def _insert_bundle_item(
             "2026-01-01T00:00:00Z",
         ],
     )
+
 
 def _insert_applied_raw_file(conn, *, endpoint: str, record_count: int = 0) -> None:
     conn.execute(

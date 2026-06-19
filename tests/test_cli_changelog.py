@@ -220,9 +220,7 @@ def test_changelog_summary_human_digest_and_exit_code(tmp_path, capsys) -> None:
         deleted_record_delete_types_by_endpoint={"boms": {"B1": "tombstone"}},
     )
 
-    exit_code = main(
-        ["changelog", "--db", str(db_path), "--since", "2026-01-02T00:00:00Z"]
-    )
+    exit_code = main(["changelog", "--db", str(db_path), "--since", "2026-01-02T00:00:00Z"])
 
     output = capsys.readouterr().out
     assert exit_code == 0
@@ -250,10 +248,7 @@ def test_changelog_since_uses_modified_at_not_detection_time(tmp_path, capsys) -
         )
     record_changelog(db_path, endpoints={"styles"}, full=True)
 
-    assert (
-        main(["changelog", "--db", str(db_path), "--since", "2026-06-01T00:00:00Z"])
-        == 0
-    )
+    assert main(["changelog", "--db", str(db_path), "--since", "2026-06-01T00:00:00Z"]) == 0
     assert "No changelog events found." in capsys.readouterr().out
 
     assert (

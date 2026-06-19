@@ -78,14 +78,11 @@ def _validate_model(model: Any, path: Path) -> None:
         raise ConfigError(f"Model {definition.name!r} has an empty output table.")
     validate_identifier(definition.output_table, f"Model {definition.name!r} output table")
     if not isinstance(definition.required_endpoints, (tuple, list)):
-        raise ConfigError(
-            f"Model {definition.name!r} required_endpoints must be a tuple or list."
-        )
+        raise ConfigError(f"Model {definition.name!r} required_endpoints must be a tuple or list.")
     for endpoint in definition.required_endpoints:
         if not isinstance(endpoint, str) or not endpoint.strip():
             raise ConfigError(
-                f"Model {definition.name!r} required_endpoints must contain "
-                "non-empty strings."
+                f"Model {definition.name!r} required_endpoints must contain non-empty strings."
             )
     for method in ("check", "run"):
         if not callable(getattr(model, method, None)):

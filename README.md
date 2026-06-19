@@ -23,12 +23,14 @@ Local checks:
 just check
 ```
 
-`just check` runs lint, bytecode compilation, and the full test suite. Without `just`, run the same
-gate directly:
+`just check` verifies formatting, lint, bytecode compilation, the CLI entrypoint, and the full test
+suite. Without `just`, run the same gate directly:
 
 ```bash
+uv run ruff format --check
 uv run ruff check
 uv run python -m compileall -q src/centric_api
+uv run centric-api --help >/dev/null
 uv run pytest
 ```
 

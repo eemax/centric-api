@@ -209,9 +209,7 @@ endpoints:
     )
 
 
-def test_swagger_history_lists_snapshots_newest_first(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_swagger_history_lists_snapshots_newest_first(tmp_path: Path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("CENTRIC_API_HOME", str(home))
     _write_history_snapshot(
@@ -269,15 +267,12 @@ def test_swagger_history_diffs_lists_adjacent_diff_counts(
     rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert exit_code == 0
     assert [
-        (row["current_index"], row["baseline_index"], row["operation_added_count"])
-        for row in rows
+        (row["current_index"], row["baseline_index"], row["operation_added_count"]) for row in rows
     ] == [(0, 1, 1), (1, 2, 1)]
     assert [row["field_added_count"] for row in rows] == [2, 2]
 
 
-def test_swagger_diff_compares_history_positions(
-    tmp_path: Path, monkeypatch, capsys
-) -> None:
+def test_swagger_diff_compares_history_positions(tmp_path: Path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     monkeypatch.setenv("CENTRIC_API_HOME", str(home))
     _write_history_snapshot(

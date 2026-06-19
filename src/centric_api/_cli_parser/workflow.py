@@ -58,6 +58,7 @@ def add_view_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
     )
     view_export_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+
 def add_load_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     load_parser = subparsers.add_parser("load", help="Load spreadsheet rows into Centric API")
     load_parser.add_argument(
@@ -152,6 +153,7 @@ def add_load_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
     load_retry_parser.add_argument("--quiet", action="store_true", help="Suppress human progress.")
     load_retry_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+
 def add_model_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     model_parser = subparsers.add_parser("model", help="Run private calculated data models")
     model_parser.add_argument(
@@ -186,6 +188,7 @@ def add_model_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
         "--db", metavar="PATH", default=None, help="SQLite database path."
     )
     model_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
 
 def add_validate_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     validate_parser = subparsers.add_parser(
@@ -278,6 +281,7 @@ def add_validate_parser(subparsers: argparse._SubParsersAction[argparse.Argument
         "--json", action="store_true", help="Emit one JSON object."
     )
 
+
 def add_snapshot_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     snapshot_parser = subparsers.add_parser(
         "snapshot",
@@ -359,4 +363,3 @@ def add_snapshot_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     snapshot_promote_parser.add_argument(
         "--json", action="store_true", help="Emit one JSON object."
     )
-

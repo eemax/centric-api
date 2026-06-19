@@ -127,7 +127,7 @@ class RawWinnerSet:
 
 def raw_index_path(raw_path: Path) -> Path:
     if raw_path.name.endswith(".jsonl"):
-        return raw_path.with_name(f"{raw_path.name[:-len('.jsonl')]}{RAW_INDEX_SUFFIX}")
+        return raw_path.with_name(f"{raw_path.name[: -len('.jsonl')]}{RAW_INDEX_SUFFIX}")
     return raw_path.with_name(f"{raw_path.name}{RAW_INDEX_SUFFIX}")
 
 
@@ -301,11 +301,7 @@ def _iter_completed_run_paths(raw_root: Path) -> list[Path]:
     runs_dir = raw_root / "runs"
     if not runs_dir.is_dir():
         return []
-    paths = [
-        path
-        for path in sorted(runs_dir.iterdir())
-        if _is_compaction_source_run(path)
-    ]
+    paths = [path for path in sorted(runs_dir.iterdir()) if _is_compaction_source_run(path)]
     return paths
 
 

@@ -38,6 +38,7 @@ def _insert_record(
         ],
     )
 
+
 def _insert_applied_raw_file(
     conn: sqlite3.Connection,
     *,
@@ -67,6 +68,7 @@ def _insert_applied_raw_file(
             "2026-01-01T00:00:00Z",
         ],
     )
+
 
 def _insert_download_run(conn: sqlite3.Connection, *, run_id: str) -> None:
     conn.execute(
@@ -100,6 +102,7 @@ def _insert_download_run(conn: sqlite3.Connection, *, run_id: str) -> None:
         ],
     )
 
+
 def _download_config(tmp_path: Path):
     config_path = tmp_path / "download.yml"
     config_path.write_text(
@@ -119,6 +122,7 @@ jobs:
     config = load_download_config(config_path)
     return replace(config, output_dir=tmp_path / "downloads")
 
+
 class _Client:
     def __init__(self, responses: httpx.Response | list[httpx.Response]) -> None:
         self.responses = responses if isinstance(responses, list) else [responses]
@@ -129,6 +133,7 @@ class _Client:
         self.index += 1
         return _Stream(response)
 
+
 class _Stream:
     def __init__(self, response: httpx.Response) -> None:
         self.response = response
@@ -138,6 +143,7 @@ class _Stream:
 
     def __exit__(self, *_args) -> None:
         return None
+
 
 class _Auth:
     base_url = "https://centric.example.com"

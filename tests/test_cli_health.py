@@ -416,8 +416,7 @@ def test_rebuild_db_can_skip_changelog(tmp_path, monkeypatch, capsys) -> None:
         ).fetchone()[0]
         event_count = conn.execute("SELECT COUNT(*) FROM endpoint_change_events").fetchone()[0]
         index_columns = {
-            row[1]
-            for row in conn.execute("PRAGMA table_info(endpoint_changelog_index_current)")
+            row[1] for row in conn.execute("PRAGMA table_info(endpoint_changelog_index_current)")
         }
     assert count == 1
     assert index_count == 1

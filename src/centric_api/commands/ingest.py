@@ -78,8 +78,7 @@ def _run_raw_run(args: argparse.Namespace) -> int:
     raw_run = _inspect_raw_run(args.raw_run, db_path=db_path, known_endpoints=set(schemas))
     if raw_run.lifecycle != "completed":
         raise ConfigError(
-            f"Raw run is not completed evidence: {raw_run.path} "
-            f"(lifecycle={raw_run.lifecycle})."
+            f"Raw run is not completed evidence: {raw_run.path} (lifecycle={raw_run.lifecycle})."
         )
     error_count = len(_raw_run_error_records(raw_run))
     if error_count:
@@ -179,9 +178,7 @@ def _inspect_raw_run(
             expected_count = _optional_int(endpoint_payload.get("expected_count"))
         discovered = discovered_files.get(path.resolve())
         is_delta = (
-            bool(endpoint_payload.get("is_delta"))
-            if discovered is None
-            else discovered.is_delta
+            bool(endpoint_payload.get("is_delta")) if discovered is None else discovered.is_delta
         )
         content_sha256: str | None = None
         line_count: int | None = None

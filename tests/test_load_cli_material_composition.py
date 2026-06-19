@@ -59,9 +59,8 @@ def test_material_create_with_composition_dry_run_plans_chain(
     assert payload["request_samples"][1]["path"] == (
         "/v2/materials/DRY-RUN-MATERIAL/technical_compositions"
     )
-    assert payload["request_samples"][1]["body"] == [
-        {"composition": "COTTON", "percentage": 100}
-    ]
+    assert payload["request_samples"][1]["body"] == [{"composition": "COTTON", "percentage": 100}]
+
 
 def test_material_create_with_composition_runs_chained_requests(
     tmp_path,
@@ -106,6 +105,7 @@ def test_material_create_with_composition_runs_chained_requests(
         ),
     ]
 
+
 def test_material_create_with_composition_marks_create_failure(
     tmp_path,
     monkeypatch,
@@ -138,6 +138,7 @@ def test_material_create_with_composition_marks_create_failure(
     assert result.request_count == 1
     assert [issue.code for issue in result.issues] == ["material_create_failed"]
     assert [issue.row for issue in result.issues] == [2]
+
 
 def test_material_create_with_composition_and_quote_dry_run_plans_chain(
     tmp_path,
@@ -182,6 +183,7 @@ def test_material_create_with_composition_and_quote_dry_run_plans_chain(
     assert payload["request_samples"][2]["path"] == (
         "/v2/materials/DRY-RUN-MATERIAL/product_sources"
     )
+
 
 def test_material_create_with_composition_and_quote_runs_chained_requests(
     tmp_path,
@@ -246,6 +248,7 @@ def test_material_create_with_composition_and_quote_runs_chained_requests(
         ),
     ]
 
+
 def test_material_create_with_composition_and_quote_review_keeps_partial_failure(
     tmp_path,
     monkeypatch,
@@ -279,7 +282,5 @@ def test_material_create_with_composition_and_quote_review_keeps_partial_failure
     review_row = _review_row(result.review_path)
     assert review_row["_cent_load_status"] == "failed"
     assert review_row["_cent_load_status_code"] == 422
-    assert review_row["_cent_load_request_path"] == (
-        "/v2/materials/NEW-MAT/technical_compositions"
-    )
+    assert review_row["_cent_load_request_path"] == ("/v2/materials/NEW-MAT/technical_compositions")
     assert "Material composition request failed" in review_row["_cent_load_message"]

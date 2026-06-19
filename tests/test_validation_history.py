@@ -323,9 +323,7 @@ def test_validate_history_keeps_season_dimensions_as_separate_series(
         "1C26",
         "2C26",
     }
-    assert {point["dimensions"]["concept"] for point in history_payload["points"]} == {
-        "Craft"
-    }
+    assert {point["dimensions"]["concept"] for point in history_payload["points"]} == {"Craft"}
     assert not (output_dir / "history.xlsx").exists()
 
 

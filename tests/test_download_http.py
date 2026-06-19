@@ -33,6 +33,7 @@ def test_download_revision_file_uses_content_disposition_filename(tmp_path: Path
     assert result.bytes_written == 5
     assert result.content_type == "application/pdf"
 
+
 def test_download_revision_file_retries_retryable_http(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -298,11 +298,7 @@ def _is_deleted_payload(payload: dict[str, Any], schema: EndpointSchema) -> bool
 def _verify_compacted_output(output: Path) -> None:
     result = check_raw_run(output)
     if result.status != "ok":
-        messages = [
-            error
-            for file in result.files
-            for error in file.errors
-        ]
+        messages = [error for file in result.files for error in file.errors]
         joined = "; ".join(messages) if messages else result.status
         raise ConfigError(f"Compacted raw run failed verification: {joined}")
 

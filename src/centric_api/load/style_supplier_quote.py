@@ -548,9 +548,7 @@ def _supplier_quote_planned_requests(
             _supplier_quote_item_request(row, product_source_id="DRY-RUN-PRODUCT-SOURCE")
         )
         if not _is_blank(row.values.get("quote_factory")):
-            requests.append(
-                _supplier_quote_revision_request(row, revision_id="DRY-RUN-REVISION")
-            )
+            requests.append(_supplier_quote_revision_request(row, revision_id="DRY-RUN-REVISION"))
         if row.values.get("set_production_quote") is True:
             requests.append(
                 _supplier_quote_production_request(

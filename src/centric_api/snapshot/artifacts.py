@@ -107,9 +107,7 @@ def _record_payload(record: SnapshotRecord) -> dict[str, Any]:
         raise ConfigError(f"Snapshot record in stream {record.stream!r} has an empty key.")
     existing_key = record.data.get("_key")
     if existing_key is not None and str(existing_key) != key:
-        raise ConfigError(
-            f"Snapshot record {record.stream}:{key} has conflicting data['_key']."
-        )
+        raise ConfigError(f"Snapshot record {record.stream}:{key} has conflicting data['_key'].")
     return {"_key": key, **record.data}
 
 

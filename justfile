@@ -6,6 +6,12 @@ default:
 sync:
     uv sync --locked
 
+format:
+    uv run ruff format
+
+format-check:
+    uv run ruff format --check
+
 lint:
     uv run ruff check
 
@@ -18,7 +24,7 @@ test:
 smoke:
     uv run centric-api --help >/dev/null
 
-check: lint compile smoke test
+check: format-check lint compile smoke test
 
 test-file path:
     uv run pytest {{path}}

@@ -72,9 +72,7 @@ def run_rebuild_db(args: argparse.Namespace) -> int:
         "ingest": _ingest_record(ingest_result),
         "changelog": _changelog_record(changelog_run) if changelog_run is not None else None,
         "changelog_index": (
-            _changelog_record(changelog_index_seed)
-            if changelog_index_seed is not None
-            else None
+            _changelog_record(changelog_index_seed) if changelog_index_seed is not None else None
         ),
         "changelog_skipped": changelog_skipped,
     }

@@ -25,6 +25,7 @@ def add_map_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParse
     )
     map_endpoints_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+
 def add_units_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     units_parser = subparsers.add_parser("units", help="Inspect and convert configured units")
     units_parser.add_argument(
@@ -65,6 +66,7 @@ def add_units_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
     _add_units_config_override(units_check_parser)
     units_check_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+
 def add_cron_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     cron_parser = subparsers.add_parser("cron", help="Run scheduled delta fetches in foreground")
     cron_parser.add_argument(
@@ -101,10 +103,12 @@ def add_cron_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
         "--env-file", metavar="PATH", default=None, help="Credential env file."
     )
 
+
 def add_status_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     status_parser = subparsers.add_parser("status", help="Show local Centric API status")
     status_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
     status_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
 
 def add_swagger_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     swagger_parser = subparsers.add_parser("swagger", help="Inspect local Centric Swagger schema")
@@ -255,6 +259,7 @@ def add_swagger_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
         "--json", action="store_true", help="Emit one JSON object."
     )
 
+
 def add_doctor_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     doctor_parser = subparsers.add_parser("doctor", help="Check local Centric API setup")
     doctor_parser.add_argument(
@@ -278,6 +283,7 @@ def add_doctor_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     )
     doctor_parser.add_argument("--json", action="store_true", help="Emit JSON Lines checks.")
 
+
 def add_rebuild_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     rebuild_parser = subparsers.add_parser("rebuild-db", help="Rebuild SQLite from raw evidence")
     rebuild_parser.add_argument("--db", metavar="PATH", default=None, help="SQLite database path.")
@@ -294,4 +300,3 @@ def add_rebuild_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
         help="Skip full changelog rebuild after raw ingest.",
     )
     rebuild_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
-

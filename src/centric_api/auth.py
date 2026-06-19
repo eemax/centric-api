@@ -41,9 +41,7 @@ def _normalize_base_url(value: str) -> str:
     netloc = parsed.netloc
     path = parsed.path.rstrip("/")
     is_centric_host = _is_centricsoftware_host(netloc)
-    if is_centric_host and (
-        path in {"", "/"} or path.casefold() == CENTRIC_REQUEST_HANDLER_PATH
-    ):
+    if is_centric_host and (path in {"", "/"} or path.casefold() == CENTRIC_REQUEST_HANDLER_PATH):
         path = CENTRIC_REQUEST_HANDLER_PATH
     return urlunsplit((scheme, netloc, path, "", ""))
 

@@ -26,6 +26,7 @@ def test_download_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     assert exit_code == 1
     assert "download lock exists" in capsys.readouterr().err
 
+
 def test_download_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
     lock_path = tmp_path / "download.lock"
@@ -37,6 +38,7 @@ def test_download_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
     assert "SQLite database not found" in capsys.readouterr().err
     assert not (tmp_path / "logs" / "download.log").exists()
 
+
 def test_bundle_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
     lock_path = tmp_path / "bundle.lock"
@@ -46,6 +48,7 @@ def test_bundle_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
 
     assert exit_code == 1
     assert "bundle lock exists" in capsys.readouterr().err
+
 
 def test_bundle_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
@@ -57,6 +60,7 @@ def test_bundle_dry_run_skips_lock(tmp_path, monkeypatch, capsys) -> None:
     assert exit_code == 1
     assert "SQLite database not found" in capsys.readouterr().err
     assert not (tmp_path / "logs").exists()
+
 
 def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
@@ -117,6 +121,7 @@ def test_bundle_history_commands_use_bundle_run_id(tmp_path, capsys) -> None:
     assert changelog["summary"]["changed_count"] == 1
     assert changelog["to_run"]["run_id"] == "2026-01-02T000000Z-style-bundle"
 
+
 def test_bundle_list_and_show_use_human_tables(tmp_path, capsys) -> None:
     db_path = tmp_path / "centric.db"
     with connect(db_path) as conn:
@@ -144,6 +149,7 @@ def test_bundle_list_and_show_use_human_tables(tmp_path, capsys) -> None:
     assert "Change" in show_output
     assert "files/styles/Style One/spec.pdf" in show_output
     assert "- added:" not in show_output
+
 
 def test_download_summary_formats_counts_and_labels_item_preview(tmp_path, capsys) -> None:
     result = DownloadRunResult(
@@ -220,6 +226,7 @@ def test_download_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
         run_download(argparse.Namespace(dry_run=False))
 
     assert not (tmp_path / "download.lock").exists()
+
 
 def test_bundle_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))

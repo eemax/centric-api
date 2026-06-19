@@ -255,9 +255,7 @@ def _material_create_composition_planned_requests(
     requests: list[LoadRequest] = []
     for row in rows:
         requests.append(_material_create_request(row))
-        requests.append(
-            _material_composition_request(row, material_id="DRY-RUN-MATERIAL")
-        )
+        requests.append(_material_composition_request(row, material_id="DRY-RUN-MATERIAL"))
     return tuple(requests)
 
 
@@ -267,9 +265,7 @@ def _material_create_composition_quote_planned_requests(
     requests: list[LoadRequest] = []
     for row in rows:
         requests.append(_material_create_request(row))
-        requests.append(
-            _material_composition_request(row, material_id="DRY-RUN-MATERIAL")
-        )
+        requests.append(_material_composition_request(row, material_id="DRY-RUN-MATERIAL"))
         quote_row = _material_supplier_quote_row(row, material_id="DRY-RUN-MATERIAL")
         requests.append(_supplier_quote_product_source_request(quote_row, root="material"))
         requests.append(

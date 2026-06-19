@@ -48,9 +48,7 @@ def load_job_record(job: LoadJob) -> dict[str, Any]:
                     if column.resolve
                     else None
                 ),
-                "value_set": (
-                    {"name": column.value_set.name} if column.value_set else None
-                ),
+                "value_set": ({"name": column.value_set.name} if column.value_set else None),
             }
             for column in job.columns
         ],
@@ -172,8 +170,7 @@ def print_human_load_show(job: LoadJob) -> None:
                 )
         if column.value_set:
             print(
-                f"  {'':<{key_width}}  {'':<{type_width}}  {'':<8}  "
-                f"values {column.value_set.name}"
+                f"  {'':<{key_width}}  {'':<{type_width}}  {'':<8}  values {column.value_set.name}"
             )
     print()
     print("Body")

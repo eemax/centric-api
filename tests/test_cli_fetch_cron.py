@@ -76,10 +76,12 @@ def test_fetch_and_cron_help_are_lean(capsys) -> None:
     assert "--job" in bundle_run_help
     assert "--no-zip" in bundle_run_help
 
+
 def test_fetch_log_level_defaults_to_summary() -> None:
     args = build_parser().parse_args(["fetch"])
 
     assert args.log_level == "summary"
+
 
 def test_fetch_log_renderer_includes_failed_request_url() -> None:
     line = render_log_line(
@@ -100,10 +102,11 @@ def test_fetch_log_renderer_includes_failed_request_url() -> None:
 
     assert line == (
         "2026-01-01T00:00:01Z REQUEST failed endpoint=styles "
-        "request_kind=\"data fetch\" method=GET "
+        'request_kind="data fetch" method=GET '
         "url=https://centric.example.com/api/v2/styles?skip=50&limit=50 "
         "reason=non_retryable_http_status status_code=400 attempt=1 max_attempts=3"
     )
+
 
 def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
@@ -114,6 +117,7 @@ def test_fetch_exits_when_lock_exists(tmp_path, monkeypatch, capsys) -> None:
 
     assert exit_code == 1
     assert "fetch lock exists" in capsys.readouterr().err
+
 
 def test_fetch_delta_dry_run_skips_lock_and_log(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
@@ -128,6 +132,7 @@ def test_fetch_delta_dry_run_skips_lock_and_log(tmp_path, monkeypatch, capsys) -
     assert lock_path.exists()
     assert not (tmp_path / "logs" / "fetch.log").exists()
     assert not (tmp_path / "raw").exists()
+
 
 def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsys) -> None:
     _patch_fetch_pipeline(monkeypatch, tmp_path)
@@ -156,6 +161,7 @@ def test_fetch_reports_post_fetch_pipeline_progress(tmp_path, monkeypatch, capsy
     assert (completed_runs[0] / ".completed.json").is_file()
     assert not list((tmp_path / "raw" / "active").glob("*"))
     assert not (tmp_path / "raw" / "failed").exists()
+
 
 def test_fetch_delta_progress_reports_missing_floor_reason(
     tmp_path,
@@ -201,6 +207,7 @@ def test_fetch_delta_progress_reports_missing_floor_reason(
     assert "delta_floor=none" in captured.err
     assert "reason=delta_state_missing" in captured.err
 
+
 def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     tmp_path,
     monkeypatch,
@@ -217,6 +224,7 @@ def test_fetch_json_suppresses_post_fetch_pipeline_progress(
     assert "Fetch run" not in captured.err
     assert "Pipeline" not in captured.err
     assert "changelog=running" not in captured.err
+
 
 def test_fetch_warning_propagates_to_json_manifest_delta_and_logs(
     tmp_path,
@@ -277,6 +285,7 @@ def test_fetch_warning_propagates_to_json_manifest_delta_and_logs(
     assert "ENDPOINT warn" in log_text
     assert "RUN warn" in log_text
 
+
 def test_fetch_does_not_advance_delta_success_on_pipeline_failure(
     tmp_path,
     monkeypatch,
@@ -299,6 +308,7 @@ def test_fetch_does_not_advance_delta_success_on_pipeline_failure(
     assert endpoint_state["last_attempted_error"] == "ingest failed: store is unavailable"
     assert "last_successful_fetch_start" not in endpoint_state
     assert "last_successful_fetch_end" not in endpoint_state
+
 
 def test_fetch_failure_reports_elapsed_and_log_path(tmp_path, monkeypatch, capsys) -> None:
     _patch_fetch_pipeline(monkeypatch, tmp_path)
@@ -324,6 +334,7 @@ def test_fetch_failure_reports_elapsed_and_log_path(tmp_path, monkeypatch, capsy
     assert not list((tmp_path / "raw" / "active").glob("*"))
     assert not (tmp_path / "raw" / "runs").exists()
 
+
 def test_fetch_quiet_suppresses_progress_but_reports_errors(
     tmp_path,
     monkeypatch,
@@ -346,6 +357,7 @@ def test_fetch_quiet_suppresses_progress_but_reports_errors(
     assert "Fetch run" not in captured.err
     assert "Pipeline" not in captured.err
     assert "Fetch result" not in captured.err
+
 
 def test_fetch_partial_result_reports_partial_status(
     tmp_path,
@@ -463,6 +475,7 @@ def test_fetch_partial_result_reports_partial_status(
     assert (failed_runs[0] / ".failed.json").is_file()
     assert not (tmp_path / "raw" / "runs").exists()
 
+
 def test_fetch_summary_shows_count_drift_warning(tmp_path, capsys) -> None:
     print_human_fetch_summary(
         mode="delta",
@@ -500,7 +513,7 @@ def test_fetch_summary_shows_count_drift_warning(tmp_path, capsys) -> None:
                 count_validation_reason="count drift",
                 id_validation_checked_items=1499,
                 id_validation_unique_ids=1499,
-            )
+            ),
         ],
         failures=[
             (
@@ -533,6 +546,7 @@ def test_fetch_summary_shows_count_drift_warning(tmp_path, capsys) -> None:
     assert "failed" in output
     assert "-1 under" in output
     assert "-0.100%" in output
+
 
 def test_fetch_summary_title_shows_warning_without_failures(tmp_path, capsys) -> None:
     print_human_fetch_summary(
@@ -571,6 +585,7 @@ def test_fetch_summary_title_shows_warning_without_failures(tmp_path, capsys) ->
     assert output.startswith("Fetch complete with warnings")
     assert "Endpoints: 0 ok, 1 warn, 0 failed, 1 total" in output
 
+
 def test_fetch_run_id_suffixes_existing_run_dirs(tmp_path) -> None:
     raw_root = tmp_path / "raw"
     existing = raw_root / "runs" / "2026-01-01T000000Z-delta"
@@ -585,6 +600,7 @@ def test_fetch_run_id_suffixes_existing_run_dirs(tmp_path) -> None:
 
     assert run_id == "2026-01-01T000000Z-delta-2"
 
+
 def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     lock_path = tmp_path / "fetch.lock"
 
@@ -595,6 +611,7 @@ def test_fetch_lock_helpers_create_and_release_lock(tmp_path) -> None:
     release_fetch_lock(lock_path)
 
     assert not lock_path.exists()
+
 
 def test_fetch_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path))
@@ -614,11 +631,13 @@ def test_fetch_interrupt_releases_lock(tmp_path, monkeypatch) -> None:
 
     assert not (tmp_path / "fetch.lock").exists()
 
+
 def test_parse_jsonl_preserves_non_json_lines() -> None:
     assert parse_jsonl('{"status":"ok"}\nnot-json\n') == [
         {"status": "ok"},
         {"record_type": "fetch_stdout", "line": "not-json"},
     ]
+
 
 def test_cron_log_helpers_write_jsonl_only(tmp_path) -> None:
     log_path = tmp_path / "cron.jsonl"
@@ -643,6 +662,7 @@ def test_cron_log_helpers_write_jsonl_only(tmp_path) -> None:
     assert rows[1]["endpoint"] == "styles"
     assert rows[2]["exit_code"] == 0
 
+
 def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
     def fail_fetch(_args):
         raise RuntimeError("boom")
@@ -661,6 +681,7 @@ def test_cron_fetch_logs_uncaught_fetch_errors(tmp_path, monkeypatch) -> None:
     assert rows[1]["record_type"] == "cron_fetch_summary"
     assert rows[1]["exit_code"] == 1
     assert not lock_path.exists()
+
 
 def test_cron_fetch_skips_when_fetch_lock_exists(tmp_path) -> None:
     args = build_parser().parse_args(["cron"])

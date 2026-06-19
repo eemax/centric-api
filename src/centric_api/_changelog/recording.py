@@ -86,9 +86,7 @@ def record_changelog(
         else:
             _emit_progress(progress, "Loading scoped changelog index...")
             previous_index = _load_current_index_for_keys(conn, keys=scoped_keys)
-            previous_index.update(
-                _previous_records_index(previous_records_by_endpoint or {})
-            )
+            previous_index.update(_previous_records_index(previous_records_by_endpoint or {}))
             _emit_progress(progress, "Loading scoped cache records...")
             current_index = _build_scoped_current_index(
                 conn,
@@ -475,9 +473,7 @@ def _load_current_index_for_keys(
                 """,
                 [endpoint, *record_id_chunk],
             ).fetchall()
-            index.update(
-                _index_from_rows(rows, hash_column="payload_hash", payload_column=None)
-            )
+            index.update(_index_from_rows(rows, hash_column="payload_hash", payload_column=None))
     return index
 
 
@@ -558,9 +554,7 @@ def _diff_indexes(
             continue
 
         delete_type = None
-        tombstone = (
-            tombstone_index.get((endpoint, record_id)) if change_type == "removed" else None
-        )
+        tombstone = tombstone_index.get((endpoint, record_id)) if change_type == "removed" else None
         if change_type == "removed":
             delete_type = delete_types_by_endpoint.get(endpoint, {}).get(
                 record_id,

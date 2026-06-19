@@ -51,10 +51,10 @@ def test_style_bom_load_dry_run_plans_header_sections_and_lines(
         "subtype": "BST1",
     }
     assert payload["request_samples"][1]["path"] == (
-        "/v2/apparel_bom_revisions/DRY-RUN-REVISION/"
-        "owned_sections/bom_section_definition"
+        "/v2/apparel_bom_revisions/DRY-RUN-REVISION/owned_sections/bom_section_definition"
     )
     assert payload["request_samples"][1]["body"] == {"node_name": "Fabrics"}
+
 
 def test_style_bom_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
@@ -112,6 +112,7 @@ def test_style_bom_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
             {"actual": "M2", "ds_section": "SEC-Trims", "pm_id": "G3", "qty_default": 2},
         ),
     ]
+
 
 def test_style_bom_load_matches_headers_when_columns_are_shuffled(
     tmp_path,
@@ -178,6 +179,7 @@ def test_style_bom_load_matches_headers_when_columns_are_shuffled(
         "qty_default": 0.05,
     }
 
+
 def test_style_bom_load_omits_blank_pm_id(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -237,6 +239,7 @@ def test_style_bom_load_omits_blank_pm_id(tmp_path, monkeypatch, capsys) -> None
         "qty_default": 0.05,
     }
 
+
 def test_style_bom_load_allows_missing_pm_id_header(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -288,6 +291,7 @@ def test_style_bom_load_allows_missing_pm_id_header(tmp_path, monkeypatch, capsy
     payload = json.loads(capsys.readouterr().out)
     assert payload["valid_rows"] == 1
     assert payload["issues"] == []
+
 
 def test_style_bom_load_omits_blank_quantity(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
@@ -346,6 +350,7 @@ def test_style_bom_load_omits_blank_quantity(tmp_path, monkeypatch, capsys) -> N
         "ds_section": "DRY-RUN-SECTION-Fabrics",
         "pm_id": "G2",
     }
+
 
 def test_style_bom_load_normalizes_comma_decimal_quantity(
     tmp_path,
@@ -410,6 +415,7 @@ def test_style_bom_load_normalizes_comma_decimal_quantity(
         "qty_default": 0.05,
     }
 
+
 def test_style_bom_load_allows_missing_quantity_header(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -462,6 +468,7 @@ def test_style_bom_load_allows_missing_quantity_header(tmp_path, monkeypatch, ca
     assert payload["valid_rows"] == 1
     assert payload["issues"] == []
 
+
 def test_style_bom_load_marks_line_failures_as_row_issues(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -495,6 +502,7 @@ def test_style_bom_load_marks_line_failures_as_row_issues(tmp_path, monkeypatch)
     ]
     assert [issue.row for issue in result.issues] == [2, 3]
 
+
 def test_style_bom_load_rejects_ad_hoc_sections(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -521,6 +529,7 @@ def test_style_bom_load_rejects_ad_hoc_sections(tmp_path, monkeypatch, capsys) -
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["issues"][0]["code"] == "bom_section_not_found"
+
 
 def test_style_bom_load_rejects_inactive_sections(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"

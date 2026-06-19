@@ -47,9 +47,8 @@ def test_style_supplier_quote_load_dry_run_plans_chain(tmp_path, monkeypatch, ca
     assert payload["request_samples"][1]["path"] == (
         "/v2/product_sources/DRY-RUN-PRODUCT-SOURCE/supplier_items"
     )
-    assert payload["request_samples"][2]["path"] == (
-        "/v2/supplier_item_revisions/DRY-RUN-REVISION"
-    )
+    assert payload["request_samples"][2]["path"] == ("/v2/supplier_item_revisions/DRY-RUN-REVISION")
+
 
 def test_material_supplier_quote_load_dry_run_plans_chain(
     tmp_path,
@@ -87,9 +86,8 @@ def test_material_supplier_quote_load_dry_run_plans_chain(
     assert payload["request_samples"][1]["path"] == (
         "/v2/product_sources/DRY-RUN-PRODUCT-SOURCE/supplier_items"
     )
-    assert payload["request_samples"][2]["path"] == (
-        "/v2/supplier_item_revisions/DRY-RUN-REVISION"
-    )
+    assert payload["request_samples"][2]["path"] == ("/v2/supplier_item_revisions/DRY-RUN-REVISION")
+
 
 def test_material_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
@@ -141,6 +139,7 @@ def test_material_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatc
         ),
     ]
 
+
 def test_style_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatch) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -191,6 +190,7 @@ def test_style_supplier_quote_load_runs_chained_requests(tmp_path, monkeypatch) 
         ),
     ]
 
+
 def test_style_supplier_quote_load_marks_product_source_failure(
     tmp_path,
     monkeypatch,
@@ -224,6 +224,7 @@ def test_style_supplier_quote_load_marks_product_source_failure(
     assert [issue.code for issue in result.issues] == ["product_source_create_failed"]
     assert [issue.row for issue in result.issues] == [2]
 
+
 def test_style_supplier_quote_load_rejects_unlinked_agent(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -250,6 +251,7 @@ def test_style_supplier_quote_load_rejects_unlinked_agent(tmp_path, monkeypatch,
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["issues"][0]["code"] == "agent_not_linked_to_supplier"
+
 
 def test_style_supplier_quote_load_omits_blank_agent(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
@@ -279,6 +281,7 @@ def test_style_supplier_quote_load_omits_blank_agent(tmp_path, monkeypatch, caps
     payload = json.loads(capsys.readouterr().out)
     assert payload["request_samples"][0]["path"] == "/v2/styles/S1/product_sources"
     assert payload["request_samples"][0]["body"] == {"supplier": "SUP1"}
+
 
 def test_style_supplier_quote_load_allows_missing_agent_header(
     tmp_path,
@@ -334,6 +337,7 @@ def test_style_supplier_quote_load_allows_missing_agent_header(
     assert payload["valid_rows"] == 1
     assert payload["issues"] == []
 
+
 def test_style_supplier_quote_load_rejects_unlinked_factory(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -360,6 +364,7 @@ def test_style_supplier_quote_load_rejects_unlinked_factory(tmp_path, monkeypatc
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["issues"][0]["code"] == "factory_not_linked_to_supplier"
+
 
 def test_style_supplier_quote_load_allows_blank_factory_without_factory_cache(
     tmp_path,

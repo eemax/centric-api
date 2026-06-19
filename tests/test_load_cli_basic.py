@@ -54,6 +54,7 @@ def test_load_cli_dry_run_writes_request_artifacts(tmp_path, monkeypatch, capsys
     assert request_record["method"] == "POST"
     assert request_record["path"] == "/v2/materials"
 
+
 def test_load_cli_json_request_samples_are_capped_at_three(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -98,6 +99,7 @@ def test_load_cli_json_request_samples_are_capped_at_three(tmp_path, monkeypatch
     assert payload["requests"] == 4
     assert len(payload["request_samples"]) == 3
 
+
 def test_explicit_load_config_source_is_shown(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()
@@ -124,6 +126,7 @@ jobs:
     show_output = capsys.readouterr().out
     assert "Source:     explicit" in show_output
     assert f"Config:     {explicit_config}" in show_output
+
 
 def test_load_show_includes_value_sets(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
@@ -156,6 +159,7 @@ jobs:
     show_output = capsys.readouterr().out
 
     assert "values materials.fabric_type" in show_output
+
 
 def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
@@ -195,6 +199,7 @@ def test_load_cli_reports_human_progress(tmp_path, monkeypatch, capsys) -> None:
     assert "[load] planning: job=material-create mode=dry-run" in captured.err
     assert "[load] artifacts:" in captured.err
     assert "Load dry run: material-create" in captured.out
+
 
 def test_load_cli_json_suppresses_human_progress(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"

@@ -102,9 +102,7 @@ def test_prune_changelog_removes_old_history_but_keeps_seed_runs(tmp_path: Path)
     assert counts["actor_summary"] == 1
     assert counts["runs"] == 1
     with sqlite3.connect(db_path) as conn:
-        runs = conn.execute(
-            "SELECT run_id FROM endpoint_changelog_runs ORDER BY run_id"
-        ).fetchall()
+        runs = conn.execute("SELECT run_id FROM endpoint_changelog_runs ORDER BY run_id").fetchall()
         event_count = conn.execute("SELECT COUNT(*) FROM endpoint_change_events").fetchone()[0]
     assert [row[0] for row in runs] == ["seed"]
     assert event_count == 0

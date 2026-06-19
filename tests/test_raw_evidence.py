@@ -91,8 +91,7 @@ def test_raw_check_inspect_and_diff_use_record_indexes(
     assert diff_payload["from"]["run_id"] == "run-1"
     assert diff_payload["to"]["run_id"] == "run-2"
     assert {
-        (change["path"], change["from"], change["to"])
-        for change in diff_payload["changes"]
+        (change["path"], change["from"], change["to"]) for change in diff_payload["changes"]
     } >= {
         ("node_name", "Old", "New"),
         ("_modified_at", "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"),
@@ -219,10 +218,13 @@ def test_raw_check_detects_index_payload_mismatch(
         [{"id": "S1", "node_name": "Old", "_modified_at": "2026-01-01T00:00:00Z"}],
     )
     raw_path = run_dir / "styles.delta.jsonl"
-    next_raw = json.dumps(
-        {"id": "S1", "node_name": "New", "_modified_at": "2026-01-01T00:00:00Z"},
-        sort_keys=True,
-    ) + "\n"
+    next_raw = (
+        json.dumps(
+            {"id": "S1", "node_name": "New", "_modified_at": "2026-01-01T00:00:00Z"},
+            sort_keys=True,
+        )
+        + "\n"
+    )
     raw_path.write_text(next_raw, encoding="utf-8")
     manifest_path = run_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

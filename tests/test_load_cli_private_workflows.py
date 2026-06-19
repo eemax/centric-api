@@ -71,6 +71,7 @@ jobs:
     assert payload["requests"] == 1
     assert payload["request_samples"][0]["path"] == "/v2/materials"
 
+
 def test_private_load_job_overrides_bundled_job(tmp_path, monkeypatch, capsys) -> None:
     home = tmp_path / "home"
     home.mkdir()

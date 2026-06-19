@@ -195,9 +195,7 @@ def _group_latest_points(
             grouped[key] = {
                 **point,
                 "bucket": (
-                    str(point["run_id"])
-                    if group == "run"
-                    else _bucket_label(bucket_start, group)
+                    str(point["run_id"]) if group == "run" else _bucket_label(bucket_start, group)
                 ),
                 "bucket_start": _isoformat(bucket_start),
             }
@@ -290,9 +288,7 @@ def _html_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if isinstance(point, dict)
     ]
     return {
-        key: value
-        for key, value in payload.items()
-        if key != "raw_points" and key != "points"
+        key: value for key, value in payload.items() if key != "raw_points" and key != "points"
     } | {"points": points}
 
 

@@ -68,6 +68,7 @@ def add_fetch_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
         help="Fetch log verbosity.",
     )
 
+
 def add_ingest_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     ingest_parser = subparsers.add_parser("ingest", help="Inspect or ingest raw evidence")
     ingest_actions = ingest_parser.add_subparsers(dest="action", required=True)
@@ -102,6 +103,7 @@ def add_ingest_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
         help="Run the normal scoped changelog after ingest.",
     )
     ingest_raw_run_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
 
 def add_raw_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     raw_parser = subparsers.add_parser("raw", help="Inspect and compact raw evidence")
@@ -198,6 +200,7 @@ def add_raw_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParse
     )
     raw_compact_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+
 def add_changelog_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     changelog_parser = subparsers.add_parser("changelog", help="Inspect or update changelog")
     changelog_parser.add_argument(
@@ -251,6 +254,7 @@ def add_changelog_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     )
     changelog_parser.add_argument("--json", action="store_true", help="Emit JSON output.")
 
+
 def add_download_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     download_parser = subparsers.add_parser("download", help="Download latest document revisions")
     download_parser.add_argument(
@@ -282,6 +286,7 @@ def add_download_parser(subparsers: argparse._SubParsersAction[argparse.Argument
         default="summary",
         help="Download log verbosity.",
     )
+
 
 def add_bundle_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     bundle_parser = subparsers.add_parser("bundle", help="Package downloaded files into a bundle")
@@ -337,4 +342,3 @@ def add_bundle_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPa
     bundle_changelog_parser.add_argument(
         "--json", action="store_true", help="Emit one JSON object."
     )
-
