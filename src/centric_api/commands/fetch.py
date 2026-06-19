@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import calendar
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
 from ..auth import AuthError, init_auth_context
-from ..changelog import ChangelogRun
-from ..config import ConfigError, load_fetcher_settings, resolve_private_config_path, runtime_path
+from ..config import load_fetcher_settings, resolve_private_config_path, runtime_path
 from ..defaults import (
     DEFAULT_DELTA_STATE_PATH,
     DEFAULT_FETCH_LOG_PATH,
@@ -20,8 +17,6 @@ from ..defaults import (
     DEFAULT_OVERLAP_DAYS,
     DEFAULT_OVERLAP_MINUTES,
 )
-from ..defaults import db_path as resolve_db_path
-from ..delta import apply_data_sort, strip_modified_at_filters
 from ..fetch_delta_state import (
     derive_delta_floor,
     load_delta_state,
@@ -36,17 +31,14 @@ from ..fetch_manifest import (
     write_run_manifest,
 )
 from ..fetcher import FetchError, run_endpoint
-from ..models import EndpointSpec, FetchProgressEvent, FetchRunResult
+from ..models import FetchProgressEvent, FetchRunResult
 from ..raw_lifecycle import (
     active_run_dir,
     completed_run_dir,
     failed_run_dir,
     promote_run_dir,
-    write_completed_marker,
-    write_failed_marker,
     write_running_marker,
 )
-from ..record_constants import MODIFIED_AT_FIELD
 from ..rendering.fetch import (
     print_delta_dry_run,
     print_human_fetch_run_header,
@@ -56,19 +48,31 @@ from ..rendering.fetch import (
 )
 from ..rendering.logs import LogCallback, build_log_callback, format_duration
 from ..schema import load_endpoint_schemas
-from ..store import IngestResult, ingest_raw_dir
+from ..store import ingest_raw_dir
+from ._fetch_pipeline import DeltaStateUpdate, PipelineProgressCallback, run_post_fetch_pipeline
+from ._fetch_runtime import (
+    allocate_run_id as _allocate_run_id,
+)
+from ._fetch_runtime import (
+    delta_floor_reason as _delta_floor_reason,
+)
+from ._fetch_runtime import (
+    endpoint_window_context as _endpoint_window_context,
+)
+from ._fetch_runtime import (
+    prepare_runtime_spec as _prepare_runtime_spec,
+)
+from ._fetch_runtime import (
+    remap_result_output_files as _remap_result_output_files,
+)
+from ._fetch_runtime import (
+    resolve_fetch_mode as _resolve_fetch_mode,
+)
+from ._fetch_runtime import (
+    select_endpoints as _select_endpoints,
+)
 from .common import release_fetch_lock, try_acquire_fetch_lock, utc_iso, utc_now
 from .pipeline import run_changelog_after_ingest
-
-PipelineProgressCallback = Callable[[str], None]
-
-
-@dataclass(frozen=True)
-class _DeltaStateUpdate:
-    endpoint_name: str
-    status: str
-    attempt_start: str
-    attempt_end: str
 
 
 def run_fetch(args: argparse.Namespace) -> int:
@@ -165,7 +169,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     results: list[FetchRunResult] = []
     failures: list[tuple[str, str]] = []
     endpoint_records: list[dict[str, Any]] = []
-    pending_successful_delta_updates: list[_DeltaStateUpdate] = []
+    pending_successful_delta_updates: list[DeltaStateUpdate] = []
     pipeline_progress = None if args.quiet or args.json else _write_pipeline_progress
     fetch_progress = None if args.quiet else _fetch_progress_writer()
     if not args.quiet and not args.json:
@@ -276,7 +280,7 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
                     )
                     if mode in {"delta", "full"}:
                         pending_successful_delta_updates.append(
-                            _DeltaStateUpdate(
+                            DeltaStateUpdate(
                                 endpoint_name=spec.name,
                                 status=status,
                                 attempt_start=attempt_start,
@@ -366,229 +370,35 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
         )
     _remap_result_output_files(results, fetcher_cfg.output_dir)
 
-    pipeline_started = time.time()
-    _emit_pipeline_progress(pipeline_progress, "")
-    _emit_pipeline_progress(pipeline_progress, "Pipeline")
-    _emit_pipeline_progress(pipeline_progress, "manifest=writing")
-    manifest_path = fetcher_cfg.output_dir / "manifest.json"
-    ingest_result: IngestResult | None = None
-    changelog_run: ChangelogRun | None = None
-    changelog_skipped: str | None = None
-    pipeline_error: str | None = None
-    ingest_status = "skipped"
-    changelog_status = "skipped"
-    try:
-        manifest_path = write_run_manifest(
-            output_dir=fetcher_cfg.output_dir,
-            run_id=run_id,
-            mode=mode,
-            run_started_at=run_started_dt,
-            run_finished_at=utc_now(),
-            selected_specs=selected_specs,
-            results=results,
-            failures=failures,
-            endpoint_records=endpoint_records,
-            modified_since=modified_since,
-            utc_iso=utc_iso,
-        )
-    except Exception as exc:
-        pipeline_error = f"manifest failed: {exc}"
-        _emit_pipeline_progress(pipeline_progress, f"manifest=failed error={exc}")
-        if not raw_run_failed:
-            fetcher_cfg.output_dir = promote_run_dir(
-                fetcher_cfg.output_dir,
-                failed_run_dir(raw_root_dir, run_id),
-            )
-            _remap_result_output_files(results, fetcher_cfg.output_dir)
-            raw_run_failed = True
-        write_failed_marker(
-            fetcher_cfg.output_dir,
-            run_id=run_id,
-            mode=mode,
-            started_at=utc_iso(run_started_dt),
-            failed_at=utc_iso(),
-            manifest_path=None,
-            reason=pipeline_error,
-            failures=[{"endpoint": endpoint, "error": message} for endpoint, message in failures],
-        )
-        if log_callback:
-            log_callback(
-                {
-                    "level": "summary",
-                    "event": "manifest_failed",
-                    "error": str(exc),
-                }
-            )
-    else:
-        _emit_pipeline_progress(pipeline_progress, f"manifest=ok path={manifest_path}")
-        if raw_run_failed:
-            write_failed_marker(
-                fetcher_cfg.output_dir,
-                run_id=run_id,
-                mode=mode,
-                started_at=utc_iso(run_started_dt),
-                failed_at=utc_iso(),
-                manifest_path=manifest_path,
-                reason="endpoint fetch failures",
-                failures=[
-                    {"endpoint": endpoint, "error": message} for endpoint, message in failures
-                ],
-            )
-        else:
-            write_completed_marker(
-                fetcher_cfg.output_dir,
-                run_id=run_id,
-                mode=mode,
-                started_at=utc_iso(run_started_dt),
-                completed_at=utc_iso(),
-                manifest_path=manifest_path,
-            )
-
-    if results and not raw_run_failed and pipeline_error is None:
-        db_path = resolve_db_path(args.db)
-        _emit_pipeline_progress(pipeline_progress, "ingest=running")
-        try:
-            schemas = load_endpoint_schemas(Path(args.schema).expanduser() if args.schema else None)
-            ingest_result = ingest_raw_dir(fetcher_cfg.output_dir, db_path, schemas=schemas)
-        except Exception as exc:
-            ingest_status = "failed"
-            pipeline_error = f"ingest failed: {exc}"
-            _emit_pipeline_progress(pipeline_progress, f"ingest=failed error={exc}")
-            if log_callback:
-                log_callback(
-                    {
-                        "level": "summary",
-                        "event": "ingest_failed",
-                        "error": str(exc),
-                    }
-                )
-        else:
-            ingest_status = "ok"
-            _emit_pipeline_progress(
-                pipeline_progress,
-                (
-                    f"ingest=ok records_read={_fmt_cli_int(ingest_result.records_read)} "
-                    f"upserts={_fmt_cli_int(ingest_result.records_upserted)} "
-                    f"deletes={_fmt_cli_int(ingest_result.records_deleted)}"
-                ),
-            )
-            if log_callback:
-                log_callback(
-                    {
-                        "level": "summary",
-                        "event": "ingest_ok",
-                        "applied_files": ingest_result.applied_files,
-                        "skipped_files": ingest_result.skipped_files,
-                        "records_read": ingest_result.records_read,
-                        "upserts": ingest_result.records_upserted,
-                        "deletes": ingest_result.records_deleted,
-                        "hard_deletes": ingest_result.records_hard_deleted,
-                        "invalid": ingest_result.invalid_records,
-                    }
-                )
-        if ingest_result is not None:
-            _emit_pipeline_progress(pipeline_progress, "changelog=running")
-            changelog_started = time.time()
-            try:
-                changelog_run, changelog_skipped = run_changelog_after_ingest(
-                    db_path,
-                    ingest_result,
-                    progress=_indented_pipeline_progress(pipeline_progress),
-                )
-            except Exception as exc:
-                changelog_status = "failed"
-                pipeline_error = f"changelog failed after ingest: {exc}"
-                _emit_pipeline_progress(
-                    pipeline_progress,
-                    (
-                        "changelog=failed "
-                        f"elapsed={format_duration(time.time() - changelog_started)} "
-                        f"error={exc}"
-                    ),
-                )
-                if log_callback:
-                    log_callback(
-                        {
-                            "level": "summary",
-                            "event": "changelog_failed",
-                            "error": str(exc),
-                        }
-                    )
-            else:
-                if changelog_skipped:
-                    changelog_status = "skipped"
-                    _emit_pipeline_progress(
-                        pipeline_progress,
-                        (
-                            f"changelog=skipped "
-                            f"elapsed={format_duration(time.time() - changelog_started)} "
-                            f"reason={changelog_skipped}"
-                        ),
-                    )
-                elif changelog_run is not None:
-                    changelog_status = "ok"
-                    _emit_pipeline_progress(
-                        pipeline_progress,
-                        (
-                            f"changelog=ok events={_fmt_cli_int(changelog_run.event_count)} "
-                            f"scoped={_fmt_cli_int(changelog_run.scoped_record_count)} "
-                            f"elapsed={format_duration(time.time() - changelog_started)}"
-                        ),
-                    )
-                if log_callback:
-                    if changelog_run is not None:
-                        log_callback(
-                            {
-                                "level": "summary",
-                                "event": "changelog_ok",
-                                "events": changelog_run.event_count,
-                                "scoped": changelog_run.scoped_record_count,
-                                "run_id": changelog_run.run_id,
-                            }
-                        )
-                    elif changelog_skipped:
-                        log_callback(
-                            {
-                                "level": "summary",
-                                "event": "changelog_skipped",
-                                "reason": changelog_skipped,
-                            }
-                        )
-    else:
-        skipped_reason = "no successful endpoint fetches"
-        if raw_run_failed:
-            skipped_reason = "endpoint fetch failures"
-        if pipeline_error is not None:
-            skipped_reason = pipeline_error
-        _emit_pipeline_progress(
-            pipeline_progress,
-            f"ingest=skipped reason={skipped_reason}",
-        )
-        if log_callback:
-            log_callback(
-                {
-                    "level": "summary",
-                    "event": "ingest_skipped",
-                    "reason": skipped_reason,
-                }
-            )
-
-    if mode in {"delta", "full"}:
-        _apply_successful_delta_updates(
-            delta_state,
-            delta_state_file=delta_state_file,
-            updates=pending_successful_delta_updates,
-            pipeline_error="endpoint fetch failures" if raw_run_failed else pipeline_error,
-        )
-
-    _emit_pipeline_progress(
-        pipeline_progress,
-        (
-            f"pipeline=done ingest={ingest_status} changelog={changelog_status} "
-            f"elapsed={format_duration(time.time() - pipeline_started)}"
-        ),
+    pipeline_result = run_post_fetch_pipeline(
+        db_arg=args.db,
+        schema_arg=args.schema,
+        fetcher_cfg=fetcher_cfg,
+        raw_root_dir=raw_root_dir,
+        run_id=run_id,
+        mode=mode,
+        run_started_dt=run_started_dt,
+        selected_specs=selected_specs,
+        results=results,
+        failures=failures,
+        endpoint_records=endpoint_records,
+        modified_since=modified_since,
+        pipeline_progress=pipeline_progress,
+        log_callback=log_callback,
+        delta_state=delta_state,
+        delta_state_file=delta_state_file,
+        pending_successful_delta_updates=pending_successful_delta_updates,
+        raw_run_failed=raw_run_failed,
+        write_run_manifest_func=write_run_manifest,
+        load_endpoint_schemas_func=load_endpoint_schemas,
+        ingest_raw_dir_func=ingest_raw_dir,
+        run_changelog_after_ingest_func=run_changelog_after_ingest,
     )
-
+    manifest_path = pipeline_result.manifest_path
+    ingest_result = pipeline_result.ingest_result
+    changelog_run = pipeline_result.changelog_run
+    changelog_skipped = pipeline_result.changelog_skipped
+    pipeline_error = pipeline_result.pipeline_error
     duration_seconds = time.time() - started
     endpoints_warn = sum(1 for result in results if fetch_result_has_warning(result))
     endpoints_ok = len(results) - endpoints_warn
@@ -660,155 +470,6 @@ def _run_fetch_unlocked(args: argparse.Namespace) -> int:
     return 1 if failures or pipeline_error else 0
 
 
-def _resolve_fetch_mode(args: argparse.Namespace, now: datetime) -> tuple[str, str | None]:
-    if args.full and (args.days is not None or args.months is not None):
-        raise ConfigError("Use --full, --days, or --months separately.")
-    if args.days is not None and args.months is not None:
-        raise ConfigError("Use either --days or --months, not both.")
-    if args.delta_dry_run:
-        return "delta", None
-    if args.full:
-        return "full", None
-    if args.days is not None:
-        return "days", utc_iso(now - timedelta(days=args.days))
-    if args.months is not None:
-        return "months", utc_iso(_subtract_calendar_months(now, args.months))
-    return "delta", None
-
-
-def _prepare_runtime_spec(
-    spec: EndpointSpec,
-    *,
-    mode: str,
-    delta_floor: str | None,
-    modified_since: str | None,
-) -> EndpointSpec:
-    runtime_spec = apply_data_sort(spec, sort_value=MODIFIED_AT_FIELD, policy="force")
-    if mode == "delta" and delta_floor is not None:
-        return _apply_modified_since_filter(runtime_spec, delta_floor)
-    if mode in {"days", "months"} and modified_since is not None:
-        return _apply_modified_since_filter(runtime_spec, modified_since)
-    return runtime_spec
-
-
-def _apply_modified_since_filter(spec: EndpointSpec, modified_since: str) -> EndpointSpec:
-    query_params = strip_modified_at_filters(spec.query_params)
-    query_params[f"{MODIFIED_AT_FIELD}=ge"] = modified_since
-    count_query_params = strip_modified_at_filters(spec.count_spec.query_params)
-    count_query_params[f"{MODIFIED_AT_FIELD}=ge"] = modified_since
-    next_count_spec = replace(spec.count_spec, query_params=count_query_params)
-    return replace(spec, query_params=query_params, count_spec=next_count_spec)
-
-
-def _select_endpoints(all_specs: list[EndpointSpec], names: list[str]) -> list[EndpointSpec]:
-    if not names:
-        return all_specs
-    wanted = set(names)
-    selected = [spec for spec in all_specs if spec.name in wanted]
-    missing = sorted(wanted - {spec.name for spec in selected})
-    if missing:
-        raise ConfigError(f"Unknown endpoint names: {', '.join(missing)}")
-    return selected
-
-
-def _subtract_calendar_months(value: datetime, months: int) -> datetime:
-    total_month_index = (value.year * 12 + (value.month - 1)) - months
-    year = total_month_index // 12
-    month = (total_month_index % 12) + 1
-    day = min(value.day, calendar.monthrange(year, month)[1])
-    return value.replace(year=year, month=month, day=day)
-
-
-def _run_id(value: datetime, mode: str, amount: int | None) -> str:
-    base = value.astimezone(UTC).strftime("%Y-%m-%dT%H%M%SZ")
-    if mode in {"days", "months"} and amount is not None:
-        return f"{base}-{mode}{amount}"
-    return f"{base}-{mode}"
-
-
-def _allocate_run_id(
-    raw_root_dir: Path,
-    value: datetime,
-    mode: str,
-    amount: int | None,
-) -> str:
-    base = _run_id(value, mode, amount)
-    runs_dir = raw_root_dir / "runs"
-    for index in range(100):
-        suffix = "" if index == 0 else f"-{index + 1}"
-        run_id = f"{base}{suffix}"
-        if (
-            active_run_dir(raw_root_dir, run_id).exists()
-            or (runs_dir / run_id).exists()
-            or failed_run_dir(raw_root_dir, run_id).exists()
-        ):
-            continue
-        return run_id
-    raise RuntimeError("Could not allocate fetch run id.")
-
-
-def _remap_result_output_files(results: list[FetchRunResult], run_dir: Path) -> None:
-    for result in results:
-        if result.output_file_created:
-            result.output_file = run_dir / result.output_file.name
-
-
-def _apply_successful_delta_updates(
-    delta_state: dict[str, Any],
-    *,
-    delta_state_file: Path,
-    updates: list[_DeltaStateUpdate],
-    pipeline_error: str | None,
-) -> None:
-    if not updates:
-        return
-    for update in updates:
-        status = update.status if pipeline_error is None else "PIPELINE_FAILED"
-        update_delta_state_for_endpoint(
-            delta_state,
-            endpoint_name=update.endpoint_name,
-            status=status,
-            attempt_start=update.attempt_start,
-            attempt_end=update.attempt_end,
-            error=pipeline_error,
-        )
-    write_delta_state(delta_state_file, delta_state)
-
-
-def _delta_floor_reason(
-    delta_state: dict[str, Any],
-    endpoint_name: str,
-    delta_state_exists: bool,
-) -> str:
-    if not delta_state_exists:
-        return "delta_state_missing"
-    endpoints = delta_state.get("endpoints")
-    if not isinstance(endpoints, dict) or endpoint_name not in endpoints:
-        return "endpoint_not_tracked"
-    endpoint_state = endpoints.get(endpoint_name)
-    if not isinstance(endpoint_state, dict):
-        return "endpoint_state_invalid"
-    if not endpoint_state.get("last_successful_fetch_start"):
-        return "no_successful_fetch_start"
-    return "invalid_successful_fetch_start"
-
-
-def _endpoint_window_context(
-    *,
-    mode: str,
-    delta_floor: str | None,
-    delta_floor_reason: str | None,
-    modified_since: str | None,
-) -> str | None:
-    if mode == "delta":
-        if delta_floor is not None:
-            return f"delta_floor={delta_floor}"
-        return f"delta_floor=none reason={delta_floor_reason or 'unknown'}"
-    if modified_since is not None:
-        return f"modified_since={modified_since}"
-    return None
-
-
 def _write_pipeline_progress(message: str) -> None:
     print(message, file=sys.stderr)
 
@@ -825,14 +486,6 @@ def _fetch_progress_writer() -> Callable[[FetchProgressEvent], None]:
         write_progress_line(event)
 
     return emit
-
-
-def _emit_pipeline_progress(
-    progress: PipelineProgressCallback | None,
-    message: str,
-) -> None:
-    if progress is not None:
-        progress(message)
 
 
 def _emit_run_result_progress(
@@ -859,18 +512,6 @@ def _emit_run_result_progress(
         f"records={_fmt_cli_int(records)} pages={_fmt_cli_int(pages)} "
         f"retries={_fmt_cli_int(retries)} elapsed={format_duration(elapsed_seconds)}"
     )
-
-
-def _indented_pipeline_progress(
-    progress: PipelineProgressCallback | None,
-) -> PipelineProgressCallback | None:
-    if progress is None:
-        return None
-
-    def emit(message: str) -> None:
-        progress(f"  {message}")
-
-    return emit
 
 
 def _fmt_cli_int(value: int) -> str:
