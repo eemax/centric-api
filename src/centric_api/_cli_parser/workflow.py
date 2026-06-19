@@ -343,6 +343,26 @@ def add_snapshot_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     )
     snapshot_build_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
 
+    snapshot_diff_parser = snapshot_actions.add_parser(
+        "diff",
+        help="Compare candidate snapshot artifacts against baseline",
+    )
+    snapshot_diff_parser.add_argument("name", metavar="NAME", help="Snapshot name.")
+    _add_snapshot_dir_override(snapshot_diff_parser)
+    snapshot_diff_parser.add_argument(
+        "--output-dir",
+        metavar="PATH",
+        default=None,
+        help="Snapshot workspace root directory.",
+    )
+    snapshot_diff_parser.add_argument(
+        "--review-file",
+        metavar="PATH",
+        default=None,
+        help="Write JSON review actions for selective promotion.",
+    )
+    snapshot_diff_parser.add_argument("--json", action="store_true", help="Emit one JSON object.")
+
     snapshot_promote_parser = snapshot_actions.add_parser(
         "promote",
         help="Promote candidate snapshot artifacts to baseline",
@@ -359,6 +379,17 @@ def add_snapshot_parser(subparsers: argparse._SubParsersAction[argparse.Argument
         "--clean",
         action="store_true",
         help="Replace non-hidden contents in the baseline target.",
+    )
+    snapshot_promote_parser.add_argument(
+        "--review-file",
+        metavar="PATH",
+        default=None,
+        help="Apply approved JSON review actions instead of promoting the whole candidate.",
+    )
+    snapshot_promote_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm full candidate-to-baseline promotion when no review file is used.",
     )
     snapshot_promote_parser.add_argument(
         "--json", action="store_true", help="Emit one JSON object."

@@ -46,6 +46,38 @@ class SnapshotBuildSummary:
     metrics: dict[str, Any]
 
 
+@dataclass(frozen=True, order=True)
+class SnapshotRecordIdentity:
+    group: tuple[str, ...]
+    stream: str
+    key: str
+
+
+@dataclass(frozen=True)
+class SnapshotChange:
+    change_type: str
+    identity: SnapshotRecordIdentity
+    path: str | None = None
+    old: Any = None
+    new: Any = None
+    changed_paths: tuple[str, ...] = ()
+    promotion_unit: str = "field"
+    approval: str = "actionable"
+    approval_owner: str | None = None
+    reason: str | None = None
+    impacts: tuple[SnapshotRecordIdentity, ...] = ()
+
+
+@dataclass(frozen=True)
+class SnapshotDiffSummary:
+    snapshot_name: str
+    title: str
+    baseline_dir: Path
+    candidate_dir: Path
+    changes: tuple[SnapshotChange, ...]
+    metrics: dict[str, Any]
+
+
 class SnapshotProtocol(Protocol):
     definition: SnapshotDefinition
 

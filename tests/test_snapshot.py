@@ -349,6 +349,7 @@ def test_snapshot_promote_copies_candidate_to_baseline(tmp_path: Path, capsys) -
                 str(snapshots_dir),
                 "--output-dir",
                 str(output_root),
+                "--yes",
                 "--json",
             ]
         )
@@ -370,6 +371,126 @@ def test_snapshot_promote_copies_candidate_to_baseline(tmp_path: Path, capsys) -
     )
 
 
+def test_snapshot_promote_full_requires_yes(tmp_path: Path, capsys) -> None:
+    snapshots_dir = tmp_path / "snapshots-private"
+    snapshots_dir.mkdir()
+    _write_demo_snapshot(snapshots_dir / "dpp.py")
+
+    assert (
+        main(
+            [
+                "snapshot",
+                "promote",
+                "dpp",
+                "--snapshots-dir",
+                str(snapshots_dir),
+                "--output-dir",
+                str(tmp_path / "snapshot-output"),
+            ]
+        )
+        == 1
+    )
+
+    assert "Full snapshot promotion requires --yes" in capsys.readouterr().err
+
+
+def test_snapshot_promote_review_file_does_not_require_yes(tmp_path: Path, capsys) -> None:
+    snapshots_dir = tmp_path / "snapshots-private"
+    snapshots_dir.mkdir()
+    _write_demo_snapshot(snapshots_dir / "dpp.py")
+    db_path = tmp_path / "centric.db"
+    _insert_style(
+        db_path,
+        "S1",
+        {
+            "id": "S1",
+            "node_name": "Style 1",
+            "concept": "Concept A",
+            "season": "SS27",
+            "brand": "Brand A",
+        },
+    )
+    output_root = tmp_path / "snapshot-output"
+    common_args = [
+        "snapshot",
+        "build",
+        "dpp",
+        "--snapshots-dir",
+        str(snapshots_dir),
+        "--db",
+        str(db_path),
+        "--output-dir",
+        str(output_root),
+    ]
+
+    assert main([*common_args, "--target", "baseline"]) == 0
+    capsys.readouterr()
+    _insert_style(
+        db_path,
+        "S1",
+        {
+            "id": "S1",
+            "node_name": "Style 1 Updated",
+            "concept": "Concept A",
+            "season": "SS27",
+            "brand": "Brand A",
+        },
+    )
+    assert main(common_args) == 0
+    capsys.readouterr()
+
+    review_file = tmp_path / "review.json"
+    assert (
+        main(
+            [
+                "snapshot",
+                "diff",
+                "dpp",
+                "--snapshots-dir",
+                str(snapshots_dir),
+                "--output-dir",
+                str(output_root),
+                "--review-file",
+                str(review_file),
+            ]
+        )
+        == 0
+    )
+    review = json.loads(review_file.read_text(encoding="utf-8"))
+    for action in review["actions"]:
+        if action["stream"] == "style-boms" and action["path"] == "/node_name":
+            action["action"] = "promote"
+    review_file.write_text(json.dumps(review), encoding="utf-8")
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "snapshot",
+                "promote",
+                "dpp",
+                "--snapshots-dir",
+                str(snapshots_dir),
+                "--output-dir",
+                str(output_root),
+                "--review-file",
+                str(review_file),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    baseline_record = json.loads(
+        (
+            output_root / "dpp" / "baseline" / "Concept A" / "SS27" / "Brand A" / "style-boms.jsonl"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["metrics"]["promoted"] == 1
+    assert baseline_record["node_name"] == "Style 1 Updated"
+
+
 def test_snapshot_promote_requires_candidate_manifest(tmp_path: Path, capsys) -> None:
     snapshots_dir = tmp_path / "snapshots-private"
     snapshots_dir.mkdir()
@@ -385,6 +506,7 @@ def test_snapshot_promote_requires_candidate_manifest(tmp_path: Path, capsys) ->
                 str(snapshots_dir),
                 "--output-dir",
                 str(tmp_path / "snapshot-output"),
+                "--yes",
             ]
         )
         == 1

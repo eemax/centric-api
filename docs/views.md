@@ -15,7 +15,7 @@ uv run centric-api view show style-colorways-demo
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
 uv run centric-api view export style-colorways-demo --format csv
-uv run centric-api view export style-colorways-demo --output ~/Desktop/style-colorways.xlsx
+uv run centric-api view export style-colorways-demo --output exports/style-colorways.xlsx
 ```
 
 Config resolves from private `CENTRIC_API_HOME/views.yml` first, then `config/views.yml`, unless

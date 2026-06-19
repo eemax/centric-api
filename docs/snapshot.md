@@ -14,8 +14,10 @@ uv run centric-api snapshot list
 uv run centric-api snapshot show dpp
 uv run centric-api snapshot check dpp
 uv run centric-api snapshot build dpp
+uv run centric-api snapshot diff dpp --review-file review.json
+uv run centric-api snapshot promote dpp --review-file review.json
 uv run centric-api snapshot build dpp --target baseline
-uv run centric-api snapshot promote dpp
+uv run centric-api snapshot promote dpp --yes
 uv run centric-api snapshot build dpp --output-dir ~/review-repos/snapshots
 uv run centric-api snapshot build dpp --output-dir ~/review-repos/snapshots --clean
 ```
@@ -28,10 +30,25 @@ Override the workspace root with `--output-dir PATH`; the snapshot name and targ
 appended, so `--output-dir ~/snapshots` writes `~/snapshots/dpp/candidate` by default.
 
 Use `--target candidate` for regenerated review output and `--target baseline` to rebuild the
-approved main snapshot directly. Prefer `snapshot promote NAME` when approving reviewed output,
-because it copies the existing `candidate/` artifacts into `baseline/` exactly instead of rebuilding
-from a possibly changed cache. A later review UI can diff `baseline/` against `candidate/` and call
-the same promotion path when approved.
+approved main snapshot directly. Prefer `snapshot promote NAME --yes` when approving all reviewed
+output, because it copies the existing `candidate/` artifacts into `baseline/` exactly instead of
+rebuilding from a possibly changed cache. Full candidate-to-baseline promotion requires `--yes`;
+selective `--review-file` promotion does not.
+
+Use `snapshot diff NAME` to compare `baseline/` against `candidate/` without requiring a separate Git
+checkout. Add `--review-file review.json` to write every current change as a review action. The
+review file includes `schema_version: 1` and starts with all actions set to `skip`; change selected
+actions to `promote`, then run `snapshot promote NAME --review-file review.json` to apply only those
+approved changes to `baseline/`.
+
+The generic diff engine promotes changed fields by default. A private snapshot can hide
+non-reviewable diagnostic paths from the diff, opt specific streams into record-level promotion, mark
+fields as locked, and report impacted owner records. Locked fields cannot be promoted directly from
+the review file. If all impacted owner records are promoted, the locked field can move automatically
+with its owner; if only some impacted owners are promoted, the run fails instead of creating a mixed
+baseline. When a locked change impacts an owner record that has no data diff of its own, the review
+file includes an `owner_approval` action for that owner so UIs can still approve the locked change
+selectively.
 
 ## Output Shape
 
@@ -103,6 +120,9 @@ class DppSnapshot:
             )
         return SnapshotOutput(tuple(records), metrics={"styles": len(records)})
 
+    def diff_policy(self):
+        return MyPrivateSnapshotDiffPolicy()
+
 
 SNAPSHOT = DppSnapshot()
 ```
@@ -116,6 +136,16 @@ Useful `ctx` helpers:
 - `ctx.refs(value)`: collect unique references from nested payload values.
 - `ctx.record(stream, key, data, group=...)`: create a `SnapshotRecord`.
 
+Optional diff policy hooks:
+
+- `ignored_change_path(identity, path) -> bool`: hide diagnostic or trace-only fields from review
+  diffs. If all changed paths on a record are ignored, no review action is emitted.
+- `record_promotion_streams`: stream names promoted as whole records instead of individual fields.
+- `locked_field_reason(identity, path) -> str | None`: mark fields that cannot be promoted directly.
+- `approval_owner(identity, path) -> str | None`: name the stream that owns approval for a change.
+- `impacts(change, baseline, candidate) -> tuple[SnapshotRecordIdentity, ...]`: report owner records
+  affected by a locked change.
+
 ## Writer Rules
 
 - Stream names become JSONL filenames. Use names like `style-boms` or `materials`.
@@ -128,6 +158,9 @@ Useful `ctx` helpers:
   `--clean` is passed.
 - `--target candidate|baseline` selects which workspace target to write. The default is
   `candidate`.
-- `snapshot promote NAME` copies the selected snapshot's `candidate/` target to `baseline/`.
+- `snapshot promote NAME --yes` copies the selected snapshot's `candidate/` target to `baseline/`.
+- `snapshot diff NAME --review-file review.json` writes selectable review actions for the current
+  `baseline/` vs `candidate/` drift.
+- `snapshot promote NAME --review-file review.json` applies only review actions set to `promote`.
 - `--clean` removes non-hidden contents in the selected target only and preserves hidden
   directories such as `.git`.

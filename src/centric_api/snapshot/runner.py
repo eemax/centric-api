@@ -8,7 +8,8 @@ from ..store import connect_readonly
 from ..units import load_unit_registry
 from .artifacts import copy_snapshot_artifacts, stream_filename, write_snapshot_artifacts
 from .context import SnapshotContext
-from .contracts import SnapshotBuildSummary, SnapshotOutput, SnapshotProtocol
+from .contracts import SnapshotBuildSummary, SnapshotDiffSummary, SnapshotOutput, SnapshotProtocol
+from .diffing import diff_snapshot_artifacts, promote_snapshot_review
 from .registry import validate_snapshot_output
 
 DEFAULT_SNAPSHOT_WORKSPACE_DIR = Path("snapshot/workspaces")
@@ -70,11 +71,24 @@ def promote_snapshot(
     *,
     output_root: str | Path | None = None,
     clean: bool = False,
+    review_file: str | Path | None = None,
 ) -> SnapshotBuildSummary:
     started_at = _utc_iso()
     source_dir = _output_dir(snapshot.definition.name, output_root, "candidate")
     output_dir = _output_dir(snapshot.definition.name, output_root, "baseline")
-    manifest_path, manifest = copy_snapshot_artifacts(source_dir, output_dir, clean=clean)
+    if review_file is None:
+        manifest_path, manifest = copy_snapshot_artifacts(source_dir, output_dir, clean=clean)
+        metrics = dict(manifest.get("metrics") or {})
+    else:
+        manifest_path, manifest, review_metrics = promote_snapshot_review(
+            definition=snapshot.definition,
+            baseline_dir=output_dir,
+            candidate_dir=source_dir,
+            review_file=Path(review_file).expanduser(),
+            policy=_snapshot_diff_policy(snapshot),
+            clean=clean,
+        )
+        metrics = {**dict(manifest.get("metrics") or {}), **review_metrics}
     return SnapshotBuildSummary(
         snapshot_name=snapshot.definition.name,
         title=snapshot.definition.title,
@@ -88,7 +102,24 @@ def promote_snapshot(
         stream_count=int(manifest.get("stream_count") or 0),
         file_count=int(manifest.get("file_count") or 0),
         manifest_path=manifest_path,
-        metrics=dict(manifest.get("metrics") or {}),
+        metrics=metrics,
+    )
+
+
+def diff_snapshot(
+    snapshot: SnapshotProtocol,
+    *,
+    output_root: str | Path | None = None,
+    review_file: str | Path | None = None,
+) -> SnapshotDiffSummary:
+    baseline_dir = _output_dir(snapshot.definition.name, output_root, "baseline")
+    candidate_dir = _output_dir(snapshot.definition.name, output_root, "candidate")
+    return diff_snapshot_artifacts(
+        definition=snapshot.definition,
+        baseline_dir=baseline_dir,
+        candidate_dir=candidate_dir,
+        policy=_snapshot_diff_policy(snapshot),
+        review_file=Path(review_file).expanduser() if review_file is not None else None,
     )
 
 
@@ -155,3 +186,13 @@ def _summary(
 
 def _utc_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _snapshot_diff_policy(snapshot: SnapshotProtocol) -> object | None:
+    factory = getattr(snapshot, "diff_policy", None)
+    if callable(factory):
+        return factory()
+    policy = getattr(snapshot, "promotion_policy", None)
+    if policy is not None:
+        return policy
+    return None

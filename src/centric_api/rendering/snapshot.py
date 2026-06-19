@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..snapshot.contracts import SnapshotBuildSummary, SnapshotProtocol
+from ..snapshot.contracts import SnapshotBuildSummary, SnapshotDiffSummary, SnapshotProtocol
 from .common import format_count
 
 
@@ -33,6 +33,41 @@ def snapshot_summary_record(summary: SnapshotBuildSummary) -> dict[str, Any]:
         "streams": summary.stream_count,
         "files": summary.file_count,
         "metrics": summary.metrics,
+    }
+
+
+def snapshot_diff_record(summary: SnapshotDiffSummary) -> dict[str, Any]:
+    return {
+        "snapshot": summary.snapshot_name,
+        "title": summary.title,
+        "baseline_dir": str(summary.baseline_dir),
+        "candidate_dir": str(summary.candidate_dir),
+        "metrics": summary.metrics,
+        "changes": [
+            {
+                "change_type": change.change_type,
+                "stream": change.identity.stream,
+                "group": list(change.identity.group),
+                "key": change.identity.key,
+                "path": change.path,
+                "promotion_unit": change.promotion_unit,
+                "approval": change.approval,
+                "approval_owner": change.approval_owner,
+                "reason": change.reason,
+                "impacts": [
+                    {
+                        "stream": impact.stream,
+                        "group": list(impact.group),
+                        "key": impact.key,
+                    }
+                    for impact in change.impacts
+                ],
+                "old": change.old,
+                "new": change.new,
+                "changed_paths": list(change.changed_paths),
+            }
+            for change in summary.changes
+        ],
     }
 
 
@@ -92,6 +127,38 @@ def print_human_snapshot_summary(summary: SnapshotBuildSummary) -> None:
     _print_metrics(summary)
 
 
+def print_human_snapshot_diff(summary: SnapshotDiffSummary) -> None:
+    print(f"Snapshot diff: {summary.snapshot_name}")
+    print()
+    print(f"Baseline:  {summary.baseline_dir}")
+    print(f"Candidate: {summary.candidate_dir}")
+    print(f"Changes:   {format_count(summary.metrics.get('changes', 0))}")
+    print(f"Actionable:{format_count(summary.metrics.get('actionable', 0)):>8}")
+    print(f"Locked:    {format_count(summary.metrics.get('locked', 0)):>8}")
+    if not summary.changes:
+        return
+    print()
+    print("Changes")
+    print(
+        f"{'Approval':<10}  {'Unit':<6}  {'Stream':<11}  {'Group':<28}  {'Key':<32}  Path / Impact"
+    )
+    print("-" * 112)
+    for change in summary.changes[:200]:
+        group = "/".join(change.identity.group)
+        impact = ""
+        if change.impacts:
+            impact = f" -> impacts {len(change.impacts)} {change.approval_owner or 'records'}"
+        path = change.path or "<record>"
+        reason = f" ({change.reason})" if change.reason else ""
+        print(
+            f"{change.approval:<10}  {change.promotion_unit:<6}  "
+            f"{change.identity.stream:<11}  {_clip(group, 28):<28}  "
+            f"{_clip(change.identity.key, 32):<32}  {_clip(path + impact + reason, 80)}"
+        )
+    if len(summary.changes) > 200:
+        print(f"... {format_count(len(summary.changes) - 200)} more changes")
+
+
 def _print_metrics(summary: SnapshotBuildSummary) -> None:
     if not summary.metrics:
         return
@@ -102,3 +169,12 @@ def _print_metrics(summary: SnapshotBuildSummary) -> None:
         if isinstance(value, int):
             value = format_count(value)
         print(f"  {label}: {value}")
+
+
+def _clip(value: object, width: int) -> str:
+    text = str(value or "")
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return text[: width - 1] + "…"

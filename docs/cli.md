@@ -394,7 +394,7 @@ uv run centric-api view show style-colorways-demo
 uv run centric-api view check style-colorways-demo
 uv run centric-api view export style-colorways-demo
 uv run centric-api view export style-colorways-demo --format csv
-uv run centric-api view export style-colorways-demo --output ~/Desktop/style-colorways.xlsx
+uv run centric-api view export style-colorways-demo --output exports/style-colorways.xlsx
 ```
 
 `view export` writes flat XLSX or CSV tables from local cached endpoint records or calculated model
@@ -458,25 +458,34 @@ uv run centric-api snapshot list
 uv run centric-api snapshot show dpp
 uv run centric-api snapshot check dpp
 uv run centric-api snapshot build dpp
+uv run centric-api snapshot diff dpp --review-file review.json
+uv run centric-api snapshot promote dpp --review-file review.json
 uv run centric-api snapshot build dpp --target baseline
-uv run centric-api snapshot promote dpp
+uv run centric-api snapshot promote dpp --yes
 uv run centric-api snapshot build dpp --output-dir ~/review-repos/snapshots
 ```
 
 `snapshot` runs private cache modeling/grouping modules and writes deterministic JSONL directories
 for Git review workflows. Builds write to a snapshot workspace target: `candidate` by default, or
-`baseline` when explicitly selected. `snapshot promote` copies reviewed candidate artifacts to
-baseline exactly. There are no bundled snapshots. Private modules load from
-`CENTRIC_API_HOME/snapshots/*.py` by default, or from `--snapshots-dir PATH`.
+`baseline` when explicitly selected. `snapshot promote --yes` copies all reviewed candidate artifacts
+to baseline exactly. `snapshot diff` compares `baseline/` to `candidate/`; with `--review-file`, it
+writes selectable actions that `snapshot promote --review-file` can apply for selective promotion.
+Private diff policies can hide diagnostic paths from the review diff. Full promotion requires
+`--yes`; selective review-file promotion does not. There are no bundled snapshots. Private modules
+load from `CENTRIC_API_HOME/snapshots/*.py` by default, or from `--snapshots-dir PATH`.
 
 Useful options:
 
 - `--snapshots-dir PATH`: load private snapshots from a specific directory.
 - `--units-config PATH`: use an explicit unit registry.
 - `--db PATH`: use a non-default SQLite cache for `check` or `build`.
-- `--output-dir PATH`: choose the snapshot workspace root for `build`.
+- `--output-dir PATH`: choose the snapshot workspace root for `build`, `diff`, or `promote`.
 - `--target candidate|baseline`: choose the workspace target for `build`; default is `candidate`.
-- `promote`: copy `candidate/` to `baseline/` after review.
+- `promote --yes`: copy all of `candidate/` to `baseline/` after review.
+- `diff`: compare `baseline/` to `candidate/`.
+- `--review-file PATH`: write review actions for `diff`, or selectively apply approved actions for
+  `promote`.
+- `--yes`: confirm full candidate-to-baseline `promote` when no review file is used.
 - `--clean`: replace non-hidden contents in the selected snapshot target while preserving hidden
   directories such as `.git`.
 - `--json`: emit machine-readable output.
