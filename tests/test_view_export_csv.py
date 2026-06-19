@@ -151,6 +151,57 @@ views:
     assert rows == [["Name", "Quantity"], ["'=SUM(1,1)", "-5"]]
 
 
+def test_view_export_streams_simple_table_csv(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute("CREATE TABLE model_export (code TEXT, name TEXT, active INTEGER)")
+        conn.executemany(
+            "INSERT INTO model_export VALUES (?, ?, ?)",
+            [("S1", "One", 1), ("S2", "Two", 0)],
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: streamed-model
+    root:
+      table: model_export
+      as: model
+    filters:
+      - path: model.active
+        equals: 1
+    columns:
+      - header: Code
+        path: model.code
+      - header: Name
+        path: model.name
+""",
+        encoding="utf-8",
+    )
+    def fail_materialize(*_args, **_kwargs):
+        raise AssertionError("materialized")
+
+    monkeypatch.setattr(view_export_module, "materialize_view", fail_materialize)
+    config = load_view_config(config_path)
+
+    result = export_view(
+        db_path,
+        config,
+        select_view(config, "streamed-model"),
+        export_format="csv",
+        output_path=tmp_path / "streamed-model.csv",
+    )
+
+    assert result.row_count == 1
+    with result.output_path.open("r", encoding="utf-8", newline="") as fh:
+        rows = list(csv.reader(fh))
+    assert rows == [["Code", "Name"], ["S1", "One"]]
+
+
 def test_view_csv_export_preserves_existing_file_when_write_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

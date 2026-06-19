@@ -7,6 +7,7 @@ from zipfile import ZipFile
 import pytest
 from openpyxl import load_workbook
 
+import centric_api.view_export as view_export_module
 from centric_api.store import connect
 from centric_api.view_config import load_view_config, select_view
 from centric_api.view_export import export_view
@@ -188,6 +189,83 @@ views:
 
     assert sheet["A2"].value == 2
     assert sheet["B2"].value == "1.9"
+
+
+def test_view_export_streams_simple_table_xlsx(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "centric.db"
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE model_export (
+                code TEXT,
+                name TEXT,
+                quantity REAL,
+                row_status TEXT
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO model_export VALUES (?, ?, ?, ?)",
+            [
+                ("S1", "=Formula Name", 2.5, "ok"),
+                ("S2", "Regular Name", 1, "ok"),
+                ("S3", "Filtered Name", 9, "skip"),
+            ],
+        )
+    config_path = tmp_path / "views.yml"
+    config_path.write_text(
+        """
+version: 1
+views:
+  - name: streamed-model
+    title: Streamed Model
+    root:
+      table: model_export
+      as: model
+    filters:
+      - path: model.row_status
+        equals: ok
+    columns:
+      - header: Code
+        path: model.code
+      - header: Name
+        path: model.name
+      - header: Quantity
+        path: model.quantity
+        type: number
+        number_format: "0.00"
+""",
+        encoding="utf-8",
+    )
+    def fail_materialize(*_args, **_kwargs):
+        raise AssertionError("materialized")
+
+    monkeypatch.setattr(view_export_module, "materialize_view", fail_materialize)
+    config = load_view_config(config_path)
+
+    result = export_view(
+        db_path,
+        config,
+        select_view(config, "streamed-model"),
+        export_format="xlsx",
+        output_path=tmp_path / "streamed-model.xlsx",
+    )
+
+    assert result.row_count == 2
+    assert result.column_count == 3
+    workbook = load_workbook(result.output_path)
+    sheet = workbook.active
+    assert sheet.title == "Streamed Model"
+    assert sheet.freeze_panes == "A2"
+    assert sheet.auto_filter.ref == "A1:C3"
+    assert len(sheet.tables) == 0
+    assert [cell.value for cell in sheet[1]] == ["Code", "Name", "Quantity"]
+    assert [cell.value for cell in sheet[2]] == ["S1", "'=Formula Name", 2.5]
+    assert [cell.value for cell in sheet[3]] == ["S2", "Regular Name", 1]
+    assert sheet["C2"].number_format == "0.00"
 
 
 def test_view_xlsx_export_preserves_existing_file_when_write_fails(

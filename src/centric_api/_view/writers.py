@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,23 +18,44 @@ HEADER_ROW_HEIGHT = 18
 
 
 def _write_csv(path: Path, materialized: ViewMaterialized) -> None:
+    _write_csv_rows(path, materialized.headers, materialized.columns, materialized.rows)
+
+
+def _write_csv_streaming(
+    path: Path,
+    headers: tuple[str, ...],
+    columns: tuple[ViewColumn, ...],
+    rows: Iterable[tuple[Any, ...]],
+) -> int:
+    return _write_csv_rows(path, headers, columns, rows)
+
+
+def _write_csv_rows(
+    path: Path,
+    headers: tuple[str, ...],
+    columns: tuple[ViewColumn, ...],
+    rows: Iterable[tuple[Any, ...]],
+) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = _temp_output_path(path)
+    row_count = 0
     try:
         with temp_path.open("w", encoding="utf-8", newline="") as fh:
             writer = csv.writer(fh)
-            writer.writerow(materialized.headers)
-            for row in materialized.rows:
+            writer.writerow(headers)
+            for row in rows:
                 writer.writerow(
                     [
                         _csv_value(value, column)
-                        for value, column in zip(row, materialized.columns, strict=True)
+                        for value, column in zip(row, columns, strict=True)
                     ]
                 )
+                row_count += 1
         temp_path.replace(path)
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+    return row_count
 
 
 def _write_xlsx(path: Path, materialized: ViewMaterialized, view: ViewDefinition) -> None:
@@ -110,6 +132,122 @@ def _write_xlsx(path: Path, materialized: ViewMaterialized, view: ViewDefinition
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
+
+
+def _write_xlsx_streaming(
+    path: Path,
+    headers: tuple[str, ...],
+    columns: tuple[ViewColumn, ...],
+    rows: Iterable[tuple[Any, ...]],
+    view: ViewDefinition,
+    *,
+    widths: tuple[int | None, ...],
+    row_count: int,
+) -> int:
+    try:
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError as exc:  # pragma: no cover - dependency is declared
+        raise ConfigError("XLSX export requires openpyxl.") from exc
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = _temp_output_path(path)
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet(title=_sheet_name(view))
+    if view.options.freeze_header:
+        sheet.freeze_panes = "A2"
+    for column_index, width in enumerate(widths, start=1):
+        if width is not None:
+            sheet.column_dimensions[get_column_letter(column_index)].width = width
+    if view.options.autofilter and headers:
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{row_count + 1}"
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_border = Border(bottom=Side(style="thin", color="B7B7B7"))
+    header_alignment = Alignment(horizontal="left", vertical="top")
+    body_alignment = Alignment(vertical="top")
+    header_row = []
+    for header in headers:
+        cell = WriteOnlyCell(sheet, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.border = header_border
+        cell.alignment = header_alignment
+        header_row.append(cell)
+    sheet.append(header_row)
+    written_count = 0
+    for raw_row in rows:
+        sheet.append(
+            [
+                _streaming_xlsx_cell(sheet, value, column, body_alignment, WriteOnlyCell)
+                for value, column in zip(raw_row, columns, strict=True)
+            ]
+        )
+        written_count += 1
+    sheet.row_dimensions[1].height = HEADER_ROW_HEIGHT
+    try:
+        workbook.save(temp_path)
+        temp_path.replace(path)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
+    return written_count
+
+
+def _measure_xlsx_streaming(
+    headers: tuple[str, ...],
+    columns: tuple[ViewColumn, ...],
+    rows: Iterable[tuple[Any, ...]],
+    view: ViewDefinition,
+) -> tuple[int, tuple[int | None, ...]]:
+    row_count = 0
+    auto_widths = [len(header) for header in headers]
+    for raw_row in rows:
+        if view.options.autosize:
+            for index, value in enumerate(raw_row):
+                if columns[index].width is None:
+                    auto_widths[index] = max(auto_widths[index], len(_cell_text(value)))
+        row_count += 1
+    widths: list[int | None] = []
+    for index, column in enumerate(columns):
+        if column.width is not None:
+            widths.append(column.width)
+        elif view.options.autosize:
+            widths.append(min(auto_widths[index] + 2, 80))
+        else:
+            widths.append(None)
+    return row_count, tuple(widths)
+
+
+def _streaming_xlsx_cell(
+    sheet: Any,
+    value: Any,
+    column: ViewColumn,
+    alignment: Any,
+    cell_type: Any,
+) -> Any:
+    typed_value = _xlsx_value(value, column)
+    if typed_value is None:
+        return None
+    number_format = _xlsx_number_format(column)
+    if number_format is None:
+        return typed_value
+    cell = cell_type(sheet, value=typed_value)
+    cell.alignment = alignment
+    cell.number_format = number_format
+    return cell
+
+
+def _xlsx_number_format(column: ViewColumn) -> str | None:
+    if column.number_format:
+        return column.number_format
+    if column.type == "date":
+        return "yyyy-mm-dd"
+    if column.type == "datetime":
+        return "yyyy-mm-dd hh:mm"
+    return None
 
 
 def _xlsx_value(value: Any, column: ViewColumn) -> Any:

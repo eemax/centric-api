@@ -6,6 +6,7 @@ from typing import Literal
 
 from ._view import writers as _view_writers
 from ._view.materialize import MissingJoinDetail, ViewMaterialized, materialize_view
+from ._view.streaming import can_stream_table_view, stream_table_view
 from .config import ConfigError
 from .view_config import ViewConfig, ViewDefinition
 
@@ -19,6 +20,9 @@ csv = _view_writers.csv
 
 _write_csv = _view_writers._write_csv
 _write_xlsx = _view_writers._write_xlsx
+_write_csv_streaming = _view_writers._write_csv_streaming
+_measure_xlsx_streaming = _view_writers._measure_xlsx_streaming
+_write_xlsx_streaming = _view_writers._write_xlsx_streaming
 _default_output_path = _view_writers._default_output_path
 
 __all__ = [
@@ -90,6 +94,46 @@ def export_view(
     resolved_output_path = output_path or _default_output_path(
         config.output_dir, view, export_format
     )
+    if can_stream_table_view(view):
+        if export_format == "csv":
+            with stream_table_view(db_path, view) as stream:
+                row_count = _write_csv_streaming(
+                    resolved_output_path,
+                    stream.headers,
+                    stream.columns,
+                    stream.rows,
+                )
+                column_count = len(stream.headers)
+        else:
+            with stream_table_view(db_path, view) as stream:
+                row_count, widths = _measure_xlsx_streaming(
+                    stream.headers,
+                    stream.columns,
+                    stream.rows,
+                    view,
+                )
+                column_count = len(stream.headers)
+            with stream_table_view(db_path, view) as write_stream:
+                row_count = _write_xlsx_streaming(
+                    resolved_output_path,
+                    write_stream.headers,
+                    write_stream.columns,
+                    write_stream.rows,
+                    view,
+                    widths=widths,
+                    row_count=row_count,
+                )
+        return ViewExportResult(
+            view_name=view.name,
+            title=view.title,
+            format=export_format,
+            output_path=resolved_output_path,
+            row_count=row_count,
+            column_count=column_count,
+            missing_join_count=0,
+            missing_join_details=(),
+            warnings=(),
+        )
     materialized = materialize_view(db_path, view)
     if export_format == "csv":
         _write_csv(resolved_output_path, materialized)
