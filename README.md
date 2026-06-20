@@ -34,6 +34,12 @@ uv run centric-api --help >/dev/null
 uv run pytest
 ```
 
+Install the local commit hook once per clone to run the same gate before each commit:
+
+```bash
+just install-hooks
+```
+
 ```bash
 uv run centric-api fetch
 uv run centric-api fetch --full

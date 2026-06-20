@@ -476,12 +476,7 @@ def test_bundle_cleans_stale_temp_dir_before_writing_artifacts(
     source_file.parent.mkdir(parents=True)
     source_file.write_bytes(b"tech pack")
     stale_file = (
-        tmp_path
-        / "bundles"
-        / "runs"
-        / ".style-bundle-2026-01-01-0000.tmp"
-        / "files"
-        / "stale.txt"
+        tmp_path / "bundles" / "runs" / ".style-bundle-2026-01-01-0000.tmp" / "files" / "stale.txt"
     )
     stale_file.parent.mkdir(parents=True)
     stale_file.write_text("stale", encoding="utf-8")

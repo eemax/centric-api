@@ -6,6 +6,9 @@ default:
 sync:
     uv sync --locked
 
+install-hooks:
+    git config core.hooksPath scripts/git-hooks
+
 format:
     uv run ruff format
 

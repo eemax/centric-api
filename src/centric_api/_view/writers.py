@@ -45,10 +45,7 @@ def _write_csv_rows(
             writer.writerow(headers)
             for row in rows:
                 writer.writerow(
-                    [
-                        _csv_value(value, column)
-                        for value, column in zip(row, columns, strict=True)
-                    ]
+                    [_csv_value(value, column) for value, column in zip(row, columns, strict=True)]
                 )
                 row_count += 1
         temp_path.replace(path)

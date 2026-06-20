@@ -462,8 +462,10 @@ def _allocate_run_id(
     runs_dir = output_dir / "runs"
     return allocate_artifact_name(
         base,
-        lambda run_id: (runs_dir / run_id).exists()
-        or (output_dir / f"{run_id}.zip").exists()
-        or bundle_run_exists(conn, run_id),
+        lambda run_id: (
+            (runs_dir / run_id).exists()
+            or (output_dir / f"{run_id}.zip").exists()
+            or bundle_run_exists(conn, run_id)
+        ),
         limit=100,
     )

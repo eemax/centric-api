@@ -240,6 +240,7 @@ views:
 """,
         encoding="utf-8",
     )
+
     def fail_materialize(*_args, **_kwargs):
         raise AssertionError("materialized")
 

@@ -548,8 +548,9 @@ def _allocate_run_id(
     base = artifact_base_name(job_name, created_at)
     return allocate_artifact_name(
         base,
-        lambda run_id: (output_dir / "runs" / run_id).exists()
-        or _download_run_exists(conn, run_id),
+        lambda run_id: (
+            (output_dir / "runs" / run_id).exists() or _download_run_exists(conn, run_id)
+        ),
         limit=100,
     )
 

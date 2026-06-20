@@ -40,14 +40,11 @@ def stream_table_view(db_path: Path, view: ViewDefinition) -> Iterator[Streaming
     with connect_readonly(db_path) as conn:
         if not table_exists(conn, table_name):
             message = (
-                f"View root table not found: {table_name}. "
-                "Run the model that creates it first."
+                f"View root table not found: {table_name}. Run the model that creates it first."
             )
             raise ConfigError(message)
         root_row_count = _table_row_count(conn, table_name)
-        cursor = conn.execute(
-            f"SELECT * FROM {_quote_identifier(table_name)} ORDER BY rowid"
-        )
+        cursor = conn.execute(f"SELECT * FROM {_quote_identifier(table_name)} ORDER BY rowid")
         stream = StreamingViewRows(
             root_row_count=root_row_count,
             headers=tuple(column.header for column in view.columns),

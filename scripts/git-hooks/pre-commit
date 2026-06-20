@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v just >/dev/null 2>&1; then
+  echo "pre-commit: just is required. Install it, then run: just check" >&2
+  exit 1
+fi
+
+just check
