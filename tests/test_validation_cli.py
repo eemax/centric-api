@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 from openpyxl import load_workbook
 
 from centric_api.cli import main
@@ -12,6 +13,11 @@ from centric_api.store import connect
 from centric_api.validation.registry import discover_validators
 from centric_api.validation.runner import _allocate_output_dir
 from tests.helpers_validation import _seed_styles_cache, _write_style_name_validator
+
+
+@pytest.fixture(autouse=True)
+def _isolate_runtime_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CENTRIC_API_HOME", str(tmp_path / "home"))
 
 
 def test_validate_list_is_empty_without_private_validators(
