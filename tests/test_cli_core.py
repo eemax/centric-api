@@ -82,6 +82,13 @@ def test_units_cli_convert_and_normalize(capsys) -> None:
     assert "Width unit:     m" in output
     assert "Requires:       bom_quantity, material_uom, material_weight, cuttable_width" in output
 
+    assert main(["units", "basis", "sq. m"]) == 0
+    output = capsys.readouterr().out
+    assert "Unit:           sq. m -> m2 (area)" in output
+    assert "Basis:          area_mass" in output
+    assert "Material unit:  g" in output
+    assert "Width unit:" not in output
+
     assert main(["units", "basis", "pcs", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["basis"] == "per_piece_mass"

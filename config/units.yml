@@ -105,6 +105,14 @@ dimensions:
 
   area:
     base: m2
+    consumption:
+      basis: area_mass
+      bom_quantity: area
+      material_value: grams_per_area_unit
+      material_value_unit: g
+      output_unit: kg
+      requires: [bom_quantity, material_uom, material_weight]
+      formula: bom_area * material_weight_g_per_area_unit / 1000
     units:
       mm2:
         factor: 0.000001

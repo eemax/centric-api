@@ -76,6 +76,7 @@ Some unit dimensions also describe how a material UOM drives material consumptio
 ```bash
 uv run centric-api units basis pcs
 uv run centric-api units basis kg
+uv run centric-api units basis "sq. m"
 uv run centric-api units basis gsm
 uv run centric-api units basis g/m
 ```
@@ -84,6 +85,8 @@ The default bases are:
 
 - `mass`: BOM quantity is already mass; material weight is ignored.
 - `count`: BOM quantity is pieces; material weight is grams per piece.
+- `area`: BOM quantity is already area; material weight is grams per area unit and does not require
+  cuttable width.
 - `areal_density`: BOM quantity is length; material weight is mass per area and requires
   cuttable width.
 - `linear_density`: BOM quantity is length; material weight is mass per length.
@@ -91,11 +94,16 @@ The default bases are:
 `requires` lists all semantic inputs the model needs for that basis. For example, direct mass needs
 the BOM quantity and material UOM, while areal density also needs material weight and cuttable width.
 
+For area and plain length material UOMs, the material weight field follows the selected UOM. For
+example, `SQ. M` means grams per square meter, `SQ. FT` means grams per square foot, `M` with width
+means grams per square meter, and `YD` with width means grams per square yard. Plain length UOMs
+without width are treated as linear consumption, so `YD` means grams per yard.
+
 Density units can also declare the BOM quantity and width units implied by that material UOM. For
 example, `gsm` uses meter-based length and width, while `oz/yd2` uses yards.
 
-Pure dimensions such as `length`, `area`, and `volume` intentionally have no material consumption
-basis by default.
+Pure dimensions such as `length` and `volume` intentionally have no material consumption basis by
+default.
 
 Plain `ton` is intentionally not a default alias because it is ambiguous between short tons and
 metric tonnes in international trade. Use `short_ton`, `us ton`, `t`, or `tonne`.

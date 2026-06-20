@@ -40,6 +40,18 @@ def test_unit_registry_resolves_consumption_basis() -> None:
     assert count_basis.consumption.basis == "per_piece_mass"
     assert count_basis.consumption.material_value_unit == "g"
 
+    area_basis = registry.basis("sq. m")
+    assert area_basis.unit == "m2"
+    assert area_basis.consumption.basis == "area_mass"
+    assert area_basis.consumption.material_value == "grams_per_area_unit"
+    assert area_basis.consumption.material_value_unit == "g"
+    assert area_basis.consumption.requires == (
+        "bom_quantity",
+        "material_uom",
+        "material_weight",
+    )
+    assert area_basis.unit_context is None
+
     fabric_basis = registry.basis("gsm")
     assert fabric_basis.unit == "g_per_m2"
     assert fabric_basis.consumption.basis == "areal_density"

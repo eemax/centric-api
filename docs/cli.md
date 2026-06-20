@@ -594,7 +594,7 @@ uv run centric-api units check
 private `CENTRIC_API_HOME/units.yml` extends the defaults when present. Pass `--units-config PATH`
 before the units action to use an explicit registry.
 `units basis UNIT` shows the material-consumption formula implied by material UOMs such as `pcs`,
-`kg`, `gsm`, or `g/m`.
+`kg`, `sq. m`, `gsm`, or `g/m`.
 
 See [Units](units.md) for registry authoring rules.
 

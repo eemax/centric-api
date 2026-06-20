@@ -25,6 +25,7 @@ CONSUMPTION_CONFIG_KEYS = {
     "formula",
 }
 CONSUMPTION_BASIS_TYPES = {
+    "area_mass",
     "direct_mass",
     "per_piece_mass",
     "areal_density",

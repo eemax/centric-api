@@ -369,4 +369,11 @@ Consumption sections are optional and describe how material UOMs drive modeling.
 `output_unit`, `material_value_unit`, and `basis_units` must resolve to known units so modeling
 errors fail during config load instead of during a private calculation.
 
+Area units can use the `area_mass` basis when BOM quantity is already a square measure and material
+weight is grams per area unit, so no cuttable width is required.
+
+When a material UOM is an area or plain length unit, the separate material weight field follows that
+UOM: `SQ. FT` means grams per square foot, and `YD` with width means grams per square yard. Plain
+length UOMs without width are linear, so `YD` means grams per yard.
+
 Use `docs/units.md` as the full unit registry reference.
