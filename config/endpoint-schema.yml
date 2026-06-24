@@ -112,6 +112,9 @@ endpoints:
     delete_when_any:
       - field: active
         equals: false
+  routings: {}
+  routing_items: {}
+  routing_revisions: {}
   documents:
     delete_when_any:
       - field: active
