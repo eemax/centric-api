@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import MappingProxyType
@@ -21,6 +21,16 @@ from ..record_constants import (
 )
 from ..schema import DeleteCondition, EndpointSchema
 from .discovery import RawFile
+
+# Keep room for the endpoint bind parameter on SQLite builds with the classic
+# 999-variable ceiling.
+SQL_IN_CHUNK_SIZE = 900
+
+
+def _record_id_chunks(record_ids: set[str]) -> Iterator[list[str]]:
+    sorted_ids = sorted(record_ids)
+    for index in range(0, len(sorted_ids), SQL_IN_CHUNK_SIZE):
+        yield sorted_ids[index : index + SQL_IN_CHUNK_SIZE]
 
 
 @dataclass(frozen=True)
@@ -207,44 +217,51 @@ def _reconcile_full_snapshot_hard_deletes(
     if raw_file.run_mode != "full" or raw_file.is_delta or invalid_records:
         return {}
 
+    # Ids first, payloads second: full snapshots run this per raw file, and
+    # selecting payload_json for every current record holds the whole endpoint
+    # in memory to find what is usually a handful of hard deletes.
     rows = conn.execute(
-        """
-        SELECT record_id, payload_json, payload_sha256
-        FROM endpoint_records
-        WHERE endpoint = ?
-        """,
+        "SELECT record_id FROM endpoint_records WHERE endpoint = ?",
         [raw_file.endpoint],
     ).fetchall()
     current_ids = {str(row["record_id"]) for row in rows}
     hard_deleted_ids = current_ids - retained_ids
     hard_deleted: dict[str, PreviousRecord] = {}
-    for row in rows:
-        record_id = str(row["record_id"])
-        if record_id not in hard_deleted_ids:
-            continue
-        hard_deleted[record_id] = _previous_record(row)
-        payload = {
-            PRIMARY_KEY_FIELD: record_id,
-            HARD_DELETE_TYPE_FIELD: DELETE_TYPE_HARD_DELETE,
-            HARD_DELETE_DELETED_AT_FIELD: ingested_at,
-            HARD_DELETE_SOURCE_RUN_ID_FIELD: raw_file.source_run_id,
-            HARD_DELETE_SOURCE_FILE_FIELD: str(raw_file.path),
-        }
-        payload_json = _canonical_json(payload)
-        payload_hash = _hash_text(payload_json)
-        conn.execute(
-            "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
-            [raw_file.endpoint, record_id],
-        )
-        _upsert_tombstone(
-            conn,
-            raw_file=raw_file,
-            record_id=record_id,
-            payload_json=payload_json,
-            payload_hash=payload_hash,
-            modified_at=None,
-            ingested_at=ingested_at,
-        )
+    for id_chunk in _record_id_chunks(hard_deleted_ids):
+        chunk_rows = conn.execute(
+            f"""
+            SELECT record_id, payload_json, payload_sha256
+            FROM endpoint_records
+            WHERE endpoint = ?
+              AND record_id IN ({",".join("?" for _ in id_chunk)})
+            """,
+            [raw_file.endpoint, *id_chunk],
+        ).fetchall()
+        for row in chunk_rows:
+            record_id = str(row["record_id"])
+            hard_deleted[record_id] = _previous_record(row)
+            payload = {
+                PRIMARY_KEY_FIELD: record_id,
+                HARD_DELETE_TYPE_FIELD: DELETE_TYPE_HARD_DELETE,
+                HARD_DELETE_DELETED_AT_FIELD: ingested_at,
+                HARD_DELETE_SOURCE_RUN_ID_FIELD: raw_file.source_run_id,
+                HARD_DELETE_SOURCE_FILE_FIELD: str(raw_file.path),
+            }
+            payload_json = _canonical_json(payload)
+            payload_hash = _hash_text(payload_json)
+            conn.execute(
+                "DELETE FROM endpoint_records WHERE endpoint = ? AND record_id = ?",
+                [raw_file.endpoint, record_id],
+            )
+            _upsert_tombstone(
+                conn,
+                raw_file=raw_file,
+                record_id=record_id,
+                payload_json=payload_json,
+                payload_hash=payload_hash,
+                modified_at=None,
+                ingested_at=ingested_at,
+            )
     return hard_deleted
 
 

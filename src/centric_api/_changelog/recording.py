@@ -79,9 +79,21 @@ def record_changelog(
         if full_refresh:
             _emit_progress(progress, "Loading existing changelog index...")
             previous_index = _load_current_index(conn, endpoints=endpoint_names)
-            _emit_progress(progress, "Loading current cache...")
+            _emit_progress(progress, "Loading current cache hashes...")
             current_index = _build_current_index(conn, endpoints=endpoint_names)
-            tombstone_index = _build_tombstone_index(conn, endpoints=endpoint_names)
+            _emit_progress(progress, "Loading payloads for changed records...")
+            current_index.update(
+                _build_scoped_current_index(
+                    conn,
+                    record_ids_by_endpoint=_changed_ids_by_endpoint(previous_index, current_index),
+                )
+            )
+            tombstone_index = _build_scoped_tombstone_index(
+                conn,
+                deleted_record_ids_by_endpoint=_removed_ids_by_endpoint(
+                    previous_index, current_index
+                ),
+            )
         else:
             _emit_progress(progress, "Loading scoped changelog index...")
             previous_index = _load_current_index_for_keys(conn, keys=scoped_keys)
@@ -341,18 +353,46 @@ def _build_current_index(
     *,
     endpoints: set[str],
 ) -> dict[tuple[str, str], _IndexRow]:
+    # Hash-only on purpose: full refreshes diff every cached record, and loading
+    # every payload here holds the whole cache in memory. Payloads are hydrated
+    # afterwards for just the records whose hashes differ.
     if not endpoints:
         return {}
     rows = conn.execute(
         f"""
-        SELECT endpoint, record_id, payload_json, payload_sha256
+        SELECT endpoint, record_id, payload_sha256
         FROM endpoint_records
         WHERE endpoint IN ({",".join("?" for _ in endpoints)})
         ORDER BY endpoint, record_id
         """,
         sorted(endpoints),
     ).fetchall()
-    return _index_from_rows(rows, hash_column="payload_sha256")
+    return _index_from_rows(rows, hash_column="payload_sha256", payload_column=None)
+
+
+def _changed_ids_by_endpoint(
+    previous_index: dict[tuple[str, str], _IndexRow],
+    current_index: dict[tuple[str, str], _IndexRow],
+) -> dict[str, set[str]]:
+    """Current-cache keys that will produce added or changed events."""
+    changed: dict[str, set[str]] = {}
+    for (endpoint, record_id), current in current_index.items():
+        previous = previous_index.get((endpoint, record_id))
+        if previous is None or previous.payload_hash != current.payload_hash:
+            changed.setdefault(endpoint, set()).add(record_id)
+    return changed
+
+
+def _removed_ids_by_endpoint(
+    previous_index: dict[tuple[str, str], _IndexRow],
+    current_index: dict[tuple[str, str], _IndexRow],
+) -> dict[str, set[str]]:
+    """Previous-index keys missing from the current cache (removed events)."""
+    removed: dict[str, set[str]] = {}
+    for endpoint, record_id in previous_index:
+        if (endpoint, record_id) not in current_index:
+            removed.setdefault(endpoint, set()).add(record_id)
+    return removed
 
 
 def _count_current_records(
@@ -393,25 +433,6 @@ def _build_scoped_current_index(
             ).fetchall()
             index.update(_index_from_rows(rows, hash_column="payload_sha256"))
     return index
-
-
-def _build_tombstone_index(
-    conn: sqlite3.Connection,
-    *,
-    endpoints: set[str],
-) -> dict[tuple[str, str], _IndexRow]:
-    if not endpoints:
-        return {}
-    rows = conn.execute(
-        f"""
-        SELECT endpoint, record_id, payload_json, payload_sha256
-        FROM endpoint_tombstones
-        WHERE endpoint IN ({",".join("?" for _ in endpoints)})
-        ORDER BY endpoint, record_id
-        """,
-        sorted(endpoints),
-    ).fetchall()
-    return _index_from_rows(rows, hash_column="payload_sha256")
 
 
 def _build_scoped_tombstone_index(
