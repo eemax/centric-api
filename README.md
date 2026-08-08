@@ -9,6 +9,7 @@ Docs:
 - [Architecture notes](docs/architecture.md)
 - [Configuration](docs/configuration.md)
 - [Deployment](docs/deployment.md)
+- [Fetch performance: future work](docs/fetch-performance.md)
 - [Load jobs](docs/load.md)
 - [Modeling spec](docs/modeling.md)
 - [Operations](docs/operations.md)
