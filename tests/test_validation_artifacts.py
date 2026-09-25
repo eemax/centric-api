@@ -103,6 +103,114 @@ def test_validation_artifacts_can_cap_raw_finding_exports(tmp_path: Path) -> Non
     assert rows[1][8] == "S0"
 
 
+def test_validation_artifacts_can_customize_findings_sheet(tmp_path: Path) -> None:
+    from centric_api.validation.artifacts import write_validation_workbook
+    from centric_api.validation.contracts import ValidationResult, ValidationSheet
+
+    result = ValidationResult(
+        summary={},
+        findings_sheet=ValidationSheet(
+            "Findings",
+            ({"article_number": "A-1", "article_name": "Jacket"},),
+            ("article_number", "article_name"),
+        ),
+    )
+    report_path = tmp_path / "report.xlsx"
+    write_validation_workbook(
+        report_path,
+        result,
+        run_record={
+            "run_id": "run-1",
+            "validator": "test",
+            "title": "Test",
+            "status": "completed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "findings": 0,
+            "errors": 0,
+            "warnings": 0,
+            "info": 0,
+        },
+    )
+
+    workbook = load_workbook(report_path, read_only=True)
+    assert list(workbook["Findings"].values) == [
+        ("Article Number", "Article Name"),
+        ("A-1", "Jacket"),
+    ]
+
+
+def test_validation_artifacts_can_use_reader_summary_without_findings_tab(tmp_path: Path) -> None:
+    from centric_api.validation.artifacts import write_validation_workbook
+    from centric_api.validation.contracts import ValidationResult, ValidationSheet
+
+    result = ValidationResult(
+        summary={"internal_metric": 4},
+        summary_sheet=ValidationSheet(
+            "Summary",
+            ({"Section": "Coverage", "Item": "Articles compared", "Count": 4},),
+            ("Section", "Item", "Count"),
+            column_widths={"B": 35},
+        ),
+        sheets=(
+            ValidationSheet(
+                "Drift",
+                ({"Article Number": "A-1"},),
+                ("Article Number",),
+                freeze_panes="B2",
+            ),
+        ),
+        include_findings_sheet=False,
+    )
+    report_path = tmp_path / "report.xlsx"
+    write_validation_workbook(
+        report_path,
+        result,
+        run_record={
+            "run_id": "run-1",
+            "validator": "test",
+            "title": "Test",
+            "status": "completed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "findings": 0,
+            "errors": 0,
+            "warnings": 0,
+            "info": 0,
+        },
+    )
+
+    workbook = load_workbook(report_path)
+    assert workbook.sheetnames == ["Summary", "Drift"]
+    assert list(workbook["Summary"].values) == [
+        ("Section", "Item", "Count"),
+        ("Coverage", "Articles compared", 4),
+    ]
+    assert workbook["Summary"].column_dimensions["B"].width == 35
+    assert workbook["Drift"].freeze_panes == "B2"
+
+
+def test_validation_artifacts_can_render_custom_summary(tmp_path: Path) -> None:
+    from centric_api.validation.artifacts import write_validation_workbook
+    from centric_api.validation.contracts import ValidationResult
+
+    def render(sheet, run_record):
+        sheet["A1"] = f"Report {run_record['run_id']}"
+        sheet.merge_cells("A1:C1")
+
+    report_path = tmp_path / "report.xlsx"
+    write_validation_workbook(
+        report_path,
+        ValidationResult(summary={}, summary_renderer=render, include_findings_sheet=False),
+        run_record={"run_id": "run-1"},
+    )
+
+    workbook = load_workbook(report_path)
+    assert workbook.sheetnames == ["Summary"]
+    assert workbook["Summary"]["A1"].value == "Report run-1"
+    assert "A1:C1" in workbook["Summary"].merged_cells
+
+
 def test_validation_artifacts_can_use_custom_report_workbook(tmp_path: Path) -> None:
     from io import BytesIO
 

@@ -93,23 +93,34 @@ def write_validation_workbook(
     workbook = Workbook()
     summary = workbook.active
     summary.title = "Summary"
-    _append_sheet_rows(
-        summary,
-        SUMMARY_COLUMNS,
-        _summary_rows(result, run_record),
-    )
+    summary_definition = result.summary_sheet
+    if result.summary_renderer is not None:
+        result.summary_renderer(summary, run_record)
+    else:
+        _append_sheet_rows(
+            summary,
+            summary_definition.columns if summary_definition else SUMMARY_COLUMNS,
+            summary_definition.rows if summary_definition else _summary_rows(result, run_record),
+        )
+    sheet_definitions = {"Summary": summary_definition}
     for sheet in result.sheets:
+        sheet_definitions[_sheet_name(sheet.name)] = sheet
         _append_sheet_rows(
             workbook.create_sheet(_sheet_name(sheet.name)),
             sheet.columns or _headers_from_rows(sheet.rows),
             sheet.rows,
         )
-    _append_sheet_rows(
-        workbook.create_sheet("Findings"),
-        FINDING_COLUMNS,
-        _exported_finding_records(result),
-    )
+    if result.include_findings_sheet:
+        finding_sheet = result.findings_sheet
+        sheet_definitions["Findings"] = finding_sheet
+        _append_sheet_rows(
+            workbook.create_sheet("Findings"),
+            finding_sheet.columns if finding_sheet else FINDING_COLUMNS,
+            finding_sheet.rows if finding_sheet else _exported_finding_records(result),
+        )
     for sheet in workbook.worksheets:
+        if sheet is summary and result.summary_renderer is not None:
+            continue
         _format_sheet(
             sheet,
             get_column_letter,
@@ -118,6 +129,7 @@ def write_validation_workbook(
             Font,
             PatternFill,
             Side,
+            sheet_definitions.get(sheet.title),
         )
     temp_path = path.parent / f".{path.name}.tmp"
     try:
@@ -269,6 +281,7 @@ def _format_sheet(
     font_cls: Any,
     pattern_fill_cls: Any,
     side_cls: Any,
+    definition: Any = None,
 ) -> None:
     header_fill = pattern_fill_cls("solid", fgColor="1F4E78")
     header_font = font_cls(bold=True, color="FFFFFF", size=11)
@@ -287,7 +300,26 @@ def _format_sheet(
         width = min(max((len(value) for value in values), default=10) + 2, 70)
         sheet.column_dimensions[letter].width = width
     sheet.row_dimensions[1].height = 18
-    sheet.freeze_panes = "A2"
+    sheet.freeze_panes = definition.freeze_panes if definition and definition.freeze_panes else "A2"
+    if definition:
+        for column, width in definition.column_widths.items():
+            sheet.column_dimensions[column].width = width
+    if sheet.title == "Summary" and definition and len(definition.columns) > 2:
+        section_fill = pattern_fill_cls("solid", fgColor="EAF2F8")
+        previous_section = None
+        for cells in sheet.iter_rows(min_row=2):
+            section = cells[0].value
+            if section != previous_section:
+                for cell in cells:
+                    cell.fill = section_fill
+                cells[0].font = font_cls(bold=True, color="17365D")
+            previous_section = section
+            for cell in cells:
+                cell.alignment = alignment_cls(vertical="top", wrap_text=True)
+            for cell in cells[2:4]:
+                if isinstance(cell.value, int | float):
+                    cell.number_format = "#,##0"
+            sheet.row_dimensions[cells[0].row].height = 36
     if sheet.max_row >= 1 and sheet.max_column >= 1:
         sheet.auto_filter.ref = sheet.dimensions
 

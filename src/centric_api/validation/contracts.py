@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
@@ -42,6 +42,8 @@ class ValidationSheet:
     name: str
     rows: tuple[dict[str, Any], ...]
     columns: tuple[str, ...] = ()
+    freeze_panes: str | None = None
+    column_widths: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,10 @@ class ValidationResult:
     sheets: tuple[ValidationSheet, ...] = ()
     report_workbook: bytes | None = None
     history_metrics: tuple[ValidationHistoryMetric, ...] = ()
+    findings_sheet: ValidationSheet | None = None
+    summary_sheet: ValidationSheet | None = None
+    include_findings_sheet: bool = True
+    summary_renderer: Callable[[Any, dict[str, Any]], None] | None = None
 
 
 @dataclass(frozen=True)
