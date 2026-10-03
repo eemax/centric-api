@@ -1,0 +1,32 @@
+# centric-api configuration. Relative paths resolve against this file's directory.
+# Credentials never go here: set CENTRIC_BASE_URL, CENTRIC_USERNAME and CENTRIC_PASSWORD
+# in the environment or in the env file below.
+
+# SQLite database holding bronze, silver and fetch state.
+database: centric.db
+
+# Optional env file with credentials (defaults to .env next to this file if present).
+# env_file: .env
+
+http:
+  timeout: 30
+  retry_max_attempts: 3
+  retry_base_seconds: 15
+  retry_max_seconds: 30
+
+delta:
+  # Incremental fetches re-read this many minutes before the last successful start.
+  overlap_minutes: 10
+
+# Leave `endpoints` out to fetch the bundled default list (run `centric-api status` to see it).
+# Setting it replaces the whole list, for example:
+# endpoints:
+#   - name: styles
+#     path: styles
+#     api_version: v2
+#     count_path: count/Style
+#   - name: bom_lines
+#     path: part_materials
+#     api_version: v3
+#     count_path: count/PartMaterial
+#     limit: 50

@@ -1,0 +1,172 @@
+# Default Centric endpoints fetched by centric-api.
+# Override the list with `endpoints:` in your centric-api.yml.
+endpoints:
+  - name: seasons
+    path: seasons
+    api_version: v2
+    count_path: count/Season
+  - name: styles
+    path: styles
+    api_version: v2
+    count_path: count/Style
+  - name: materials
+    path: materials
+    api_version: v2
+    count_path: count/Material
+  - name: colorways
+    path: colorways
+    api_version: v2
+    count_path: count/Colorway
+  - name: collections
+    path: collections
+    api_version: v2
+    count_path: count/Collection
+  - name: category1s
+    path: category1s
+    api_version: v2
+    count_path: count/Category1
+  - name: category2s
+    path: category2s
+    api_version: v2
+    count_path: count/Category2
+  - name: sizes
+    path: product_sizes
+    api_version: v2
+    count_path: count/ProductSize
+  - name: size_ranges
+    path: size_ranges
+    api_version: v2
+    count_path: count/SizeRange
+  - name: size_charts
+    path: size_charts
+    api_version: v2
+    count_path: count/SizeChart
+  - name: size_chart_revisions
+    path: size_chart_revisions
+    api_version: v2
+    count_path: count/SizeChartRevision
+  - name: size_chart_dimensions
+    path: size_chart_dimensions
+    api_version: v2
+    count_path: count/SizeChartDimension
+    limit: 500
+  - name: apparel_dimensions
+    path: apparel_dimensions
+    api_version: v2
+    count_path: count/ApparelDimension
+  - name: bom_masters
+    path: apparel_boms
+    api_version: v2
+    count_path: count/ApparelBOM
+  - name: bom_subtypes
+    path: apparel_bom_subtypes
+    api_version: v2
+    count_path: count/ApparelBOMSubtype
+  - name: boms
+    path: apparel_bom_revisions
+    api_version: v3
+    count_path: count/ApparelBOMRevision
+  - name: bom_sections
+    path: bom_section_definitions
+    api_version: v2
+    count_path: count/BOMSectionDefinition
+  - name: bom_lines
+    path: part_materials
+    api_version: v3
+    count_path: count/PartMaterial
+  - name: supplier_quote_masters
+    path: supplier_items
+    api_version: v2
+    count_path: count/SupplierItem
+  - name: supplier_quotes
+    path: supplier_item_revisions
+    api_version: v2
+    count_path: count/SupplierItemRevision
+  - name: suppliers
+    path: suppliers
+    api_version: v2
+    count_path: count/Supplier
+  - name: factories
+    path: factories
+    api_version: v2
+    count_path: count/Factory
+  - name: color_specifications
+    path: color_specifications
+    api_version: v2
+    count_path: count/ColorSpecification
+  - name: compositions
+    path: compositions
+    api_version: v2
+    count_path: count/Composition
+  - name: material_compositions
+    path: material_compositions
+    api_version: v2
+    count_path: count/MaterialComposition
+  - name: care_and_compositions
+    path: care_and_compositions
+    api_version: v2
+    count_path: count/CareAndComposition
+  - name: care_and_composition_revisions
+    path: care_and_composition_revisions
+    api_version: v2
+    count_path: count/CareAndCompositionRevision
+  - name: care_symbols
+    path: care_symbols
+    api_version: v2
+    count_path: count/CareSymbol
+  - name: countries
+    path: countries
+    api_version: v2
+    count_path: count/Country
+  - name: shipping_ports
+    path: shipping_ports
+    api_version: v2
+    count_path: count/ShippingPort
+  - name: lookup_items
+    path: lookup_items
+    api_version: v2
+    count_path: count/LookupItem
+  - name: lookup_item_subtypes
+    path: lookup_item_subtypes
+    api_version: v2
+    count_path: count/LookupItemSubtype
+  - name: material_types
+    path: material_types
+    api_version: v2
+    count_path: count/MaterialType
+  - name: style_types
+    path: style_types
+    api_version: v2
+    count_path: count/StyleType
+  - name: product_sources
+    path: product_sources
+    api_version: v2
+    count_path: count/ProductSource
+  - name: routings
+    path: routings
+    api_version: v2
+    count_path: count/Routing
+  - name: routing_items
+    path: routing_items
+    api_version: v2
+    count_path: count/RoutingItem
+  - name: routing_revisions
+    path: routing_revisions
+    api_version: v2
+    count_path: count/RoutingRevision
+  - name: documents
+    path: documents
+    api_version: v2
+    count_path: count/Document
+  - name: document_revisions
+    path: document_revisions
+    api_version: v2
+    count_path: count/DocumentRevision
+  - name: duty_rates
+    path: duty_rates
+    api_version: v2
+    count_path: count/DutyRate
+  - name: users
+    path: users
+    api_version: v2
+    count_path: count/User

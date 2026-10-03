@@ -1,0 +1,14 @@
+.venv/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+dist/
+.DS_Store
+
+# Local data and credentials
+*.db
+*.db-shm
+*.db-wal
+.env
+centric-api.yml
