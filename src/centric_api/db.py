@@ -160,7 +160,20 @@ def connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
     if readonly:
         conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
         conn.row_factory = sqlite3.Row
-        _check_schema(conn, path)
+        try:
+            _check_schema(conn, path)
+        except sqlite3.OperationalError as exc:
+            conn.close()
+            if "readonly" not in str(exc):
+                raise
+            # WAL mode: even a reader creates <db>-shm and <db>-wal next to the database
+            # when nobody else has it open, so it needs write access to that directory.
+            raise DatabaseError(
+                f"Can't open {path} for reading: SQLite needs to create {path.name}-shm and "
+                f"{path.name}-wal in {path.parent}, which this user can't write to. Read as "
+                "the user that runs the fetch, or give this user write access to that "
+                "directory."
+            ) from exc
         return conn
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, isolation_level=None, timeout=30)

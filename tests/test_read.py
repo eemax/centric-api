@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 
 import pytest
@@ -148,3 +149,17 @@ def test_payloads_orjson_rejects_fall_back_to_json(fetched) -> None:
 
 def test_orjson_is_the_default_parser() -> None:
     assert read_module._loads is read_module._loads_orjson
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_reader_explains_an_unwritable_database_directory(fetched) -> None:
+    # A reader running as another user than the fetch: it can read the file, but SQLite
+    # (WAL) can't create its -shm/-wal files next to it.
+    _, settings = fetched
+    folder = settings.database.parent
+    folder.chmod(0o555)
+    try:
+        with pytest.raises(DatabaseError, match="needs to create centric.db-shm"):
+            Reader(settings.database)
+    finally:
+        folder.chmod(0o755)

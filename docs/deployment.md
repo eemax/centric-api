@@ -41,8 +41,8 @@ Nothing else needs them: consumers only read the database.
 
 Run consumers as the same `centric-api` user. They open the database read-only, but
 SQLite (WAL mode) still creates `centric.db-shm`/`-wal` next to it when no one else has
-it open, so a reader running as another user fails with "attempt to write a readonly
-database" unless it can write to `/var/lib/centric-api`.
+it open, so a reader running as another user fails (`Reader` says why: "SQLite needs to
+create centric.db-shm …") unless it can write to `/var/lib/centric-api`.
 
 Pin a commit rather than tracking `main`: a scheduled fetch shouldn't change under you. When
 you upgrade, upgrade consumers that use `centric_api.read.Reader` to the same commit, since
