@@ -223,10 +223,35 @@ def next_change_seq(conn: sqlite3.Connection) -> int:
     return value
 
 
+def _owner_is_dead_local_process(owner: str) -> bool:
+    """True only when the lock owner ran on this host and its process no longer exists.
+
+    Owners look like ``host:pid:nonce``. A lock held from another host, or by a process
+    that still exists (even one that reused the pid), is never treated as dead here: the
+    heartbeat timeout covers those, so a live lock is never taken over early.
+    """
+    host, _, rest = owner.partition(":")
+    pid_text = rest.partition(":")[0]
+    if host != socket.gethostname() or not pid_text.isdigit():
+        return False
+    pid = int(pid_text)
+    if pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 class RunLock:
     """A single-writer lock stored in the database, refreshed by heartbeats.
 
-    A lock whose heartbeat is older than LOCK_STALE_AFTER is treated as abandoned.
+    A lock whose heartbeat is older than LOCK_STALE_AFTER is treated as abandoned, and so
+    is one whose owning process on this host is gone (crashed or killed with SIGKILL),
+    without waiting for the heartbeat to age.
     """
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -239,7 +264,8 @@ class RunLock:
             row = self.conn.execute("SELECT owner, heartbeat_at FROM meta_lock").fetchone()
             if row is not None:
                 heartbeat = datetime.fromisoformat(row["heartbeat_at"].replace("Z", "+00:00"))
-                if now - heartbeat < LOCK_STALE_AFTER:
+                fresh = now - heartbeat < LOCK_STALE_AFTER
+                if fresh and not _owner_is_dead_local_process(row["owner"]):
                     raise LockError(
                         f"Another centric-api run holds the database lock ({row['owner']}, "
                         f"last heartbeat {row['heartbeat_at']})."

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
 
+import httpx
 import pytest
 
 from centric_api import cli
+from centric_api.client import CentricClient
 from tests.fake_centric import FakeCentric, ts
 
 CONFIG = """
@@ -96,3 +100,56 @@ def test_init_writes_a_loadable_config(tmp_path, monkeypatch, capsys) -> None:
     assert status["exists"] is False
     assert not (tmp_path / "centric.db").exists()
     assert cli.main(["init", "my.yml"]) == 2
+
+
+def _signal_on_request(workspace, monkeypatch, *, signum: int, at_request: int) -> FakeCentric:
+    """Six styles over pages of 2; send `signum` to ourselves on the given styles request."""
+    fake = FakeCentric()
+    for n in range(1, 7):
+        fake.add("styles", id=f"S{n}", _modified_at=ts(n), node_name=f"Style {n}")
+    inner = fake.transport()
+    calls = {"styles": 0}
+
+    def handle(request):
+        if request.url.path.endswith("/v2/styles"):
+            calls["styles"] += 1
+            if calls["styles"] == at_request:
+                os.kill(os.getpid(), signum)
+        return inner.handle_request(request)
+
+    def client_factory(credentials, http, **kwargs):
+        transport = httpx.MockTransport(handle) if at_request else fake.transport()
+        return CentricClient(credentials, http, transport=transport, sleep=lambda _s: None)
+
+    monkeypatch.setattr("centric_api.fetch.CentricClient", client_factory)
+    monkeypatch.setattr("centric_api.maintenance.CentricClient", client_factory)
+    return fake
+
+
+@pytest.mark.parametrize(
+    ("signum", "status"), [(signal.SIGTERM, 143), (signal.SIGHUP, 129), (signal.SIGINT, 130)]
+)
+def test_stop_signal_mid_fetch_releases_lock_and_next_fetch_resumes(
+    workspace, monkeypatch, capsys, signum, status
+) -> None:
+    _signal_on_request(workspace, monkeypatch, signum=signum, at_request=2)
+    assert cli.main(["fetch", "-q"]) == status
+    err = capsys.readouterr().err
+    assert f"Interrupted ({signal.Signals(signum).name})" in err
+
+    assert cli.main(["status", "--json"]) == 0
+    stopped = json.loads(capsys.readouterr().out)
+    assert stopped["lock"] is None  # released: the next run doesn't wait 15 minutes
+    assert 0 < stopped["endpoints"][0]["active_records"] < 6
+
+    _signal_on_request(workspace, monkeypatch, signum=signum, at_request=0)
+    assert cli.main(["fetch", "-q"]) == 0
+    capsys.readouterr()
+    assert cli.main(["status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["endpoints"][0]["active_records"] == 6
+
+
+def test_signal_handlers_are_restored_after_a_command(workspace) -> None:
+    before = {sig: signal.getsignal(sig) for sig in cli.STOP_SIGNALS}
+    assert cli.main(["fetch", "-q"]) == 0
+    assert {sig: signal.getsignal(sig) for sig in cli.STOP_SIGNALS} == before

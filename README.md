@@ -57,13 +57,27 @@ centric-api silver --rebuild  # rebuild silver from bronze without calling the A
 ```
 
 Add `--json` for a machine-readable summary on stdout, or `-q` to silence progress output.
-`fetch` exits with status 1 when any endpoint failed or the login was rejected, and every
-command exits with status 2 when it cannot start (invalid configuration, missing credentials,
-another run holding the lock, or a database error). `status` only reads the database, so it is
-safe to run while a fetch is in progress.
+Exit status:
+
+| Status | Meaning |
+|---|---|
+| 0 | Done: every endpoint fetched |
+| 1 | `fetch` finished, but an endpoint failed or the login was rejected |
+| 2 | Couldn't start: invalid configuration, missing credentials, another run holding the lock, or a database error |
+| 130 / 143 / 129 | Stopped by SIGINT (Ctrl-C) / SIGTERM / SIGHUP |
+
+`status` only reads the database, so it is safe to run while a fetch is in progress.
+
+**Stopping a run.** Ctrl-C, SIGTERM (what systemd, `kill` and a shutdown send) and SIGHUP (a
+closed terminal) all stop cleanly: the page being written is rolled back, the lock is
+released, and the next `fetch` resumes where this one stopped. A stopped run never exits 0, so
+anything that runs "after a successful fetch" won't run on partial data. A second signal while
+it stops is ignored; SIGKILL still kills it outright, and the lock it leaves is reclaimed as
+described below.
 
 Schedule `centric-api fetch` with whatever your platform provides (cron, systemd timers, Task
-Scheduler, a container job). Run `centric-api fetch --full --allow-delete` periodically, for
+Scheduler, a container job). Treat any non-zero status as "not done"; in particular don't
+declare 130/143/129 successful, or follow-up jobs would run on a partial fetch. Run `centric-api fetch --full --allow-delete` periodically, for
 example weekly, to pick up deleted records.
 
 ## How fetching works
@@ -113,8 +127,11 @@ so the next run reads the same span again. Nothing is ever accepted on a "close 
 An endpoint only fails on HTTP errors, invalid data (such as a record without an `id`), or a
 server that misbehaves (for example ignores `skip`); the other endpoints still run.
 
-Only one run can write to a database at a time; a second run exits with an error. A lock left
-behind by a crashed run expires after 15 minutes.
+Only one run can write to a database at a time; a second run exits with an error. The lock
+records which host and process holds it. If that process is gone on this same host (it
+crashed, or was killed with SIGKILL), the next run takes the lock over immediately. Otherwise
+(a lock held from another machine, or by a process that still exists) it is only treated as
+abandoned once its heartbeat is 15 minutes old.
 
 ### Deleted records
 

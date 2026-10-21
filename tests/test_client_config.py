@@ -243,3 +243,46 @@ def _write(path, text: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def _lock_owned_by(conn, owner: str) -> None:
+    with transaction(conn):
+        conn.execute(
+            "INSERT INTO meta_lock (id, owner, acquired_at, heartbeat_at) VALUES (1, ?, ?, ?)",
+            [owner, iso(utc_now()), iso(utc_now())],
+        )
+
+
+def test_run_lock_of_a_dead_local_process_is_reclaimed_at_once(tmp_path) -> None:
+    import socket
+    import subprocess
+    import sys
+
+    finished = subprocess.run(
+        [sys.executable, "-c", "import os; print(os.getpid())"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    dead_pid = int(finished.stdout)
+    conn = connect(tmp_path / "centric.db")
+    _lock_owned_by(conn, f"{socket.gethostname()}:{dead_pid}:deadbeef")  # fresh heartbeat
+    lock = RunLock(connect(tmp_path / "centric.db"))
+    lock.acquire()
+    assert conn.execute("SELECT owner FROM meta_lock").fetchone()[0] == lock.owner
+
+
+@pytest.mark.parametrize("who", ["live-local", "other-host", "garbled"])
+def test_run_lock_of_a_live_or_unknown_owner_is_respected(tmp_path, who) -> None:
+    import os
+    import socket
+
+    owner = {
+        "live-local": f"{socket.gethostname()}:{os.getppid()}:cafe",
+        "other-host": f"not-{socket.gethostname()}:1:cafe",
+        "garbled": "no-pid-here",
+    }[who]
+    conn = connect(tmp_path / "centric.db")
+    _lock_owned_by(conn, owner)
+    with pytest.raises(LockError, match="holds the database lock"):
+        RunLock(connect(tmp_path / "centric.db")).acquire()

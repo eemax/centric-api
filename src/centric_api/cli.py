@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sqlite3
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict
 from importlib import resources
 from pathlib import Path
@@ -18,6 +21,43 @@ from .maintenance import collect_status, run_silver, run_swagger
 from .silver import SilverResult
 
 
+class Interrupted(KeyboardInterrupt):
+    """A stop request by signal. Subclasses KeyboardInterrupt so every cleanup path that
+    handles Ctrl-C (transaction rollback, lock release) handles it the same way."""
+
+    def __init__(self, signum: int) -> None:
+        super().__init__(signum)
+        self.signum = signum
+
+
+# Signals that ask a run to stop: Ctrl-C, systemd/kill/shutdown, a closed terminal.
+STOP_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
+
+
+def _request_stop(signum: int, _frame: object) -> None:
+    # Ignore repeats so a second signal can't interrupt the cleanup (rollback, lock
+    # release) that this one starts. SIGKILL remains the way to stop it hard.
+    for sig in STOP_SIGNALS:
+        signal.signal(sig, signal.SIG_IGN)
+    raise Interrupted(signum)
+
+
+@contextmanager
+def _stop_signals_interrupt() -> Iterator[None]:
+    """Turn SIGTERM/SIGHUP into the same clean stop as Ctrl-C for the duration of a
+    command, then restore whatever handlers were there before."""
+    previous = {sig: signal.getsignal(sig) for sig in STOP_SIGNALS}
+    for sig in STOP_SIGNALS:
+        signal.signal(sig, _request_stop)
+    try:
+        yield
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -25,16 +65,24 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 0
     try:
-        return args.handler(args)
+        with _stop_signals_interrupt():
+            return args.handler(args)
     except (ConfigError, AuthError, FetchError, LockError, DatabaseError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     except sqlite3.Error as exc:
         print(f"Error: database: {exc}", file=sys.stderr)
         return 2
-    except KeyboardInterrupt:
-        print("Interrupted. The next fetch resumes where this one stopped.", file=sys.stderr)
-        return 130
+    except KeyboardInterrupt as exc:
+        signum = exc.signum if isinstance(exc, Interrupted) else signal.SIGINT
+        name = signal.Signals(signum).name
+        print(
+            f"Interrupted ({name}). The next fetch resumes where this one stopped.",
+            file=sys.stderr,
+        )
+        # Conventional shell status for "terminated by signal N": 130 for SIGINT,
+        # 143 for SIGTERM, 129 for SIGHUP. Never 0: an interrupted run didn't finish.
+        return 128 + signum
 
 
 def _parser() -> argparse.ArgumentParser:
