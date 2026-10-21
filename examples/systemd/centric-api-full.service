@@ -1,0 +1,27 @@
+# Weekly full fetch + upkeep. Install to /etc/systemd/system/; see docs/deployment.md.
+[Unit]
+Description=centric-api: weekly full fetch (also flags records deleted in Centric)
+Documentation=https://github.com/eemax/centric-api/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+# No Conflicts= with the incremental fetch: that would stop a running job. The lock
+# refuses a second concurrent fetch instead (exit 2).
+
+[Service]
+Type=oneshot
+User=centric-api
+Group=centric-api
+StateDirectory=centric-api
+StateDirectoryMode=0750
+ExecStart=/opt/centric-api/.venv/bin/centric-api --config /etc/centric-api/centric-api.yml fetch --full --allow-delete --log-format logfmt
+# Then upkeep: integrity check, VACUUM, optimize, WAL checkpoint. A failed integrity
+# check fails the unit, so consumers don't run on a damaged database.
+ExecStartPost=/opt/centric-api/.venv/bin/centric-api --config /etc/centric-api/centric-api.yml maintain --vacuum
+# A full fetch of 12 endpoints on a large instance took ~45 min; leave room to grow.
+TimeoutStartSec=4h
+TimeoutStopSec=120
+Nice=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

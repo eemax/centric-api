@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 
@@ -286,3 +287,15 @@ def test_run_lock_of_a_live_or_unknown_owner_is_respected(tmp_path, who) -> None
     _lock_owned_by(conn, owner)
     with pytest.raises(LockError, match="holds the database lock"):
         RunLock(connect(tmp_path / "centric.db")).acquire()
+
+
+EXAMPLES = Path(__file__).parents[1] / "examples" / "endpoints"
+
+
+@pytest.mark.parametrize("name", ["minimal.yml", "dpp-compliance.yml", "all.yml"])
+def test_example_endpoint_lists_load(name: str) -> None:
+    settings = load_settings(EXAMPLES / name)
+    names = [endpoint.name for endpoint in settings.endpoints]
+    assert names and len(names) == len(set(names))
+    if name == "all.yml":
+        assert names == [endpoint.name for endpoint in default_endpoints()]

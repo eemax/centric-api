@@ -1,0 +1,13 @@
+[Unit]
+Description=centric-api incremental fetch, Mon-Sat 01:00 UTC (Sunday is the full fetch)
+
+[Timer]
+# Pick a quiet hour, clear of reboot windows and backups. Sunday belongs to
+# centric-api-full.timer, so the two never run the same night.
+OnCalendar=Mon..Sat *-*-* 01:00:00 UTC
+# Catch up after downtime. If both timers catch up at once, centric-api's lock makes
+# the second exit 2 (failed unit); the next night is normal.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

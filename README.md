@@ -110,7 +110,9 @@ it stops is ignored; SIGKILL still kills it outright, and the lock it leaves is 
 described below.
 
 Schedule `centric-api fetch` with whatever your platform provides (cron, systemd timers, Task
-Scheduler, a container job). Treat any non-zero status as "not done"; in particular don't
+Scheduler, a container job). [docs/deployment.md](docs/deployment.md) has a recommended server
+setup (schedule, upkeep, monitoring, consumers) with ready-made systemd and cron files, and
+[`examples/endpoints/`](examples/endpoints/) has example endpoint lists. Treat any non-zero status as "not done"; in particular don't
 declare 130/143/129 successful, or follow-up jobs would run on a partial fetch. Run `centric-api fetch --full --allow-delete` periodically, for
 example weekly, to pick up deleted records.
 
@@ -299,7 +301,8 @@ recreates it at any time without calling the API.
 
 The bundled list covers common Centric objects (styles, colorways, materials, BOMs and BOM
 lines, suppliers, sizes, documents and more). Not every Centric instance has every object type;
-an endpoint your instance lacks fails with a message saying so. To change the list, set
+an endpoint your instance lacks fails with a message saying so. Example lists, from two endpoints to all of them, are in
+[`examples/endpoints/`](examples/endpoints/). To change the list, set
 `endpoints:` in your config; it replaces the whole list. Entries can name bundled endpoints,
 optionally overriding some keys, or define new ones in full:
 

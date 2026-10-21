@@ -1,0 +1,11 @@
+# centric-api configuration: the smallest useful set, for trying
+# centric-api out or a first look at your instance (a full fetch takes minutes).
+# Copy to centric-api.yml (or pass --config). Names refer to the bundled endpoint
+# definitions; override a key with a mapping, e.g. `- {name: boms, limit: 200}`.
+# More in docs/deployment.md.
+
+database: centric.db
+
+endpoints:
+  - seasons
+  - styles

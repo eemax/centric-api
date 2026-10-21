@@ -1,0 +1,23 @@
+# centric-api configuration: what a Digital Product Passport
+# (DPP) readiness check needs: styles and their BOMs down to materials, where they are
+# made, and the lookups to label it all (12 endpoints; about 1 GB and a 45-minute first
+# full fetch on a large instance).
+# Copy to centric-api.yml (or pass --config). Names refer to the bundled endpoint
+# definitions; override a key with a mapping, e.g. `- {name: boms, limit: 200}`.
+# More in docs/deployment.md.
+
+database: centric.db
+
+endpoints:
+  - styles            # the products
+  - seasons           # season codes and concepts the styles belong to
+  - boms              # bills of materials per style
+  - bom_sections      # BOM sections (fabric, trims, packaging, ...)
+  - bom_lines         # BOM lines: which material, where, how much
+  - materials         # composition, weight, origin
+  - material_types    # material classification
+  - supplier_quotes   # which supplier/factory makes a material or style
+  - suppliers
+  - factories         # production sites (country, address)
+  - lookup_items      # enum values referenced by the records above
+  - users             # names behind responsible-person references

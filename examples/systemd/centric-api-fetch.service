@@ -1,0 +1,29 @@
+# Incremental fetch. Install to /etc/systemd/system/; see docs/deployment.md.
+[Unit]
+Description=centric-api: incremental fetch from Centric PLM
+Documentation=https://github.com/eemax/centric-api/blob/main/docs/deployment.md
+After=network-online.target
+Wants=network-online.target
+# Consumers hook in with a drop-in (OnSuccess=, see consumer-onsuccess.conf), so this
+# unit never needs to know about them.
+
+[Service]
+Type=oneshot
+User=centric-api
+Group=centric-api
+# /var/lib/centric-api, owned by the service user; the database lives there.
+StateDirectory=centric-api
+StateDirectoryMode=0750
+ExecStart=/opt/centric-api/.venv/bin/centric-api --config /etc/centric-api/centric-api.yml fetch --log-format logfmt
+# An incremental fetch takes about a minute; 1h bounds a stuck run. A timeout or stop
+# sends SIGTERM: centric-api rolls back the current page, releases its lock and exits
+# 143, which counts as failed on purpose (no SuccessExitStatus=), so OnSuccess=
+# consumers never run on a partial fetch. The next run resumes.
+TimeoutStartSec=1h
+TimeoutStopSec=120
+Nice=10
+# Hardening: it only needs the network and its state directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes

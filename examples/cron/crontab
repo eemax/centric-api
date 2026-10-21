@@ -1,0 +1,8 @@
+# centric-api without systemd: incremental Mon-Sat, full + upkeep on Sunday, 01:00.
+# Install with `crontab -e -u centric-api` (the user that owns the database; consumers
+# run as it too). Logs go to its home, /var/lib/centric-api. See docs/deployment.md.
+# Times are in the system's time zone. `&&` runs the next step only after a successful
+# fetch (exit 0); any other status, including 130/143 for a stopped run, means "not done".
+CENTRIC=/opt/centric-api/.venv/bin/centric-api --config /etc/centric-api/centric-api.yml
+0 1 * * 1-6  $CENTRIC fetch --log-format logfmt >> $HOME/centric-api.log 2>&1 && /usr/local/bin/my-report
+0 1 * * 0    $CENTRIC fetch --full --allow-delete --log-format logfmt >> $HOME/centric-api.log 2>&1 && $CENTRIC maintain --vacuum >> $HOME/centric-api.log 2>&1 && /usr/local/bin/my-report
