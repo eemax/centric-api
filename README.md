@@ -218,15 +218,15 @@ with Reader("centric.db") as db:
         ...  # nothing you read has changed
 ```
 
-Records are the payloads exactly as Centric returned them. With `fields`, SQLite extracts
-only those top-level fields, so you never parse or hold the rest: on a 364k-record
-database, holding all records takes 0.35 GB with the fields one validator needs, against
-3.1 GB for full payloads. `id` is always included; a field missing from a payload is missing
-from the dict (so `"x" in record` still means something), and a JSON `null` stays `None`.
-Deleted records are left out unless `include_deleted=True`. Records stream in `id` order.
-Field extraction adapts to the SQLite library it runs on: older releases (such as 3.45)
-can't address keys containing `"` or `\`, so those few fields are taken from the parsed
-payload instead.
+Records are the payloads exactly as Centric returned them. With `fields`, each payload is
+parsed ([orjson](https://github.com/ijl/orjson), falling back to the standard library for
+the odd payload it rejects) and only those top-level fields are kept; the rest is freed
+straight away. On a 364k-record database, reading every record with the fields one
+validator needs takes about 1 s while streaming, and holding them all takes 0.35 GB
+instead of 3.1 GB for full payloads. `id` comes first, then the fields in the order asked;
+a field missing from a payload is missing from the dict (so `"x" in record` still means
+something), and a JSON `null` stays `None`. Deleted records are left out unless
+`include_deleted=True`. Records stream in `id` order.
 
 ### Bronze
 

@@ -9,11 +9,12 @@
         changed = db.changes(since=seq_from_last_time)  # ... and ask later what moved
 
 Records are the JSON payloads exactly as Centric returned them (bronze), as dicts. With
-``fields``, SQLite extracts just those top-level fields in C, so a consumer that needs 10
-of an endpoint's 100 fields never parses (or holds) the other 90. A field missing from a
-payload is missing from the dict too, so ``"x" in record`` keeps its meaning. ``id`` is
-always included. Deleted records (flagged by ``fetch --full --allow-delete``) are left out
-unless ``include_deleted=True``.
+``fields``, each payload is parsed (with orjson) and only those top-level fields are kept;
+the rest is freed at once, so a consumer that needs 10 of an endpoint's 100 fields never
+holds the other 90. A field missing from a payload is missing from the dict too, so
+``"x" in record`` keeps its meaning, and a JSON null stays None. ``id`` comes first, then
+the fields in the order asked. Deleted records (flagged by ``fetch --full
+--allow-delete``) are left out unless ``include_deleted=True``.
 
 The connection is read-only (SQLite WAL), so reading never blocks or disturbs a running
 fetch. Prefer this over querying the tables directly: it checks the schema version, and
@@ -23,8 +24,7 @@ the tables' layout may change between versions while this interface stays.
 from __future__ import annotations
 
 import json
-import sqlite3
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,6 +36,30 @@ from .db import (
     stored_endpoints,
     table_exists,
 )
+
+try:
+    import orjson
+except ImportError:  # pragma: no cover - orjson is a dependency; this keeps a broken
+    orjson = None  # install working (slower) instead of failing outright
+
+
+def _loads_stdlib(payload: str) -> Any:
+    return json.loads(payload)
+
+
+def _loads_orjson(payload: str) -> Any:
+    try:
+        return orjson.loads(payload)
+    except orjson.JSONDecodeError:
+        # orjson is strict where json isn't: NaN/Infinity, integers beyond 64 bits.
+        return json.loads(payload)
+
+
+# Parsing whole payloads in Python and keeping the wanted keys beats extracting each field
+# in SQLite: 364k records with ~10 fields each in 1.0 s with orjson (2.1 s with json) vs
+# 3.8 s with one `payload -> '$.field'` per field. The per-value call overhead dominates,
+# not the parsing.
+_loads: Callable[[str], Any] = _loads_orjson if orjson is not None else _loads_stdlib
 
 
 @dataclass(frozen=True)
@@ -66,8 +90,6 @@ class Reader:
         if self._info("schema_version") is None or not table_exists(self.conn, "bronze_records"):
             self.conn.close()
             raise DatabaseError(f"{path} is not a centric-api database.")
-        # What this SQLite can extract by itself; anything it can't is done in Python.
-        self._arrow, self._escaped_keys = _probe_json_support(self.conn)
 
     def __enter__(self) -> Reader:
         return self
@@ -98,30 +120,18 @@ class Reader:
         include_deleted: bool = False,
     ) -> Iterator[dict[str, Any]]:
         """Yield an endpoint's records, ordered by id. Streams: nothing is held between rows."""
+        wanted = None if fields is None else _field_list(fields)
         where = "endpoint = ?" + ("" if include_deleted else " AND deleted = 0")
-        if fields is None:
-            for (payload,) in self.conn.execute(
-                f"SELECT payload FROM bronze_records WHERE {where} ORDER BY id", [endpoint]
-            ):
-                yield _json_object(payload)
-            return
-        wanted = _field_list(fields)
-        in_sql = [name for name in wanted if self._can_extract(name)]
-        in_python = [name for name in wanted if name not in in_sql]
-        columns = ["payload -> ?" for _ in in_sql] + (["payload"] if in_python else [])
-        params = [_json_path(name) for name in in_sql] + [endpoint]
-        sql = f"SELECT {', '.join(columns)} FROM bronze_records WHERE {where} ORDER BY id"
-        loads = json.loads
-        for row in self.conn.execute(sql, params):
-            found = {
-                key: loads(value)
-                for key, value in zip(in_sql, row, strict=False)
-                if value is not None
-            }
-            if in_python:
-                payload = _json_object(row[-1])
-                found.update((key, payload[key]) for key in in_python if key in payload)
-            yield {key: found[key] for key in wanted if key in found}
+        rows = self.conn.execute(
+            f"SELECT payload FROM bronze_records WHERE {where} ORDER BY id", [endpoint]
+        )
+        for (payload,) in rows:
+            record = _json_object(payload)
+            if wanted is None:
+                yield record
+            else:
+                # Iterate the few wanted keys, not the payload's dozens.
+                yield {key: record[key] for key in wanted if key in record}
 
     def records_by_id(
         self,
@@ -179,36 +189,11 @@ class Reader:
 
     # ------------------------------------------------------------------ internals
 
-    def _can_extract(self, name: str) -> bool:
-        return self._arrow and (self._escaped_keys or not any(ch in name for ch in '"\\'))
-
     def _info(self, key: str) -> str | None:
         if not table_exists(self.conn, "meta_info"):
             return None
         row = self.conn.execute("SELECT value FROM meta_info WHERE key = ?", [key]).fetchone()
         return row[0] if row else None
-
-
-def _probe_json_support(conn: sqlite3.Connection) -> tuple[bool, bool]:
-    """(can use ``->`` at all, can address keys that need escaping: ``"`` or ``\\``).
-
-    ``->`` needs SQLite 3.38. Escapes inside a quoted path label only work in newer
-    releases: 3.45 returns NULL for ``$."a\\"b"``, which would silently drop the field. So
-    test the actual library instead of trusting a version number.
-    """
-    try:
-        plain, escaped = conn.execute(
-            "SELECT ? -> ?, ? -> ?",
-            [
-                json.dumps({"a.b": 1}),
-                _json_path("a.b"),
-                json.dumps({'q"b\\s': 2}),
-                _json_path('q"b\\s'),
-            ],
-        ).fetchone()
-    except sqlite3.OperationalError:
-        return False, False
-    return plain == "1", escaped == "2"
 
 
 def _field_list(fields: Iterable[str]) -> list[str]:
@@ -223,11 +208,6 @@ def _field_list(fields: Iterable[str]) -> list[str]:
     return wanted
 
 
-def _json_path(name: str) -> str:
-    # Quote the key so any character is safe: $."node_name", $."a.b", $."say \"hi\""
-    return '$."' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
 def _json_object(payload: str) -> dict[str, Any]:
-    value = json.loads(payload)
+    value = _loads(payload)
     return value if isinstance(value, dict) else {}
