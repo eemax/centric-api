@@ -200,6 +200,40 @@ def _check_schema(conn: sqlite3.Connection, path: Path) -> bool:
     return True
 
 
+def stored_endpoints(conn: sqlite3.Connection) -> list[str]:
+    """Endpoints that have records, sorted. Hops along the primary key index from one
+    endpoint name to the next (a few lookups) instead of scanning every record."""
+    rows = conn.execute(
+        """
+        WITH RECURSIVE names(name) AS (
+            SELECT MIN(endpoint) FROM bronze_records
+            UNION ALL
+            SELECT (SELECT MIN(endpoint) FROM bronze_records WHERE endpoint > names.name)
+            FROM names WHERE names.name IS NOT NULL
+        )
+        SELECT name FROM names WHERE name IS NOT NULL
+        """
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def latest_change_seq(conn: sqlite3.Connection, endpoints: list[str] | None = None) -> int:
+    """The highest change_seq stamped on any record (of these endpoints), 0 if none.
+
+    Records get a new stamp only when they really change, so this moves only on real
+    changes (the meta_info counter also advances for pages that changed nothing).
+    One index lookup per endpoint.
+    """
+    names = stored_endpoints(conn) if endpoints is None else endpoints
+    best = 0
+    for name in names:
+        row = conn.execute(
+            "SELECT MAX(change_seq) FROM bronze_records WHERE endpoint = ?", [name]
+        ).fetchone()
+        best = max(best, int(row[0] or 0))
+    return best
+
+
 def table_has_row(conn: sqlite3.Connection, table: str, key: str) -> bool:
     return conn.execute(f"SELECT 1 FROM {quote(table)} WHERE key = ?", [key]).fetchone() is not None
 

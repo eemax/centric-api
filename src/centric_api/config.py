@@ -75,13 +75,16 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     env_file = _path(raw.get("env_file"), base_dir, "env_file")
     if env_file is None and (base_dir / ".env").is_file():
         env_file = base_dir / ".env"
-    endpoints_raw = raw["endpoints"] if "endpoints" in raw else _default_endpoints_raw()
+    if "endpoints" in raw:
+        endpoints = _endpoints(raw["endpoints"], bundled=_bundled_by_name())
+    else:
+        endpoints = _endpoints(_default_endpoints_raw())
     return Settings(
         database=database,
         env_file=env_file,
         http=_http_settings(raw.get("http")),
         overlap_minutes=_overlap_minutes(raw.get("delta")),
-        endpoints=_endpoints(endpoints_raw),
+        endpoints=endpoints,
         config_file=path,
     )
 
@@ -104,6 +107,10 @@ def _resolve_config_path(config_path: str | Path | None) -> Path | None:
         return path.resolve()
     default = Path.cwd() / DEFAULT_CONFIG_FILE
     return default.resolve() if default.is_file() else None
+
+
+def _bundled_by_name() -> dict[str, dict[str, Any]]:
+    return {item["name"]: item for item in _default_endpoints_raw()}
 
 
 def _default_endpoints_raw() -> Any:
@@ -147,13 +154,20 @@ def _overlap_minutes(raw: Any) -> int:
     return value
 
 
-def _endpoints(raw: Any) -> tuple[EndpointSpec, ...]:
+def _endpoints(
+    raw: Any, *, bundled: dict[str, dict[str, Any]] | None = None
+) -> tuple[EndpointSpec, ...]:
+    """Parse an endpoint list. With ``bundled`` (a user config), an entry may also be just
+    the name of a bundled endpoint (``- styles``), or a mapping without ``path`` that
+    names one and overrides some keys (``- {name: bom_lines, limit: 1000}``)."""
     if not isinstance(raw, list) or not raw:
         raise ConfigError("endpoints must be a non-empty list.")
     specs: list[EndpointSpec] = []
     seen: set[str] = set()
     for index, item in enumerate(raw):
         label = f"endpoints[{index}]"
+        if bundled is not None:
+            item = _resolve_bundled(item, bundled, label)
         if not isinstance(item, dict):
             raise ConfigError(f"{label} must be a mapping.")
         _reject_unknown(item, ENDPOINT_KEYS, label)
@@ -188,6 +202,21 @@ def _endpoints(raw: Any) -> tuple[EndpointSpec, ...]:
             )
         )
     return tuple(specs)
+
+
+def _resolve_bundled(item: Any, bundled: dict[str, dict[str, Any]], label: str) -> Any:
+    if isinstance(item, str):
+        item = {"name": item}
+    if not isinstance(item, dict) or "path" in item:
+        return item  # a full definition (or an error the caller reports)
+    name = item.get("name")
+    if name not in bundled:
+        known = ", ".join(sorted(bundled))
+        raise ConfigError(
+            f"{label}: {name!r} is not a bundled endpoint, so it needs path and count_path. "
+            f"Bundled: {known}"
+        )
+    return {**bundled[name], **item}
 
 
 def _path(value: Any, base_dir: Path, label: str) -> Path | None:

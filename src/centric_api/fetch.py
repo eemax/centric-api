@@ -11,7 +11,15 @@ from typing import Any
 from .bronze import PageCounts, apply_page, mark_deleted, seen_count, unseen_ids
 from .client import AuthError, CentricClient, FetchError, load_credentials, query_params
 from .config import ConfigError, EndpointSpec, Settings
-from .db import RunLock, connect, iso, next_change_seq, transaction, utc_now
+from .db import (
+    RunLock,
+    connect,
+    iso,
+    latest_change_seq,
+    next_change_seq,
+    transaction,
+    utc_now,
+)
 from .silver import SilverResult, sync_endpoint
 from .swagger import SwaggerRefresh, load_specs, refresh_specs
 
@@ -58,6 +66,16 @@ class FetchSummary:
     swagger: list[SwaggerRefresh]
     silver: list[SilverResult]
     error: str | None = None
+    # Latest record change sequence number before and after the run (equal: this run
+    # changed nothing). Pass it to `changes --since` / Reader.changes later.
+    change_seq_before: int = 0
+    change_seq_after: int = 0
+    records_changed: int = 0  # inserted + updated + restored + flagged deleted
+    seconds: float = 0.0
+
+
+# Structured progress for logs: one event per finished endpoint, then one for the run.
+Event = Callable[[dict[str, Any]], None]
 
 
 def run_fetch(
@@ -69,6 +87,7 @@ def run_fetch(
     allow_delete: bool = False,
     progress: Progress | None = None,
     client: CentricClient | None = None,
+    on_event: Event | None = None,
 ) -> FetchSummary:
     if allow_delete and not full:
         raise ConfigError("--allow-delete only applies to --full fetches.")
@@ -80,10 +99,14 @@ def run_fetch(
         with lock:
             owned_client = client is None
             if client is None:
+
+                def on_retry(message: str) -> None:
+                    emit(f"  retry: {message}")
+                    if on_event is not None:
+                        on_event({"event": "retry", "message": message})
+
                 client = CentricClient(
-                    load_credentials(settings.env_file),
-                    settings.http,
-                    on_retry=lambda message: emit(f"  retry: {message}"),
+                    load_credentials(settings.env_file), settings.http, on_retry=on_retry
                 )
             try:
                 return _run(
@@ -96,6 +119,7 @@ def run_fetch(
                     restart=restart,
                     allow_delete=allow_delete,
                     emit=emit,
+                    on_event=on_event or (lambda _event: None),
                 )
             finally:
                 if owned_client:
@@ -128,8 +152,11 @@ def _run(
     restart: bool,
     allow_delete: bool,
     emit: Progress,
+    on_event: Event,
 ) -> FetchSummary:
     run_id = uuid.uuid4().hex
+    started = time.monotonic()
+    seq_before = current_change_seq(conn)
     command = " ".join(
         [
             "fetch",
@@ -167,6 +194,7 @@ def _run(
                 emit=emit,
             )
             outcomes.append(outcome)
+            on_event(endpoint_event(run_id, outcome))
         specs = load_specs(conn)
         for spec in selected:
             with transaction(conn):
@@ -191,7 +219,69 @@ def _run(
             "UPDATE meta_runs SET finished_at = ?, status = ?, error = ? WHERE run_id = ?",
             [iso(utc_now()), status, fatal, run_id],
         )
-    return FetchSummary(run_id, status, outcomes, swagger_results, silver_results, fatal)
+    summary = FetchSummary(
+        run_id,
+        status,
+        outcomes,
+        swagger_results,
+        silver_results,
+        fatal,
+        change_seq_before=seq_before,
+        change_seq_after=current_change_seq(conn),
+        records_changed=sum(
+            item.counts.inserted + item.counts.updated + item.counts.restored + item.deleted
+            for item in outcomes
+        ),
+        seconds=round(time.monotonic() - started, 1),
+    )
+    on_event(run_event(summary, mode="full" if full else "incremental"))
+    return summary
+
+
+def endpoint_event(run_id: str, outcome: EndpointOutcome) -> dict[str, Any]:
+    counts = outcome.counts
+    event: dict[str, Any] = {
+        "event": "endpoint",
+        "run_id": run_id,
+        "endpoint": outcome.endpoint,
+        "status": outcome.status,
+        "mode": outcome.mode,
+        "fetched": outcome.fetched,
+        "new": counts.inserted,
+        "changed": counts.updated,
+        "restored": counts.restored,
+        "deleted": outcome.deleted,
+        "missing": outcome.missing,
+        "seconds": round(outcome.seconds, 1),
+    }
+    if outcome.resumed:
+        event["resumed"] = True
+    if outcome.warnings:
+        event["warning"] = "; ".join(outcome.warnings)
+    if outcome.error:
+        event["error"] = outcome.error
+    return event
+
+
+def run_event(summary: FetchSummary, *, mode: str) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "event": "run",
+        "run_id": summary.run_id,
+        "status": summary.status,
+        "mode": mode,
+        "endpoints": len(summary.endpoints),
+        "failed": sum(1 for item in summary.endpoints if item.status == "failed"),
+        "records_changed": summary.records_changed,
+        "change_seq": summary.change_seq_after,
+        "seconds": summary.seconds,
+    }
+    if summary.error:
+        event["error"] = summary.error
+    return event
+
+
+def current_change_seq(conn: sqlite3.Connection) -> int:
+    return latest_change_seq(conn)
 
 
 @dataclass

@@ -1,5 +1,11 @@
 # Default Centric endpoints fetched by centric-api.
-# Override the list with `endpoints:` in your centric-api.yml.
+# Override the list with `endpoints:` in your centric-api.yml. There, an entry can be just
+# a name from this file (`- styles`), or a name plus overrides (`- {name: boms, limit: 200}`).
+#
+# Page size (`limit`, default 50): a full fetch is bound by request count, not data volume,
+# so high-volume endpoints use 500 where that's been measured to work (about 10x the
+# records for 2x the time per request). Endpoints with heavy payloads (styles: ~3 s per 50)
+# stay at 50 to keep responses within server limits.
 endpoints:
   - name: seasons
     path: seasons
@@ -74,6 +80,7 @@ endpoints:
     path: part_materials
     api_version: v3
     count_path: count/PartMaterial
+    limit: 500
   - name: supplier_quote_masters
     path: supplier_items
     api_version: v2
@@ -82,6 +89,7 @@ endpoints:
     path: supplier_item_revisions
     api_version: v2
     count_path: count/SupplierItemRevision
+    limit: 500
   - name: suppliers
     path: suppliers
     api_version: v2

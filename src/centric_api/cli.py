@@ -16,8 +16,16 @@ from . import __version__
 from .client import AuthError, FetchError
 from .config import ConfigError, load_settings
 from .db import DatabaseError, LockError
-from .fetch import FetchSummary, run_fetch
-from .maintenance import collect_status, run_silver, run_swagger
+from .fetch import FetchSummary, run_fetch, select_endpoints
+from .maintenance import (
+    collect_health,
+    collect_status,
+    parse_duration,
+    run_maintain,
+    run_silver,
+    run_swagger,
+)
+from .read import Reader
 from .silver import SilverResult
 
 
@@ -120,6 +128,13 @@ def _parser() -> argparse.ArgumentParser:
         help="With --full: flag records that no longer exist in Centric as deleted.",
     )
     _output_flags(fetch)
+    fetch.add_argument(
+        "--log-format",
+        choices=("text", "logfmt", "json"),
+        default="text",
+        help="Progress on stderr: text (default, human), or one logfmt/JSON line per "
+        "finished endpoint plus one for the run (for journald and log shippers).",
+    )
     fetch.set_defaults(handler=_fetch)
 
     swagger = commands.add_parser(
@@ -147,6 +162,62 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--json", action="store_true", help="Print JSON.")
     status.set_defaults(handler=_status)
 
+    check = commands.add_parser(
+        "check",
+        help="Exit 0 if the last fetch is good and the data fresh, 1 (with reasons) if not.",
+    )
+    check.add_argument(
+        "--max-age",
+        metavar="DURATION",
+        help="Also require every endpoint's last success to be newer than this "
+        "(e.g. 26h, 90m, 2d).",
+    )
+    check.add_argument(
+        "-e",
+        "--endpoint",
+        action="append",
+        dest="endpoints",
+        metavar="NAME",
+        help="Only check this endpoint (repeatable).",
+    )
+    check.add_argument("--json", action="store_true", help="Print JSON.")
+    check.add_argument("-q", "--quiet", action="store_true", help="No output; exit status only.")
+    check.set_defaults(handler=_check)
+
+    changes = commands.add_parser(
+        "changes",
+        help="Records changed after a change sequence number (default: all), per endpoint.",
+    )
+    changes.add_argument(
+        "--since",
+        type=int,
+        default=0,
+        metavar="SEQ",
+        help="Change sequence number from an earlier `changes` or fetch summary.",
+    )
+    changes.add_argument(
+        "-e",
+        "--endpoint",
+        action="append",
+        dest="endpoints",
+        metavar="NAME",
+        help="Only this endpoint (repeatable).",
+    )
+    changes.add_argument("--json", action="store_true", help="Print JSON.")
+    changes.set_defaults(handler=_changes)
+
+    maintain = commands.add_parser(
+        "maintain",
+        help="Database upkeep: integrity check, WAL checkpoint, optimize (and --vacuum).",
+    )
+    maintain.add_argument(
+        "--vacuum",
+        action="store_true",
+        help="Also VACUUM: reclaim free space (needs about the database's size free on disk).",
+    )
+    _output_flags(maintain)
+    maintain.set_defaults(handler=_maintain)
+
     init = commands.add_parser("init", help="Write a starter centric-api.yml.")
     init.add_argument("path", nargs="?", default="centric-api.yml")
     init.set_defaults(handler=_init)
@@ -166,19 +237,110 @@ def _progress(args: argparse.Namespace):
 
 def _fetch(args: argparse.Namespace) -> int:
     settings = load_settings(args.config)
+    structured = args.log_format != "text" and not args.quiet
     summary = run_fetch(
         settings,
         full=args.full,
         endpoint_names=args.endpoints,
         restart=args.restart,
         allow_delete=args.allow_delete,
-        progress=_progress(args),
+        progress=None if structured else _progress(args),
+        on_event=_event_printer(args.log_format) if structured else None,
     )
+    if structured and not args.json:
+        return 0 if summary.status in {"ok", "warn"} else 1
     if args.json:
         print(json.dumps(_summary_json(summary), indent=2))
     elif not args.quiet:
         _print_summary(summary)
     return 0 if summary.status in {"ok", "warn"} else 1
+
+
+def _event_printer(log_format: str):
+    def emit(event: dict[str, Any]) -> None:
+        if log_format == "json":
+            line = json.dumps(event, separators=(",", ":"))
+        else:
+            line = " ".join(f"{key}={_logfmt(value)}" for key, value in event.items())
+        print(line, file=sys.stderr, flush=True)
+
+    return emit
+
+
+def _logfmt(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = str(value)
+    # Quote anything that would split or break the line: spaces, newlines, tabs, = and ".
+    if text == "" or any(ch.isspace() or ch in '"=\\' for ch in text):
+        return json.dumps(text)
+    return text
+
+
+def _check(args: argparse.Namespace) -> int:
+    settings = load_settings(args.config)
+    max_age = parse_duration(args.max_age) if args.max_age else None
+    health = collect_health(settings, max_age=max_age, endpoint_names=args.endpoints)
+    if args.json:
+        print(json.dumps(health, indent=2))
+    elif not args.quiet:
+        if health["healthy"]:
+            fetch = health["last_fetch"] or {}
+            extra = " (a centric-api run is in progress)" if health["running"] else ""
+            print(f"healthy: last fetch {fetch.get('status')} at {fetch.get('finished_at')}{extra}")
+        else:
+            print("unhealthy:")
+            for problem in health["problems"]:
+                print(f"  {problem}")
+    return 0 if health["healthy"] else 1
+
+
+def _changes(args: argparse.Namespace) -> int:
+    settings = load_settings(args.config)
+    if not settings.database.is_file():
+        raise DatabaseError(f"Database not found: {settings.database}")
+    names = [spec.name for spec in select_endpoints(settings.endpoints, args.endpoints)]
+    with Reader(settings.database) as reader:
+        rows = reader.changes(since=args.since, endpoints=names)
+        seq = reader.change_seq()
+    total = sum(row.total for row in rows)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "since": args.since,
+                    "change_seq": seq,
+                    "total": total,
+                    "endpoints": [{**asdict(row), "total": row.total} for row in rows],
+                },
+                indent=2,
+            )
+        )
+        return 0
+    print(f"change_seq: {seq} (since {args.since}: {total:,} records changed)")
+    for row in rows:
+        if row.total:
+            print(f"  {row.endpoint:30} changed={row.changed:,} deleted={row.deleted:,}")
+    return 0
+
+
+def _maintain(args: argparse.Namespace) -> int:
+    settings = load_settings(args.config)
+    result = run_maintain(settings, vacuum=args.vacuum, emit=_progress(args))
+    if args.json:
+        print(json.dumps(asdict(result), indent=2))
+    elif not args.quiet:
+        mb = 1024 * 1024
+        print(
+            f"maintain: integrity {result.integrity}, "
+            f"database {result.size_before / mb:,.0f} -> {result.size_after / mb:,.0f} MiB, "
+            f"wal {result.wal_before / mb:,.0f} -> {result.wal_after / mb:,.0f} MiB"
+            + (", vacuumed" if result.vacuumed else "")
+            + f" ({result.seconds}s)"
+        )
+        for note in result.notes:
+            print(f"  {note}")
+    return 0
 
 
 def _swagger(args: argparse.Namespace) -> int:
@@ -291,6 +453,9 @@ def _summary_json(summary: FetchSummary) -> dict[str, Any]:
         "run_id": summary.run_id,
         "status": summary.status,
         "error": summary.error,
+        "change_seq": {"before": summary.change_seq_before, "after": summary.change_seq_after},
+        "records_changed": summary.records_changed,
+        "seconds": summary.seconds,
         "swagger": [asdict(item) for item in summary.swagger],
         "endpoints": [asdict(item) for item in summary.endpoints],
         "silver": _silver_json(summary.silver),

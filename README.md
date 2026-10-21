@@ -52,9 +52,43 @@ centric-api fetch --full    # complete fetch; reports records no longer returned
 centric-api fetch --full --allow-delete  # ...and flags confirmed deletions
 centric-api fetch -e styles -e colorways
 centric-api status          # what is stored, when it was fetched, anything pending
+centric-api check --max-age 26h   # exit 0 if the last fetch is good and the data fresh
+centric-api changes --since 1234  # what changed since an earlier change sequence number
+centric-api maintain --vacuum     # integrity check, WAL checkpoint, optimize, reclaim space
 centric-api swagger         # refresh the API spec and update silver tables
 centric-api silver --rebuild  # rebuild silver from bronze without calling the API
 ```
+
+### Running it on a schedule
+
+`fetch --log-format logfmt` (or `json`) replaces the human progress output with one line per
+endpoint as it finishes, then one for the run (and `event=retry` lines when Centric has to
+be asked again), which reads well in journald and log shippers:
+
+```
+event=endpoint run_id=… endpoint=styles status=ok mode=incremental fetched=12 new=0 changed=12 restored=0 deleted=0 missing=0 seconds=3.1
+event=run run_id=… status=ok mode=incremental endpoints=12 failed=0 records_changed=12 change_seq=48213 seconds=56.0
+```
+
+`check` is the health probe for monitors, cheap enough to run every minute (it reads only
+the bookkeeping tables, never the records): it exits 0 when the database exists, the latest
+fetch didn't fail (one in progress is fine while its lock is alive), every endpoint has a
+successful fetch and its last attempt didn't fail, and, with `--max-age`, every endpoint's
+last success is recent enough. Otherwise it exits 1 and lists the problems (`--json` for
+machines, `-q` for the exit status only). An abandoned lock is a problem too.
+
+`changes` tells consumers whether there's anything new. Every inserted, updated, restored or
+deleted record gets a new, higher change sequence number; records a fetch saw unchanged keep
+theirs. A consumer stores the `change_seq` it last processed (from `changes`, the fetch
+summary or `Reader.change_seq()`), and next time asks `changes --since <it>`: a total of 0
+means there's nothing to redo.
+
+`maintain` is weekly-ish upkeep: a quick integrity check (it fails, status 2, if that
+finds damage), a WAL checkpoint, `PRAGMA optimize`, and with `--vacuum` a VACUUM that hands
+free pages back to the filesystem. It takes the writer lock, so it never overlaps a fetch.
+VACUUM writes a full temporary copy and then the new contents through the WAL, so it needs
+about twice the database's size in free disk space; it's skipped with a note when that
+isn't available.
 
 Add `--json` for a machine-readable summary on stdout, or `-q` to silence progress output.
 Exit status:
@@ -166,6 +200,34 @@ that already holds other tables.
 The database uses SQLite's WAL mode, so readers (BI tools, scripts, `status`) never block a
 running fetch. Keep it on a local disk: WAL does not work on network file shares.
 
+### Reading it from your own code
+
+`centric_api.read.Reader` is the supported way for other programs to consume the database.
+It opens it read-only, checks the schema version, and keeps working when the internal table
+layout changes:
+
+```python
+from centric_api.read import Reader
+
+with Reader("centric.db") as db:
+    for line in db.records("bom_lines", fields=["ds_section", "actual", "qty_default"]):
+        ...  # {"id": ..., "ds_section": ..., ...}
+    materials = db.records_by_id("materials", fields=["node_name", "product_type"])
+    seq = db.change_seq()  # store this with your output
+    if not any(c.total for c in db.changes(since=previous_seq, endpoints=["styles"])):
+        ...  # nothing you read has changed
+```
+
+Records are the payloads exactly as Centric returned them. With `fields`, SQLite extracts
+only those top-level fields, so you never parse or hold the rest: on a 364k-record
+database, holding all records takes 0.35 GB with the fields one validator needs, against
+3.1 GB for full payloads. `id` is always included; a field missing from a payload is missing
+from the dict (so `"x" in record` still means something), and a JSON `null` stays `None`.
+Deleted records are left out unless `include_deleted=True`. Records stream in `id` order.
+Field extraction adapts to the SQLite library it runs on: older releases (such as 3.45)
+can't address keys containing `"` or `\`, so those few fields are taken from the parsed
+payload instead.
+
 ### Bronze
 
 `bronze_records` has one row per `(endpoint, id)`:
@@ -238,7 +300,24 @@ recreates it at any time without calling the API.
 The bundled list covers common Centric objects (styles, colorways, materials, BOMs and BOM
 lines, suppliers, sizes, documents and more). Not every Centric instance has every object type;
 an endpoint your instance lacks fails with a message saying so. To change the list, set
-`endpoints:` in your config; it replaces the whole list. Each endpoint needs:
+`endpoints:` in your config; it replaces the whole list. Entries can name bundled endpoints,
+optionally overriding some keys, or define new ones in full:
+
+```yaml
+endpoints:
+  - styles                        # the bundled definition as is
+  - name: bom_lines               # same
+  - name: boms                    # bundled, with a different page size
+    limit: 200
+  - name: my_objects              # not bundled: give path and count_path
+    path: my_objects
+    count_path: count/MyObject
+```
+
+Page size matters: a full fetch is bound by request count, not data volume, so the bundled
+definitions use `limit: 500` for the high-volume endpoints where that's been measured to work
+(about 10x the records for 2x the time per request); endpoints with heavy payloads, such as
+styles, stay at 50. A full definition takes:
 
 | Key | Meaning |
 |---|---|
