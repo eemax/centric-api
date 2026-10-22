@@ -70,6 +70,12 @@ event=endpoint run_id=… endpoint=styles status=ok mode=incremental fetched=12 
 event=run run_id=… status=ok mode=incremental endpoints=12 failed=0 records_changed=12 change_seq=48213 seconds=56.0
 ```
 
+`status --json` also says what the **last run** did, for dashboards and monitors that
+want more than healthy/unhealthy: `last_run` carries `duration_seconds`, `mode`
+(`full`, `delta` or `mixed`), `totals` and one entry per endpoint, each with the run's
+`fetched`, `inserted`, `updated`, `unchanged`, `restored`, `deleted` and `missing` counts,
+`status`, `warning`, `error` and `seconds`. It reads only the bookkeeping tables.
+
 `check` is the health probe for monitors, cheap enough to run every minute (it reads only
 the bookkeeping tables, never the records): it exits 0 when the database exists, the latest
 fetch didn't fail (one in progress is fine while its lock is alive), every endpoint has a

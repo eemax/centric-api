@@ -143,13 +143,57 @@ def collect_status(settings: Settings) -> dict[str, Any]:
         return {
             "database": str(settings.database),
             "exists": True,
-            "last_run": dict(last_run) if last_run else None,
+            "last_run": _run_detail(conn, last_run) if last_run else None,
             "lock": dict(lock) if lock else None,
             "swagger": swagger,
             "endpoints": endpoints,
         }
     finally:
         conn.close()
+
+
+_RUN_COUNTS = ("fetched", "inserted", "updated", "unchanged", "restored", "deleted", "missing")
+
+
+def _seconds_between(start: str | None, end: str | None) -> float | None:
+    if not start or not end:
+        return None
+    try:
+        delta = datetime.fromisoformat(end) - datetime.fromisoformat(start)
+        return round(delta.total_seconds(), 1)
+    except ValueError:
+        return None
+
+
+def _run_detail(conn: sqlite3.Connection, run: sqlite3.Row) -> dict[str, Any]:
+    """The last run as stored, plus what it did per endpoint and in total, so monitoring
+    and reporting can say "12 new styles, 2 min" without reading the log."""
+    rows = conn.execute(
+        "SELECT * FROM meta_run_endpoints WHERE run_id = ? ORDER BY started_at, endpoint",
+        [run["run_id"]],
+    ).fetchall()
+    endpoints = [
+        {
+            "endpoint": row["endpoint"],
+            "mode": row["mode"],
+            "status": row["status"],
+            **{key: int(row[key] or 0) for key in _RUN_COUNTS},
+            "expected": row["expected"],
+            "complete": bool(row["complete"]),
+            "warning": row["warning"],
+            "error": row["error"],
+            "seconds": _seconds_between(row["started_at"], row["finished_at"]),
+        }
+        for row in rows
+    ]
+    modes = {e["mode"] for e in endpoints}
+    return {
+        **dict(run),
+        "duration_seconds": _seconds_between(run["started_at"], run["finished_at"]),
+        "mode": (modes.pop() if len(modes) == 1 else "mixed") if modes else None,
+        "totals": {key: sum(e[key] for e in endpoints) for key in _RUN_COUNTS},
+        "endpoints": endpoints,
+    }
 
 
 def _empty_endpoint_status(endpoint: str) -> dict[str, Any]:

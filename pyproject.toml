@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "centric-api"
-version = "0.2.1"
+version = "0.2.2"
 description = "Fetch Centric PLM data into a local database with bronze and silver layers."
 readme = "README.md"
 license = "MIT"

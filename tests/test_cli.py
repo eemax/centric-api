@@ -68,6 +68,23 @@ def test_status_after_fetch(workspace, capsys) -> None:
     assert styles["unmapped_fields"] == ["extra_field"]
     assert status["last_run"]["status"] == "ok"
     assert status["lock"] is None
+    # What the last run did, per endpoint and in total.
+    run = status["last_run"]
+    assert run["mode"] == "full"
+    assert run["duration_seconds"] is not None and run["duration_seconds"] >= 0
+    assert run["totals"]["fetched"] == 1 and run["totals"]["inserted"] == 1
+    (endpoint,) = run["endpoints"]
+    assert endpoint["endpoint"] == "styles" and endpoint["status"] == "ok"
+    assert endpoint["inserted"] == 1 and endpoint["updated"] == 0
+    assert endpoint["seconds"] is not None
+
+    # A second fetch with nothing modified in Centric: an incremental run that adds nothing.
+    cli.main(["fetch", "-q"])
+    capsys.readouterr()
+    cli.main(["status", "--json"])
+    again = json.loads(capsys.readouterr().out)["last_run"]
+    assert again["run_id"] != run["run_id"] and again["mode"] == "delta"
+    assert again["totals"]["inserted"] == 0 and again["totals"]["updated"] == 0
 
     assert cli.main(["status"]) == 0
     assert "styles" in capsys.readouterr().out
